@@ -1,5 +1,6 @@
 #include "scan_tracking/vision/lanyou_first_station_adapter.h"
 
+#include <cmath>
 #include <exception>
 
 #include "detection/first/FirstInlinerSurfaceDetection.h"
@@ -7,6 +8,60 @@
 #include "scan_tracking/vision/lanyou_detection_adapter.h"
 
 namespace scan_tracking::vision::lanyou {
+
+namespace {
+
+QString toQtString(const std::string& text)
+{
+    return text.empty() ? QString() : QString::fromLocal8Bit(text.c_str());
+}
+
+enum class FirstStationNgReason : quint16 {
+    None = 0,
+    MissingInput = 1u << 4,
+    OutlinerFailed = 1u << 5,
+    InlinerFailed = 1u << 6,
+    UnknownFailure = 1u << 7,
+};
+
+quint16 mapOutlinerErrorToNgWord(const QString& errorLog)
+{
+    const QString lowered = errorLog.trimmed().toLower();
+    if (lowered.isEmpty()) {
+        return static_cast<quint16>(FirstStationNgReason::UnknownFailure);
+    }
+    if (lowered.contains(QStringLiteral("empty")) ||
+        lowered.contains(QStringLiteral("missing")) ||
+        lowered.contains(QStringLiteral("invalid axis")) ||
+        lowered.contains(QStringLiteral("too few points"))) {
+        return static_cast<quint16>(FirstStationNgReason::MissingInput);
+    }
+    return static_cast<quint16>(FirstStationNgReason::OutlinerFailed);
+}
+
+quint16 mapInlinerErrorToNgWord(const QString& errorLog)
+{
+    const QString lowered = errorLog.trimmed().toLower();
+    if (lowered.isEmpty()) {
+        return static_cast<quint16>(FirstStationNgReason::UnknownFailure);
+    }
+    if (lowered.contains(QStringLiteral("empty")) ||
+        lowered.contains(QStringLiteral("missing")) ||
+        lowered.contains(QStringLiteral("invalid axis")) ||
+        lowered.contains(QStringLiteral("too few points")) ||
+        lowered.contains(QStringLiteral("invalid axis projection range")) ||
+        lowered.contains(QStringLiteral("hole cylinder fit failed"))) {
+        return static_cast<quint16>(FirstStationNgReason::MissingInput);
+    }
+    return static_cast<quint16>(FirstStationNgReason::InlinerFailed);
+}
+
+bool finiteVec3(const Eigen::Vector3f& vec)
+{
+    return std::isfinite(vec.x()) && std::isfinite(vec.y()) && std::isfinite(vec.z());
+}
+
+}  // namespace
 
 FirstStationDetectionResult runFirstStationDetection(
     const FirstStationFrameSet& frames)
@@ -45,10 +100,14 @@ FirstStationDetectionResult runFirstStationDetection(
         result.firstOutInvoked = true;
         result.firstOutSuccess = firstOutDetector.Detect(outerCloud);
         result.params = firstOutDetector.GetParams();
+        result.outlinerErrorLog = toQtString(result.params.outliner_error_log);
 
         if (!result.firstOutSuccess) {
+            const quint16 ngWord0 = mapOutlinerErrorToNgWord(result.outlinerErrorLog);
             result.message = QStringLiteral(
-                "FirstOutSurfaceDetection returned false. TODO(tracking-first-station): map outliner_error_log to business NG reason words.");
+                "FirstOutSurfaceDetection returned false. ngWord0=%1, log=%2")
+                                 .arg(ngWord0)
+                                 .arg(result.outlinerErrorLog);
             return result;
         }
 
@@ -56,24 +115,34 @@ FirstStationDetectionResult runFirstStationDetection(
         result.firstInlinerInvoked = true;
         result.firstInlinerSuccess = firstInlinerDetector.Detect(innerCloud, holeCloud);
         result.params = firstInlinerDetector.GetParams();
+        result.inlinerErrorLog = toQtString(result.params.inliner_error_log);
 
         if (!result.firstInlinerSuccess) {
+            const quint16 ngWord0 = mapInlinerErrorToNgWord(result.inlinerErrorLog);
             result.message = QStringLiteral(
-                "FirstInlinerSurfaceDetection returned false. TODO(tracking-first-station): map inliner_error_log to business NG reason words.");
+                "FirstInlinerSurfaceDetection returned false. ngWord0=%1, log=%2")
+                                 .arg(ngWord0)
+                                 .arg(result.inlinerErrorLog);
             return result;
         }
 
+        result.stableOffsetXmm = result.params.cylinder_center.x();
+        result.stableOffsetYmm = result.params.cylinder_center.y();
+        result.stableOffsetZmm = result.params.cylinder_center.z();
         result.message = QStringLiteral(
-            "First station detection pipeline completed. TODO(tracking-first-station): map params to InspectionResult and stable offsets.");
+            "First station detection pipeline completed. stableOffset=(%1,%2,%3)")
+                             .arg(result.stableOffsetXmm, 0, 'f', 3)
+                             .arg(result.stableOffsetYmm, 0, 'f', 3)
+                             .arg(result.stableOffsetZmm, 0, 'f', 3);
         return result;
     } catch (const std::exception& ex) {
         result.message = QStringLiteral(
-            "First station detection threw exception: %1. TODO(tracking-first-station): surface structured diagnostics to tracking.")
+            "First station detection threw exception: %1")
                              .arg(QString::fromLocal8Bit(ex.what()));
         return result;
     } catch (...) {
         result.message = QStringLiteral(
-            "First station detection threw unknown exception. TODO(tracking-first-station): add structured error classification.");
+            "First station detection threw unknown exception.");
         return result;
     }
 }

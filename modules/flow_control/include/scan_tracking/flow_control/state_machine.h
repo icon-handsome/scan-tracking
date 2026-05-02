@@ -10,10 +10,17 @@
 #include "scan_tracking/mech_eye/mech_eye_types.h"
 #include "scan_tracking/modbus/modbus_service.h"
 #include "scan_tracking/tracking/tracking_service.h"
+#include "scan_tracking/vision/vision_types.h"
 
 namespace scan_tracking {
 namespace mech_eye {
 class MechEyeService;
+}
+namespace vision {
+class VisionPipelineService;
+}
+namespace tracking {
+struct PoseCheckResult;
 }
 namespace flow_control {
 
@@ -38,6 +45,7 @@ public:
     explicit StateMachine(
         modbus::ModbusService* modbusService,
         mech_eye::MechEyeService* mechEyeService = nullptr,
+        vision::VisionPipelineService* visionPipelineService = nullptr,
         tracking::TrackingService* trackingService = nullptr,
         QObject* parent = nullptr);
     ~StateMachine();
@@ -94,6 +102,10 @@ private slots:
     // @param result 采集结果
     void onCaptureFinished(scan_tracking::mech_eye::CaptureResult result);
 
+    // 视觉编排采集完成回调
+    // @param bundle 多相机采集结果
+    void onVisionBundleCaptureFinished(scan_tracking::vision::MultiCameraCaptureBundle bundle);
+
     // Mech-Eye 致命错误回调
     // @param code 错误码
     // @param message 错误信息
@@ -114,6 +126,21 @@ private:
         quint64 captureRequestId = 0;                              // 采集请求 ID
     };
 
+public:
+    struct PoseSourceResult {
+        bool available = false;
+        bool success = false;
+        QString sourceName;
+        QString message;
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+        float rx = 0.0f;
+        float ry = 0.0f;
+        float rz = 0.0f;
+    };
+
+private:
     // 检测结果汇总结构体
     struct InspectionSummary {
         quint16 resultCode = 1;       // 结果码
@@ -142,6 +169,9 @@ private:
     // 执行上料抓取任务
     void executeLoadGraspTask();
 
+    // 执行工位检材任务
+    void executeStationMaterialCheckTask();
+
     // 执行卸料计算任务
     void executeUnloadCalcTask();
 
@@ -153,6 +183,12 @@ private:
 
     // 执行位姿校验任务
     void executePoseCheckTask();
+
+    // 执行自检任务
+    void executeSelfCheckTask();
+
+    // 执行条码读取任务
+    void executeCodeReadTask();
 
     // 执行结果复位任务
     void executeResultResetTask();
@@ -189,6 +225,9 @@ private:
     // 清除活动任务
     void clearActiveTask();
 
+    // 清空扫描分段缓存（点云 + 视觉 bundle）
+    void resetScanSegmentCache();
+
     // 设置报警
     // @param level 报警级别
     // @param code 报警代码
@@ -222,6 +261,12 @@ private:
     // @param startOffset 起始偏移量
     // @param value 浮点值
     void writeFloatPlaceholder(int startOffset, float value);
+
+    // 读取加载抓取位姿源
+    PoseSourceResult resolveLoadGraspPoseSource() const;
+
+    // 读取卸料计算位姿源
+    PoseSourceResult resolveUnloadCalcPoseSource() const;
 
     // 写入 ASCII 字符串占位符
     // @param startOffset 起始偏移量
@@ -284,6 +329,7 @@ private:
 
     modbus::ModbusService* m_modbus = nullptr;              // Modbus 服务对象指针
     mech_eye::MechEyeService* m_mechEye = nullptr;          // Mech-Eye 相机服务对象指针
+    vision::VisionPipelineService* m_visionPipeline = nullptr;  // 视觉编排服务对象指针
     tracking::TrackingService* m_tracking = nullptr;        // 跟踪服务对象指针
     QTimer* m_pollTimer = nullptr;                          // PLC 轮询定时器
     QTimer* m_heartbeatTimer = nullptr;                     // 心跳定时器
@@ -302,6 +348,7 @@ private:
     int m_consecutiveModbusFailures = 0;                    // 连续 Modbus 失败次数
     QVector<quint16> m_lastCommandBlock;                    // 上一次命令块副本
     QMap<int, scan_tracking::mech_eye::CaptureResult> m_segmentCaptureResults;  // 分段采集结果缓存
+    QMap<int, scan_tracking::vision::MultiCameraCaptureBundle> m_segmentCaptureBundles;  // 分段视觉 bundle 缓存
 
     // 允许的最大点云缓存条目数，防止内存无限增长
     static constexpr int kMaxPointCloudCacheSize = 20;

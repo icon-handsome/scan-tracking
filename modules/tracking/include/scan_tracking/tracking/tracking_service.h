@@ -22,6 +22,11 @@ struct InspectionResult {
     float offsetXmm = 0.0f;
     float offsetYmm = 0.0f;
     float offsetZmm = 0.0f;
+    float stableOffsetXmm = 0.0f;
+    float stableOffsetYmm = 0.0f;
+    float stableOffsetZmm = 0.0f;
+    QString outlinerErrorLog;
+    QString inlinerErrorLog;
     QString message;
 };
 
@@ -38,6 +43,8 @@ struct PoseCheckResult {
         0.0, 0.0, 0.0, 1.0,
     };
     QString message;
+
+    bool hasPoseMatrix() const { return success && resultCode == 1; }
 };
 
 class TrackingService {

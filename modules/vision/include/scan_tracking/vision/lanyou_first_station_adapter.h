@@ -25,6 +25,11 @@ struct FirstStationDetectionResult {
     int innerPointCount = 0;    // 内表面点云数量
     int holePointCount = 0;     // 内孔点云数量
     FirstPoseDetectionParams params;    // 检测参数
+    QString outlinerErrorLog;    // 外表面原始错误日志
+    QString inlinerErrorLog;    // 内表面原始错误日志
+    float stableOffsetXmm = 0.0f;   // 稳定偏移 X
+    float stableOffsetYmm = 0.0f;   // 稳定偏移 Y
+    float stableOffsetZmm = 0.0f;   // 稳定偏移 Z
     QString message;    // 检测结果信息
 };
 

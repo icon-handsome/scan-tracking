@@ -80,7 +80,7 @@ void ConsoleRuntime::initModules()
     qInfo(appLog) << "Initializing modules...";
     int startupStage = 5;
     const QByteArray startupStageEnv = qgetenv("SCAN_TRACKING_STARTUP_STAGE");
-    bool startupStageOk = false;
+	bool startupStageOk = false;
     if (!startupStageEnv.isEmpty()) {
         startupStage = startupStageEnv.toInt(&startupStageOk);
         if (!startupStageOk) {
@@ -176,6 +176,7 @@ void ConsoleRuntime::initModules()
     stateMachine_ = std::make_unique<scan_tracking::flow_control::StateMachine>(
         modbusService_.get(),
         mechEyeService_.get(),
+        visionPipelineService_.get(),
         trackingService_.get(),
         &application_);
     stateMachine_->start();
@@ -222,5 +223,4 @@ void ConsoleRuntime::printShutdownStatus()
 }
 
 }  // namespace scan_tracking::app
-
 

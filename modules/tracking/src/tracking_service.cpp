@@ -102,6 +102,14 @@ quint16 countMeasuredItems(
     return count;
 }
 
+QString composeNgReasonText(const QString& label, const QString& errorLog)
+{
+    if (errorLog.trimmed().isEmpty()) {
+        return label;
+    }
+    return QStringLiteral("%1: %2").arg(label, errorLog.trimmed());
+}
+
 }  // namespace
 
 std::string TrackingService::statusText() const
@@ -148,6 +156,8 @@ InspectionResult TrackingService::inspectSegments(
     if (!detection.invoked) {
         result.resultCode = 2;
         result.ngReasonWord0 = (1u << 4);
+        result.outlinerErrorLog = detection.outlinerErrorLog;
+        result.inlinerErrorLog = detection.inlinerErrorLog;
         result.message = QStringLiteral(
             "第一工位算法适配层未真正启动，段位为 %1,详情：%2")
                              .arg(selectedSegmentText(segmentMapping), detection.message);
@@ -157,18 +167,28 @@ InspectionResult TrackingService::inspectSegments(
     if (!detection.firstOutSuccess) {
         result.resultCode = 2;
         result.ngReasonWord0 = (1u << 5);
+        result.outlinerErrorLog = detection.outlinerErrorLog;
         result.message = QStringLiteral(
-            "第一工位外表面算法失败，段位为 %1,详情：%2")
-                             .arg(selectedSegmentText(segmentMapping), detection.message);
+            "%1，段位为 %2。")
+                             .arg(
+                                 composeNgReasonText(
+                                     QStringLiteral("第一工位外表面算法失败"),
+                                     detection.outlinerErrorLog.isEmpty() ? detection.message : detection.outlinerErrorLog),
+                                 selectedSegmentText(segmentMapping));
         return result;
     }
 
     if (!detection.firstInlinerSuccess) {
         result.resultCode = 2;
         result.ngReasonWord0 = (1u << 6);
+        result.inlinerErrorLog = detection.inlinerErrorLog;
         result.message = QStringLiteral(
-            "第一工位内表面算法失败，段位为 %1,详情：%2")
-                             .arg(selectedSegmentText(segmentMapping), detection.message);
+            "%1，段位为 %2。")
+                             .arg(
+                                 composeNgReasonText(
+                                     QStringLiteral("第一工位内表面算法失败"),
+                                     detection.inlinerErrorLog.isEmpty() ? detection.message : detection.inlinerErrorLog),
+                                 selectedSegmentText(segmentMapping));
         return result;
     }
 
@@ -177,9 +197,17 @@ InspectionResult TrackingService::inspectSegments(
     result.offsetXmm = detection.params.cylinder_center.x();
     result.offsetYmm = detection.params.cylinder_center.y();
     result.offsetZmm = detection.params.cylinder_center.z();
+    result.stableOffsetXmm = detection.stableOffsetXmm;
+    result.stableOffsetYmm = detection.stableOffsetYmm;
+    result.stableOffsetZmm = detection.stableOffsetZmm;
+    result.outlinerErrorLog = detection.outlinerErrorLog;
+    result.inlinerErrorLog = detection.inlinerErrorLog;
     result.message = QStringLiteral(
-        "第一工位检测通过，段位为 %1,坡口角=%2,直边高度=%3,直边斜度=%4,内径=%5。")
+        "第一工位检测通过，段位为 %1,稳定偏移=(%2,%3,%4),坡口角=%5,直边高度=%6,直边斜度=%7,内径=%8。")
                          .arg(selectedSegmentText(segmentMapping))
+                         .arg(result.stableOffsetXmm, 0, 'f', 3)
+                         .arg(result.stableOffsetYmm, 0, 'f', 3)
+                         .arg(result.stableOffsetZmm, 0, 'f', 3)
                          .arg(detection.params.head_angle_tol, 0, 'f', 3)
                          .arg(detection.params.straight_height_tol, 0, 'f', 3)
                          .arg(detection.params.straight_slope_tol, 0, 'f', 3)
@@ -205,6 +233,9 @@ PoseCheckResult TrackingService::checkPose() const
     result.poseDeviationMm = lbResult.poseDeviationMm;
     result.rt = lbResult.rt;
     result.message = lbResult.message;
+    if (result.success && result.hasPoseMatrix()) {
+        result.message += QStringLiteral(" Pose matrix is ready for downstream use.");
+    }
     return result;
 }
 

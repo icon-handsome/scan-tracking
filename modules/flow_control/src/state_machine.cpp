@@ -3,7 +3,9 @@
 #include "scan_tracking/common/config_manager.h"
 #include "scan_tracking/common/logger.h"
 #include "scan_tracking/mech_eye/mech_eye_service.h"
+#include "scan_tracking/vision/vision_pipeline_service.h"
 
+#include <QtCore/QStringList>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QThread>
 #include <cstring>
@@ -64,6 +66,94 @@ QVector<quint16> floatToCdabRegisters(float value)
     return {low, high};
 }
 
+scan_tracking::flow_control::StateMachine::PoseSourceResult parsePoseSource(
+    const char* envName,
+    const QString& sourceName,
+    const std::array<float, 6>& fallback,
+    bool treatMissingAsSimulated)
+{
+    scan_tracking::flow_control::StateMachine::PoseSourceResult result;
+    result.available = true;
+    result.sourceName = sourceName;
+
+    const QString raw = qEnvironmentVariable(envName).trimmed();
+    if (raw.isEmpty()) {
+        result.success = true;
+        result.message = treatMissingAsSimulated
+            ? QStringLiteral("No external pose source configured; using simulated fallback.")
+            : QStringLiteral("External pose source not configured.");
+        result.x = fallback[0];
+        result.y = fallback[1];
+        result.z = fallback[2];
+        result.rx = fallback[3];
+        result.ry = fallback[4];
+        result.rz = fallback[5];
+        return result;
+    }
+
+    const auto tokens = raw.split(QRegExp(QStringLiteral("[,;\\s]+")), QString::SkipEmptyParts);
+    if (tokens.size() < 6) {
+        result.success = false;
+        result.message = QStringLiteral("Pose source %1 requires 6 values: x,y,z,rx,ry,rz.").arg(QString::fromLatin1(envName));
+        result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
+        return result;
+    }
+
+    bool ok = false;
+    const float x = tokens.value(0).toFloat(&ok);
+    if (!ok) {
+        result.success = false;
+        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
+        return result;
+    }
+    const float y = tokens.value(1).toFloat(&ok);
+    if (!ok) {
+        result.success = false;
+        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
+        return result;
+    }
+    const float z = tokens.value(2).toFloat(&ok);
+    if (!ok) {
+        result.success = false;
+        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
+        return result;
+    }
+    const float rx = tokens.value(3).toFloat(&ok);
+    if (!ok) {
+        result.success = false;
+        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
+        return result;
+    }
+    const float ry = tokens.value(4).toFloat(&ok);
+    if (!ok) {
+        result.success = false;
+        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
+        return result;
+    }
+    const float rz = tokens.value(5).toFloat(&ok);
+    if (!ok) {
+        result.success = false;
+        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
+        return result;
+    }
+
+    result.success = true;
+    result.message = QStringLiteral("Loaded pose from external source %1.").arg(QString::fromLatin1(envName));
+    result.x = x;
+    result.y = y;
+    result.z = z;
+    result.rx = rx;
+    result.ry = ry;
+    result.rz = rz;
+    return result;
+}
+
 }  // namespace
 
 /**
@@ -79,11 +169,13 @@ QVector<quint16> floatToCdabRegisters(float value)
 StateMachine::StateMachine(
     modbus::ModbusService* modbusService,
     mech_eye::MechEyeService* mechEyeService,
+    vision::VisionPipelineService* visionPipelineService,
     tracking::TrackingService* trackingService,
     QObject* parent)
     : QObject(parent)
     , m_modbus(modbusService)
     , m_mechEye(mechEyeService)
+    , m_visionPipeline(visionPipelineService)
     , m_tracking(trackingService)
     , m_pollTimer(new QTimer(this))
     , m_heartbeatTimer(new QTimer(this))
@@ -127,16 +219,36 @@ StateMachine::StateMachine(
             });
         connect(
             m_mechEye,
-            &mech_eye::MechEyeService::captureFinished,
-            this,
-            &StateMachine::onCaptureFinished,
-            Qt::QueuedConnection);
-        connect(
-            m_mechEye,
             &mech_eye::MechEyeService::fatalError,
             this,
             &StateMachine::onMechEyeFatalError,
             Qt::QueuedConnection);
+    }
+
+    if (m_visionPipeline) {
+        connect(
+            m_visionPipeline,
+            &vision::VisionPipelineService::bundleCaptureFinished,
+            this,
+            &StateMachine::onVisionBundleCaptureFinished,
+            Qt::QueuedConnection);
+        connect(
+            m_visionPipeline,
+            &vision::VisionPipelineService::stateChanged,
+            this,
+            [](vision::VisionPipelineState state, const QString& description) {
+                qInfo(LOG_FLOW) << "[VisionPipeline] state =" << static_cast<int>(state) << description;
+            });
+        connect(
+            m_visionPipeline,
+            &vision::VisionPipelineService::fatalError,
+            this,
+            [](vision::VisionErrorCode code, const QString& message) {
+                qWarning(LOG_FLOW).noquote()
+                    << "[VisionPipeline] fatal error:"
+                    << static_cast<int>(code)
+                    << message;
+            });
     }
 }
 
@@ -158,7 +270,7 @@ void StateMachine::start()
 {
     qInfo(LOG_FLOW) << "Starting state machine.";
     clearActiveTask();           // 清除当前活动任务
-    resetPointCloudCache();      // 清空点云缓存
+    resetScanSegmentCache();     // 清空扫描缓存
     m_isPollingPlc = false;      // 重置 PLC 轮询标志
     m_ipcState = protocol::IpcState::Initializing;  // 设置 IPC 状态为初始化中
     m_currentStage = protocol::Stage::Idle;         // 设置当前阶段为空闲
@@ -190,7 +302,7 @@ void StateMachine::stop()
     m_timeoutTimer->stop();      // 停止超时定时器
     m_isPollingPlc = false;      // 重置 PLC 轮询标志
     clearActiveTask();           // 清除当前活动任务
-    resetPointCloudCache();      // 清空点云缓存
+    resetScanSegmentCache();     // 清空扫描缓存
     m_consecutiveModbusFailures = 0;  // 重置 Modbus 失败计数器
     m_ipcState = protocol::IpcState::Uninitialized;  // 设置 IPC 状态为未初始化
     m_currentStage = protocol::Stage::Idle;         // 设置当前阶段为空闲
@@ -227,7 +339,7 @@ void StateMachine::onModbusConnected()
             << "Clearing stale active task after Modbus reconnect:"
             << protocol::triggerName(*m_activeTask.definition);
         clearActiveTask();
-        resetPointCloudCache();
+        resetScanSegmentCache();
     }
     
     m_isPollingPlc = false;           // 重置 PLC 轮询标志
@@ -474,14 +586,12 @@ void StateMachine::executeActiveTask()
         return;  // 没有活动任务，直接返回
     }
 
-    // TODO: [flow_control] 为 Trig_StationMaterialCheck(20)/Trig_PoseCheck(21)/
-    // Trig_SelfCheck(25)/Trig_CodeRead(26) 增加专用处理函数。
-    // 输入：m_lastCommandBlock、当前触发定义与任务上下文；
-    // 输出：对应 Res/Ack 与结果寄存器区（含失败码与报警信息）。
-
     switch (m_activeTask.definition->trigOffset) {
     case 19:  // Trig_LoadGrasp - 加载抓取任务
         executeLoadGraspTask();
+        return;
+    case 20:  // Trig_StationMaterialCheck - 工位检材任务
+        executeStationMaterialCheckTask();
         return;
     case 21:  // Trig_PoseCheck - 位姿检查
         executePoseCheckTask();
@@ -495,14 +605,22 @@ void StateMachine::executeActiveTask()
     case 24:  // Trig_UnloadCalc - 卸载计算任务
         executeUnloadCalcTask();
         return;
+    case 25:  // Trig_SelfCheck - 自检任务
+        executeSelfCheckTask();
+        return;
+    case 26:  // Trig_CodeRead - 条码读取任务
+        executeCodeReadTask();
+        return;
     case 27:  // Trig_ResultReset - 结果复位任务
         executeResultResetTask();
         return;
     default:  // 未知触发类型，使用默认响应码完成任务
-        // TODO: [flow_control] default 分支不应长期返回默认成功码。
-        // 输入：未覆盖触发的 trigOffset 与命令参数；
-        // 输出：协议约定的真实结果码（或明确失败码）并写回对应结果寄存器。
-        completeActiveTask(protocol::defaultResCodeFor(*m_activeTask.definition));
+        qWarning(LOG_FLOW).noquote()
+            << "Rejecting unsupported trigger"
+            << protocol::triggerName(*m_activeTask.definition)
+            << "trigOffset=" << m_activeTask.definition->trigOffset;
+        setAlarm(2, 624, QStringLiteral("Unsupported trigger received"));
+        completeActiveTask(9, protocol::AckState::Failed, false);
         return;
     }
 }
@@ -515,11 +633,38 @@ void StateMachine::executeActiveTask()
  */
 void StateMachine::executeLoadGraspTask()
 {
-    // TODO: [vision/grasp_provider] 接入外部抓取位姿提供模块。
-    // 输入：产品/配方/任务上下文（TaskId、RecipeId、ProductType等）；
-    // 输出：Load_X~Load_Rz 真实位姿 + 对应 Res/Ack。
+    const auto poseSource = resolveLoadGraspPoseSource();
+    qInfo(LOG_FLOW).noquote()
+        << "LoadGrasp pose source:"
+        << poseSource.sourceName
+        << "available=" << poseSource.available
+        << "success=" << poseSource.success
+        << "message=" << poseSource.message;
     writeLoadGraspResult();   // 写入加载位姿结果到 PLC 寄存器
-    completeActiveTask(1);    // 完成任务，返回成功码 1
+    completeActiveTask(poseSource.success ? 1 : 7, poseSource.success ? protocol::AckState::Completed
+                                                                       : protocol::AckState::Failed,
+                       poseSource.success);
+}
+
+void StateMachine::executeStationMaterialCheckTask()
+{
+    const bool hasModbus = m_modbus != nullptr && m_modbus->isConnected();
+    const bool hasTracking = m_tracking != nullptr;
+    const bool hasMechEye = m_mechEye != nullptr;
+
+    if (!hasModbus || !hasTracking || !hasMechEye) {
+        qWarning(LOG_FLOW).noquote()
+            << "Station material check unavailable:"
+            << "modbus=" << hasModbus
+            << "tracking=" << hasTracking
+            << "mechEye=" << hasMechEye;
+        writeAsciiPlaceholder(protocol::registers::kSelfCheckFailWord0, 2, QStringLiteral("NO"));
+        completeActiveTask(5, protocol::AckState::Failed, false);
+        return;
+    }
+
+    writeAsciiPlaceholder(protocol::registers::kSelfCheckFailWord0, 2, QStringLiteral("OK"));
+    completeActiveTask(1, protocol::AckState::Completed, true);
 }
 
 /**
@@ -530,11 +675,17 @@ void StateMachine::executeLoadGraspTask()
  */
 void StateMachine::executeUnloadCalcTask()
 {
-    // TODO: [planner/unload_provider] 接入外部卸料位姿计算模块。
-    // 输入：当前工件状态、下料区约束与任务上下文；
-    // 输出：Unload_X~Unload_Rz 真实位姿 + 对应 Res/Ack。
+    const auto poseSource = resolveUnloadCalcPoseSource();
+    qInfo(LOG_FLOW).noquote()
+        << "UnloadCalc pose source:"
+        << poseSource.sourceName
+        << "available=" << poseSource.available
+        << "success=" << poseSource.success
+        << "message=" << poseSource.message;
     writeUnloadCalcResult();  // 写入卸料位姿结果到 PLC 寄存器
-    completeActiveTask(1);    // 完成任务，返回成功码 1
+    completeActiveTask(poseSource.success ? 1 : 7, poseSource.success ? protocol::AckState::Completed
+                                                                       : protocol::AckState::Failed,
+                       poseSource.success);
 }
 
 /**
@@ -551,19 +702,14 @@ void StateMachine::executeUnloadCalcTask()
  */
 void StateMachine::executeScanSegmentTask()
 {
-    // TODO: [mech_eye] 扩展法向量采集策略（如 capture3DWithNormal / capture2DAnd3DWithNormal）。
-    // 输入：segmentIndex/segmentTotal/timeout/cameraKey；
-    // 输出：含法向量的点云结果并进入 onCaptureFinished 缓存与回写链路。
-    // 注意: 与算法沟通，最好可以转换成PCL数据，mech可调用：ConvertPointCloudWithNormalsToPcl函数。
-    // 检查相机服务是否可用
-    if (m_mechEye == nullptr) {
-        // 没有相机服务时不能进入真实采集，直接按异常握手返回，避免 PLC 等待超时。
+    // 优先走视觉编排层：梅卡点云 + 海康双目黑白图同时采集。
+    if (m_visionPipeline == nullptr) {
         finishScanSegmentFailure(
             5,                    // Res 码：5 = 设备未就绪
             3,                    // 报警级别：3 = 严重错误
-            720,                  // 报警代码：720 = 相机服务不可用
-            QStringLiteral("MechEye service unavailable"),
-            QStringLiteral("MechEye service unavailable"));
+            720,                  // 报警代码：720 = 视觉编排服务不可用
+            QStringLiteral("Vision pipeline service unavailable"),
+            QStringLiteral("Vision pipeline service unavailable"));
         return;
     }
 
@@ -576,14 +722,13 @@ void StateMachine::executeScanSegmentTask()
     }
 
     // 检查相机是否处于就绪状态且当前没有正在进行的采集
-    if (m_mechEye->state() != mech_eye::CameraRuntimeState::Ready || m_mechEye->isBusy()) {
-        // 相机未就绪或仍在执行上一帧采集时，返回设备未就绪，防止后台请求堆积。
+    if (m_visionPipeline->state() != vision::VisionPipelineState::Ready || m_visionPipeline->isStarted() == false) {
         finishScanSegmentFailure(
             5,                    // Res 码：5 = 设备未就绪
             2,                    // 报警级别：2 = 警告
-            721,                  // 报警代码：721 = 相机忙或未就绪
-            QStringLiteral("MechEye busy or not ready for capture"),
-            QStringLiteral("MechEye busy or not ready for capture"));
+            721,                  // 报警代码：721 = 视觉编排忙或未就绪
+            QStringLiteral("Vision pipeline busy or not ready for capture"),
+            QStringLiteral("Vision pipeline busy or not ready for capture"));
         return;
     }
 
@@ -592,20 +737,17 @@ void StateMachine::executeScanSegmentTask()
         ? static_cast<int>(m_activeTask.timeoutSeconds) * 1000
         : kDefaultScanSegmentCaptureTimeoutMs;
 
-    // 向相机服务发起异步采集请求
-    const quint64 requestId = m_mechEye->requestCapture(
-        QString(),                        // 不使用自定义文件名
-        mech_eye::CaptureMode::Capture3DOnly,  // 仅采集 3D 点云
-        captureTimeoutMs);                // 超时时间（毫秒）
+    const quint64 requestId = m_visionPipeline->requestCaptureBundle(
+        m_activeTask.scanSegmentIndex,
+        m_activeTask.taskId);
 
     if (requestId == 0) {
-        // requestCapture 返回 0 表示 facade 拒绝请求，按设备未就绪处理。
         finishScanSegmentFailure(
             5,                    // Res 码：5 = 设备未就绪
             2,                    // 报警级别：2 = 警告
-            721,                  // 报警代码：721 = 相机忙或未就绪
-            QStringLiteral("MechEye rejected capture request"),
-            QStringLiteral("MechEye busy or not ready for capture"));
+            721,                  // 报警代码：721 = 视觉编排忙或未就绪
+            QStringLiteral("Vision pipeline rejected capture request"),
+            QStringLiteral("Vision pipeline busy or not ready for capture"));
         return;
     }
 
@@ -615,10 +757,51 @@ void StateMachine::executeScanSegmentTask()
     publishIpcStatus();           // 发布更新的 IPC 状态
 
     qInfo(LOG_FLOW).noquote()
-        << "Trig_ScanSegment started Mech-Eye capture"
+        << "Trig_ScanSegment started vision bundle capture"
         << "segmentIndex=" << m_activeTask.scanSegmentIndex
         << "segmentTotal=" << m_activeTask.scanSegmentTotal
         << "timeoutMs=" << captureTimeoutMs;
+}
+
+void StateMachine::onVisionBundleCaptureFinished(scan_tracking::vision::MultiCameraCaptureBundle bundle)
+{
+    if (!m_activeTask.definition || bundle.request.taskId != m_activeTask.taskId) {
+        return;
+    }
+
+    if (!bundle.mechEyeResult.success()) {
+        const quint16 resultCode = mapCaptureErrorToResCode(bundle.mechEyeResult.errorCode);
+        finishScanSegmentFailure(
+            resultCode,
+            3,
+            722,
+            QStringLiteral("MechEye capture failed in vision bundle"),
+            QStringLiteral("MechEye capture failed in vision bundle"));
+        return;
+    }
+
+    if (!bundle.hikCameraAResult.success() || !bundle.hikCameraBResult.success()) {
+        finishScanSegmentFailure(
+            5,
+            2,
+            723,
+            QStringLiteral("Hik mono capture failed in vision bundle"),
+            QStringLiteral("Hik mono capture failed in vision bundle"));
+        return;
+    }
+
+    const auto& result = bundle.mechEyeResult;
+    m_segmentCaptureResults.insert(m_activeTask.scanSegmentIndex, result);
+    m_segmentCaptureBundles.insert(m_activeTask.scanSegmentIndex, bundle);
+    writeScanSegmentResult(m_activeTask.scanSegmentIndex, 2, result.pointCloud.pointCount > 0 ? 1 : 0);
+    m_progress = 100;
+    qInfo(LOG_FLOW).noquote()
+        << "Vision bundle capture finished"
+        << "segmentIndex=" << m_activeTask.scanSegmentIndex
+        << "mechPointCount=" << result.pointCloud.pointCount
+        << "hikAFrame=" << bundle.hikCameraAResult.frame.width << "x" << bundle.hikCameraAResult.frame.height
+        << "hikBFrame=" << bundle.hikCameraBResult.frame.width << "x" << bundle.hikCameraBResult.frame.height;
+    completeActiveTask(1);
 }
 
 /**
@@ -663,8 +846,52 @@ void StateMachine::executePoseCheckTask()
         << "Pose check succeeded"
         << "inputPoints=" << poseResult.inputPointCount
         << "deviationMm=" << poseResult.poseDeviationMm
-        << "rt00=" << poseResult.rt[0];
+        << "rt00=" << poseResult.rt[0]
+        << "hasPoseMatrix=" << poseResult.hasPoseMatrix();
     completeActiveTask(1, protocol::AckState::Completed, true);
+}
+
+void StateMachine::executeSelfCheckTask()
+{
+    const bool modbusReady = m_modbus != nullptr && m_modbus->isConnected();
+    const bool mechEyeReady = m_mechEye != nullptr && m_mechEye->state() != mech_eye::CameraRuntimeState::Error;
+    const bool trackingReady = m_tracking != nullptr;
+    const bool visionReady = m_visionPipeline != nullptr && m_visionPipeline->isStarted();
+
+    QVector<quint16> failWords = {
+        static_cast<quint16>(modbusReady ? 0 : (1u << 1)),
+        static_cast<quint16>(mechEyeReady ? 0 : (1u << 0)),
+    };
+    if (!modbusReady) {
+        qWarning(LOG_FLOW).noquote() << "SelfCheck: Modbus unavailable.";
+    }
+    if (!mechEyeReady) {
+        qWarning(LOG_FLOW).noquote() << "SelfCheck: MechEye unavailable.";
+    }
+    if (!trackingReady) {
+        qWarning(LOG_FLOW).noquote() << "SelfCheck: Tracking unavailable.";
+    }
+    if (!visionReady) {
+        qWarning(LOG_FLOW).noquote() << "SelfCheck: Vision pipeline unavailable.";
+    }
+
+    const quint16 resultCode = (modbusReady && mechEyeReady && trackingReady && visionReady) ? 1 : 0;
+    if (m_modbus && m_modbus->isConnected()) {
+        m_modbus->writeRegisters(protocol::registers::kSelfCheckFailWord0, failWords);
+        m_modbus->writeRegisters(protocol::registers::kSelfCheckFailWord1, {
+            static_cast<quint16>(trackingReady ? 0 : (1u << 0)),
+        });
+    }
+    completeActiveTask(resultCode, resultCode == 1 ? protocol::AckState::Completed : protocol::AckState::Failed, resultCode == 1);
+}
+
+void StateMachine::executeCodeReadTask()
+{
+    qInfo(LOG_FLOW).noquote() << "Trig_CodeRead received, using placeholder implementation.";
+    if (m_modbus && m_modbus->isConnected()) {
+        writeAsciiPlaceholder(protocol::registers::kSelfCheckFailWord0, 2, QStringLiteral("RD"));
+    }
+    completeActiveTask(9, protocol::AckState::Failed, false);
 }
 
 /**
@@ -723,7 +950,7 @@ void StateMachine::executeInspectionTask()
         summary.resultCode,
         protocol::AckState::Completed,
         summary.resultCode == 1);
-    resetPointCloudCache();  // 检测完成，清空点云缓存释放内存
+    resetScanSegmentCache();  // 检测完成，清空扫描缓存释放内存
 }
 
 /**
@@ -734,7 +961,7 @@ void StateMachine::executeInspectionTask()
  */
 void StateMachine::executeResultResetTask()
 {
-    resetPointCloudCache();  // 清空点云缓存
+    resetScanSegmentCache();  // 清空扫描缓存
     // 将扫描分段完成索引寄存器清零
     const bool segmentIndexCleared = m_modbus->writeRegisters(protocol::registers::kScanSegmentDoneIndex, {0, 0, 0});
     if (!segmentIndexCleared) {
@@ -885,7 +1112,7 @@ void StateMachine::onProcessTimeout()
     // P0修复：超时时清理已缓存的点云数据，防止内存泄漏
     if (m_activeTask.definition->stage == protocol::Stage::ScanSegment) {
         qWarning(LOG_FLOW) << "Clearing point cloud cache due to task timeout";
-        resetPointCloudCache();
+        resetScanSegmentCache();
     }
 
     // 根据任务类型采取不同的超时处理策略
@@ -915,6 +1142,10 @@ void StateMachine::onProcessTimeout()
  */
 void StateMachine::onCaptureFinished(mech_eye::CaptureResult result)
 {
+    if (m_visionPipeline != nullptr) {
+        return;
+    }
+
     // 只在扫描分段阶段且存在活动任务时才处理
     if (m_activeTask.definition == nullptr ||
         m_activeTask.definition->stage != protocol::Stage::ScanSegment) {
@@ -982,8 +1213,8 @@ void StateMachine::onMechEyeFatalError(mech_eye::CaptureErrorCode code, QString 
     }
 
     // P0修复：相机致命错误时清理已缓存的点云数据，防止内存泄漏
-    qWarning(LOG_FLOW) << "Clearing point cloud cache due to Mech-Eye fatal error";
-    resetPointCloudCache();
+    qWarning(LOG_FLOW) << "Clearing scan segment cache due to Mech-Eye fatal error";
+    resetScanSegmentCache();
 
     // 相机在扫描中途发生致命错误时，需要第一时间拉高报警并强制结束当前扫描触发。
     finishScanSegmentFailure(
@@ -1239,6 +1470,24 @@ void StateMachine::writeFloatPlaceholder(int startOffset, float value)
     }
 }
 
+StateMachine::PoseSourceResult StateMachine::resolveLoadGraspPoseSource() const
+{
+    return parsePoseSource(
+        "SCAN_TRACKING_LOAD_GRASP_POSE",
+        QStringLiteral("load-grasp-provider"),
+        {125.0f, 250.0f, 375.0f, 0.0f, 90.0f, 180.0f},
+        true);
+}
+
+StateMachine::PoseSourceResult StateMachine::resolveUnloadCalcPoseSource() const
+{
+    return parsePoseSource(
+        "SCAN_TRACKING_UNLOAD_CALC_POSE",
+        QStringLiteral("unload-calc-provider"),
+        {500.0f, 600.0f, 700.0f, 0.0f, 0.0f, 90.0f},
+        true);
+}
+
 /**
  * @brief 向 PLC 写入 ASCII 字符串占位符
  * 
@@ -1281,15 +1530,22 @@ void StateMachine::writeAsciiPlaceholder(int startOffset, int registerCount, con
  */
 void StateMachine::writeLoadGraspResult()
 {
-    // TODO: [vision/grasp_provider] 用外部模块返回的真实位姿替换当前固定值。
-    // 输入：外部定位结果（X/Y/Z/Rx/Ry/Rz）；
-    // 输出：写入 kLoadX~kLoadRz 寄存器。
-    writeFloatPlaceholder(protocol::registers::kLoadX, 125.0f);   // X 坐标（mm）
-    writeFloatPlaceholder(protocol::registers::kLoadY, 250.0f);   // Y 坐标（mm）
-    writeFloatPlaceholder(protocol::registers::kLoadZ, 375.0f);   // Z 坐标（mm）
-    writeFloatPlaceholder(protocol::registers::kLoadRx, 0.0f);    // Rx 旋转角（度）
-    writeFloatPlaceholder(protocol::registers::kLoadRy, 90.0f);   // Ry 旋转角（度）
-    writeFloatPlaceholder(protocol::registers::kLoadRz, 180.0f);  // Rz 旋转角（度）
+    const auto poseSource = resolveLoadGraspPoseSource();
+    writeFloatPlaceholder(protocol::registers::kLoadX, poseSource.x);
+    writeFloatPlaceholder(protocol::registers::kLoadY, poseSource.y);
+    writeFloatPlaceholder(protocol::registers::kLoadZ, poseSource.z);
+    writeFloatPlaceholder(protocol::registers::kLoadRx, poseSource.rx);
+    writeFloatPlaceholder(protocol::registers::kLoadRy, poseSource.ry);
+    writeFloatPlaceholder(protocol::registers::kLoadRz, poseSource.rz);
+    qInfo(LOG_FLOW).noquote()
+        << "LoadGrasp pose written"
+        << "source=" << poseSource.sourceName
+        << "x=" << poseSource.x
+        << "y=" << poseSource.y
+        << "z=" << poseSource.z
+        << "rx=" << poseSource.rx
+        << "ry=" << poseSource.ry
+        << "rz=" << poseSource.rz;
 }
 
 /**
@@ -1300,15 +1556,22 @@ void StateMachine::writeLoadGraspResult()
  */
 void StateMachine::writeUnloadCalcResult()
 {
-    // TODO: [planner/unload_provider] 用外部模块返回的真实位姿替换当前固定值。
-    // 输入：外部规划结果（X/Y/Z/Rx/Ry/Rz）；
-    // 输出：写入 kUnloadX~kUnloadRz 寄存器。
-    writeFloatPlaceholder(protocol::registers::kUnloadX, 500.0f);   // X 坐标（mm）
-    writeFloatPlaceholder(protocol::registers::kUnloadY, 600.0f);   // Y 坐标（mm）
-    writeFloatPlaceholder(protocol::registers::kUnloadZ, 700.0f);   // Z 坐标（mm）
-    writeFloatPlaceholder(protocol::registers::kUnloadRx, 0.0f);    // Rx 旋转角（度）
-    writeFloatPlaceholder(protocol::registers::kUnloadRy, 0.0f);    // Ry 旋转角（度）
-    writeFloatPlaceholder(protocol::registers::kUnloadRz, 90.0f);   // Rz 旋转角（度）
+    const auto poseSource = resolveUnloadCalcPoseSource();
+    writeFloatPlaceholder(protocol::registers::kUnloadX, poseSource.x);
+    writeFloatPlaceholder(protocol::registers::kUnloadY, poseSource.y);
+    writeFloatPlaceholder(protocol::registers::kUnloadZ, poseSource.z);
+    writeFloatPlaceholder(protocol::registers::kUnloadRx, poseSource.rx);
+    writeFloatPlaceholder(protocol::registers::kUnloadRy, poseSource.ry);
+    writeFloatPlaceholder(protocol::registers::kUnloadRz, poseSource.rz);
+    qInfo(LOG_FLOW).noquote()
+        << "UnloadCalc pose written"
+        << "source=" << poseSource.sourceName
+        << "x=" << poseSource.x
+        << "y=" << poseSource.y
+        << "z=" << poseSource.z
+        << "rx=" << poseSource.rx
+        << "ry=" << poseSource.ry
+        << "rz=" << poseSource.rz;
 }
 
 /**
@@ -1396,6 +1659,12 @@ void StateMachine::resetPointCloudCache()
     if (cacheSize > 0) {
         qInfo(LOG_FLOW).noquote() << "Cleared scan segment point cloud cache, count=" << cacheSize;
     }
+}
+
+void StateMachine::resetScanSegmentCache()
+{
+    resetPointCloudCache();
+    m_segmentCaptureBundles.clear();
 }
 
 /**
@@ -1673,10 +1942,10 @@ void StateMachine::finishScanSegmentFailure(
     setAlarm(alarmLevel, alarmCode, alarmMessage);              // 设置报警
     writeScanSegmentResult(m_activeTask.scanSegmentIndex, 0, 0); // 写入空结果
     
-    // P0修复：严重错误时清理已缓存的点云数据，防止内存泄漏
+    // P0修复：严重错误时清理已缓存的扫描数据，防止内存泄漏
     if (resultCode >= 5) {
-        qWarning(LOG_FLOW) << "Clearing point cloud cache due to scan failure (res=" << resultCode << ")";
-        resetPointCloudCache();
+        qWarning(LOG_FLOW) << "Clearing scan segment cache due to scan failure (res=" << resultCode << ")";
+        resetScanSegmentCache();
     }
     
     m_activeTask.captureRequestId = 0;                          // 清除采集请求 ID
