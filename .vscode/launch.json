@@ -1,0 +1,30 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug scan-tracking",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "D:/work/scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app/scan-tracking.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "D:/work/scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app",
+      "environment": [
+        {
+          "name": "PATH",
+          "value": "D:/work/scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app;D:/work/scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app/mech_eye_api;D:/work/scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app/ThirdParty;D:/work/scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app/hik_mvs_runtime;D:/work/scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app/OpenNI2;D:/work/scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app/OpenNI2/Drivers;C:/Qt/5.15.2/msvc2019_64/bin;C:/Program Files/PCL 1.12.1/bin;C:/Program Files/PCL 1.12.1/3rdParty/VTK/bin;C:/Program Files/OpenNI2/Redist;D:/work/opencv/opencv/build/x64/vc15/bin;D:/work/Mech-Eye SDK-2.5.4/API/dll/netstandard2.0;D:/work/Mech-Eye SDK-2.5.4/API/dll_debug/netstandard2.0;${env:PATH}"
+        }
+      ],
+      "console": "integratedTerminal",
+      "preLaunchTask": "Build (Ninja Debug)"
+    },
+    {
+      "name": "Attach to scan-tracking",
+      "type": "cppvsdbg",
+      "request": "attach",
+      "processId": "${command:pickProcess}",
+      "stopAtEntry": false,
+      "console": "integratedTerminal"
+    }
+  ]
+}

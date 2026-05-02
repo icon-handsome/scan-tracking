@@ -1,0 +1,34 @@
+﻿# CMake / Build
+build/
+build-*/
+testdata/
+tools/
+first/
+.cmake/
+CMakeLists.txt.user
+# VS Code (Personal Settings)
+.vscode/ipch/
+.vscode/*.suo
+.vscode/*.db
+# Visual Studio local state
+.vs/
+# Ignore compiled objects
+*.obj
+*.exe
+*.dll
+*.pdb
+*.lib
+# Cache
+.cache/
+compile_commands.json
+# Logs
+logs/
+*.log
+third_party/onnxruntime/logs/
+*.log
+
+# Third party SDK bundles
+third_party/*
+!third_party/lanyou_first_detection/
+!third_party/lanyou_first_detection/**
+third_party/lanyou_first_detection/logs/

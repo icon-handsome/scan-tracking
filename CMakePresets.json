@@ -1,0 +1,60 @@
+﻿{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "win-msvc2019-qtcore-ninja-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "C:/Qt/Qt5.12.12/5.12.12/msvc2017_64",
+        "Qt5_DIR": "C:/Qt/Qt5.12.12/5.12.12/msvc2017_64/lib/cmake/Qt5",
+        "CMAKE_C_COMPILER": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe",
+        "CMAKE_CXX_COMPILER": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe",
+        "CMAKE_RC_COMPILER": "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/rc.exe",
+        "CMAKE_MT": "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/mt.exe",
+        "WindowsSdkDir": "C:/Program Files (x86)/Windows Kits/10/",
+        "CMAKE_SYSTEM_VERSION": "10.0.26100.0",
+        "CMAKE_MAKE_PROGRAM": "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe",
+        "SCAN_TRACKING_MECHEYE_SDK_DIR": "D:/work/LY/IPC-192.168.110.173_track-main/third_party/Mech-Eye SDK-2.5.4/API",
+        "SCAN_TRACKING_ENABLE_LANYOU_DETECTION": "ON",
+        "SCAN_TRACKING_ENABLE_LB_POSE_DETECTION": "ON",
+        "SCAN_TRACKING_OPENCV_DIR": "D:/work/LY/IPC-192.168.110.173_track-main/third_party/LB/opencv-3.4.3-vc14_vc15/opencv/build/x64/vc15/lib",
+        "LANYOU_EIGEN_ROOT": "D:/work/LY/IPC-192.168.110.173_track-main/third_party/eigen-3.4.0",
+        "PCL_DIR": "C:/Program Files/PCL 1.12.0/cmake",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "win-msvc2019-qtcore-ninja-debug",
+      "inherits": "win-msvc2019-qtcore-ninja-base",
+      "displayName": "Windows MSVC 2019 QtCore Ninja Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "win-msvc2019-qtcore-ninja-release",
+      "inherits": "win-msvc2019-qtcore-ninja-base",
+      "displayName": "Windows MSVC 2019 QtCore Ninja Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "win-msvc2019-qtcore-ninja-debug",
+      "configurePreset": "win-msvc2019-qtcore-ninja-debug"
+    },
+    {
+      "name": "win-msvc2019-qtcore-ninja-release",
+      "configurePreset": "win-msvc2019-qtcore-ninja-release"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+CompileFlags:
+  CompilationDatabase: D:/work/scan-tracking-build/win-msvc2019-qtcore-ninja-debug
+  Add:
+    - --driver-mode=cl
+  Remove:
+    - /external:W0
+
+Index:
+  Background: Skip
+  Exclude:
+    - build/**
+
+---
+If:
+  PathMatch: .*/third_party/.*
+
+Index:
+  Background: Skip
+
+Diagnostics:
+  UnusedIncludes: None
+---
+If:
+  PathMatch: .*/third_party/.*/(bin|lib|runtime|logs|data|config)/.*
+Index:
+  Background: Skip

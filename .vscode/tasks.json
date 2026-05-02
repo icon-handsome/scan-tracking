@@ -1,0 +1,109 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Configure (Ninja Debug)",
+      "type": "shell",
+      "command": "D:/work/tools/scan-tracking-dev.cmd",
+      "args": [
+        "configure-debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "Build (Ninja Debug)",
+      "type": "shell",
+      "command": "D:/work/tools/scan-tracking-dev.cmd",
+      "args": [
+        "build-debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": [
+        "Configure (Ninja Debug)"
+      ],
+      "dependsOrder": "sequence",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Run scan-tracking",
+      "type": "shell",
+      "command": "D:/work/tools/scan-tracking-dev.cmd",
+      "args": [
+        "run-debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/../scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app",
+        "env": {
+          "PATH": "${workspaceFolder}/../scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app;${workspaceFolder}/../scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app/mech_eye_api;${workspaceFolder}/../scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app/ThirdParty;${workspaceFolder}/../scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app/hik_mvs_runtime;${workspaceFolder}/../scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app/OpenNI2;${workspaceFolder}/../scan-tracking-build/win-msvc2019-qtcore-ninja-debug/app/OpenNI2/Drivers;C:/Qt/5.15.2/msvc2019_64/bin;C:/Program Files/PCL 1.12.1/bin;C:/Program Files/PCL 1.12.1/3rdParty/VTK/bin;C:/Program Files/OpenNI2/Redist;D:/work/opencv/opencv/build/x64/vc15/bin;D:/work/Mech-Eye SDK-2.5.4/API/dll/netstandard2.0;D:/work/Mech-Eye SDK-2.5.4/API/dll_debug/netstandard2.0;${env:PATH}"
+        }
+      },
+      "dependsOn": [
+        "Build (Ninja Debug)"
+      ],
+      "dependsOrder": "sequence",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "close": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Rebuild (Ninja Debug)",
+      "type": "shell",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "\"C:\\BuildTools2019\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cd /d ${workspaceFolder} && C:\\Python311\\Scripts\\cmake.exe --build build\\win-msvc2019-qtcore-ninja-debug --target clean && D:\\work\\tools\\scan-tracking-dev.cmd build-debug"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Clean Build Directory",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Remove-Item -Recurse -Force '${workspaceFolder}/../scan-tracking-build/win-msvc2019-qtcore-ninja-debug/*' -ErrorAction SilentlyContinue"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}
