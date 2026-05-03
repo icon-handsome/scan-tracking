@@ -98,9 +98,21 @@ struct TriggerDefinition {
  */
 namespace registers {
 
+constexpr int kPlcAddressBase = 1;   ///< PLC 人机界面常用 1 基地址
+
+inline constexpr int toModbusOffset(int plcAddress)
+{
+    return plcAddress - kPlcAddressBase;
+}
+
+inline constexpr int toPlcAddress(int modbusOffset)
+{
+    return modbusOffset + kPlcAddressBase;
+}
+
 // ==================== 寄存器区块定义 ====================
 
-constexpr int kCommandBlockStart = 0;    ///< 命令区起始地址：PLC→IPC的控制指令区域
+constexpr int kCommandBlockStart = 0;    ///< 命令区起始地址：PLC→IPC的控制指令区域（0 基偏移）
 constexpr int kCommandBlockSize = 40;    ///< 命令区大小：共40个寄存器
 constexpr int kResultBlockStart = 100;   ///< 结果区起始地址：IPC→PLC的状态和数据区域
 constexpr int kResultBlockSize = 84;     ///< 结果区大小：共84个寄存器

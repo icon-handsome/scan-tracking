@@ -23,8 +23,8 @@ include(PclRuntime)
 option(SCAN_TRACKING_ENABLE_LANYOU_DETECTION "Build Lanyou PCL-based detection algorithms" ON)
 option(SCAN_TRACKING_ENABLE_LB_POSE_DETECTION "Build the legacy LB pose detection module" ON)
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Gui)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Gui)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Network)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Network)
 
 if(SCAN_TRACKING_ENABLE_LB_POSE_DETECTION)
     add_subdirectory(third_party/LB)

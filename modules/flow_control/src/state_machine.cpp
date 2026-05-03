@@ -403,16 +403,27 @@ void StateMachine::pollPlcState()
     }
 
     if (m_isPollingPlc) {
-        qWarning(LOG_FLOW) << "Skipping PLC poll because previous read is still pending.";
+        qWarning(LOG_FLOW).noquote()
+            << "Skipping PLC poll because previous read is still pending."
+            << "requestSeq=" << m_activePollRequestSequence
+            << "elapsedMs=" << (m_pollRequestTimer.isValid() ? m_pollRequestTimer.elapsed() : -1);
         return;  // 上次读取仍在进行中，跳过本次轮询
     }
 
     m_isPollingPlc = true;  // 标记正在轮询
+    m_activePollRequestSequence = ++m_pollRequestSequence;
+    m_pollRequestTimer.restart();
+    qInfo(LOG_FLOW).noquote()
+        << "Starting PLC poll request."
+        << "requestSeq=" << m_activePollRequestSequence
+        << "startAddress=" << protocol::registers::kCommandBlockStart
+        << "count=" << protocol::registers::kCommandBlockSize;
     // 异步读取命令块寄存器（从 kCommandBlockStart 开始，共 kCommandBlockSize 个寄存器）
     const bool readStarted = m_modbus->readRegisters(protocol::registers::kCommandBlockStart, protocol::registers::kCommandBlockSize);
     if (!readStarted) {
         qWarning(LOG_FLOW).noquote() << "Failed to start PLC polling read request";
         m_isPollingPlc = false;  // 重置轮询标志，允许下次重试
+        m_activePollRequestSequence = 0;
     }
 }
 
@@ -437,8 +448,62 @@ void StateMachine::handleRegistersRead(int startAddress, const QVector<quint16>&
         return;
     }
 
+    const QVector<quint16> previousCommandBlock = m_lastCommandBlock;
     m_lastCommandBlock = values;       // 保存最新的命令块数据
     resetModbusFailureCounter();       // 通信成功，重置失败计数器
+
+    qInfo(LOG_FLOW).noquote()
+        << "PLC poll completed."
+        << "requestSeq=" << m_activePollRequestSequence
+        << "elapsedMs=" << (m_pollRequestTimer.isValid() ? m_pollRequestTimer.elapsed() : -1);
+    m_activePollRequestSequence = 0;
+
+    qInfo(LOG_FLOW).noquote()
+        << "Command block snapshot:"
+        << "PLC_Start=" << protocol::registers::toPlcAddress(protocol::registers::kCommandBlockStart)
+        << "Flow_Enable=" << values.value(protocol::registers::kFlowEnable)
+        << "Reg04=" << values.value(protocol::registers::kSafetyStatusWord)
+        << "Trig_LoadGrasp=" << values.value(19)
+        << "Trig_StationMaterialCheck=" << values.value(20)
+        << "Trig_PoseCheck=" << values.value(21)
+        << "Trig_ScanSegment=" << values.value(22)
+        << "Trig_Inspection=" << values.value(23)
+        << "Trig_UnloadCalc=" << values.value(24)
+        << "Trig_SelfCheck=" << values.value(25)
+        << "Trig_CodeRead=" << values.value(26)
+        << "Trig_ResultReset=" << values.value(27)
+        << "TaskIdHigh=" << values.value(protocol::registers::kTaskIdHigh)
+        << "TaskIdLow=" << values.value(protocol::registers::kTaskIdLow);
+
+    QStringList rawRegisters;
+    rawRegisters.reserve(values.size());
+    for (int index = 0; index < values.size(); ++index) {
+        rawRegisters << QStringLiteral("%1=%2").arg(index).arg(values.value(index));
+    }
+    qInfo(LOG_FLOW).noquote()
+        << "Command block raw registers:"
+        << rawRegisters.join(QStringLiteral(" "));
+
+    if (!previousCommandBlock.isEmpty()) {
+        QStringList changedFields;
+        const int compareCount = qMin(previousCommandBlock.size(), values.size());
+        for (int index = 0; index < compareCount; ++index) {
+            const quint16 oldValue = previousCommandBlock.value(index);
+            const quint16 newValue = values.value(index);
+            if (oldValue == newValue) {
+                continue;
+            }
+            changedFields << QStringLiteral("%1:%2->%3")
+                               .arg(index)
+                               .arg(oldValue)
+                               .arg(newValue);
+        }
+        if (!changedFields.isEmpty()) {
+            qInfo(LOG_FLOW).noquote()
+                << "Command block changes:"
+                << changedFields.join(QStringLiteral(", "));
+        }
+    }
 
     // 如果当前有活动任务且已完成宣告，检查 PLC 是否已释放触发信号
     if (m_activeTask.definition != nullptr && m_activeTask.completionAnnounced) {
@@ -476,9 +541,14 @@ void StateMachine::onRegisterReadFailed(int startAddress, const QString& errorSt
     }
 
     if (m_isPollingPlc) {
-        qWarning(LOG_FLOW).noquote() << "PLC poll request failed:" << errorString;
+        qWarning(LOG_FLOW).noquote()
+            << "PLC poll request failed:"
+            << errorString
+            << "requestSeq=" << m_activePollRequestSequence
+            << "elapsedMs=" << (m_pollRequestTimer.isValid() ? m_pollRequestTimer.elapsed() : -1);
     }
     m_isPollingPlc = false;  // 重置轮询标志，允许下次轮询
+    m_activePollRequestSequence = 0;
 }
 
 /**
@@ -889,7 +959,7 @@ void StateMachine::executeCodeReadTask()
 {
     qInfo(LOG_FLOW).noquote() << "Trig_CodeRead received, using placeholder implementation.";
     if (m_modbus && m_modbus->isConnected()) {
-        writeAsciiPlaceholder(protocol::registers::kSelfCheckFailWord0, 2, QStringLiteral("RD"));
+        writeAsciiPlaceholder(protocol::registers::kCodeValueAscii, protocol::registers::kCodeValueRegisterCount, QStringLiteral("RD"));
     }
     completeActiveTask(9, protocol::AckState::Failed, false);
 }

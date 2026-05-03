@@ -1,17 +1,24 @@
-﻿#include <QCoreApplication>
+#include <QCoreApplication>
+#include <QtNetwork/QNetworkProxy>
+#include <QtNetwork/QNetworkProxyFactory>
+
 #include "scan_tracking/app/console_runtime.h"
-#include "scan_tracking/common/logger.h"
 #include "scan_tracking/common/config_manager.h"
+#include "scan_tracking/common/logger.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[])
+{
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
+
     QCoreApplication app(argc, argv);
+    QNetworkProxyFactory::setUseSystemConfiguration(false);
+    QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
     app.setApplicationName("Scan Tracking");
     app.setOrganizationName("ScanTracking");
 

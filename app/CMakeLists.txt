@@ -14,6 +14,7 @@ target_include_directories(scan_tracking
 target_link_libraries(scan_tracking
     PRIVATE
         Qt5::Core
+        Qt5::Network
         scan_tracking_common
         Qt5::Gui
         scan_tracking_mech_eye

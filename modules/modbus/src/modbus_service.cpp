@@ -200,6 +200,12 @@ bool ModbusService::readRegisters(int startAddress, quint16 numberOfEntries)
         startAddress,
         numberOfEntries);
 
+    qInfo(LOG_MODBUS).noquote()
+        << "Read request"
+        << "offset=" << startAddress
+        << "plcAddress=" << (startAddress + 1)
+        << "count=" << numberOfEntries;
+
     // 发送读请求
     if (auto* reply = m_client->sendReadRequest(readUnit, m_unitId)) {
         // 如果回复已完成（同步情况），直接处理
@@ -240,6 +246,10 @@ void ModbusService::handleReadReply(QModbusReply* reply)
         for (uint index = 0; index < unit.valueCount(); ++index) {
             values.push_back(unit.value(index));
         }
+        qDebug(LOG_MODBUS).noquote()
+            << "Modbus read OK | offset=" << unit.startAddress()
+            << "| plcAddress=" << (unit.startAddress() + 1)
+            << "| registerCount=" << unit.valueCount();
         emit registersRead(unit.startAddress(), values);
     } else {
         // 失败：记录错误并发出失败信号
@@ -391,4 +401,3 @@ void ModbusService::handleWriteReply(QModbusReply* reply, int startAddress, int 
 }
 
 }  // namespace scan_tracking::modbus
-

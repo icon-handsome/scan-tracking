@@ -5,6 +5,7 @@
 #include <QtCore/QLoggingCategory>
 
 #include <algorithm>
+#include <exception>
 #include <limits>
 #include <vector>
 
@@ -429,8 +430,28 @@ bool MechEyeWorker::connectCamera(const QString& cameraKey, int timeoutMs, QStri
 {
     setRuntimeState(CameraRuntimeState::Discovering, QStringLiteral("正在搜索相机"));
 
-    m_impl->discoveredCameras = mmind::eye::Camera::discoverCameras(
-        static_cast<unsigned int>(timeoutMs > 0 ? timeoutMs : 5000));
+    try {
+        m_impl->discoveredCameras = mmind::eye::Camera::discoverCameras(
+            static_cast<unsigned int>(timeoutMs > 0 ? timeoutMs : 5000));
+    } catch (const std::exception& exception) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("搜索相机异常: %1")
+                .arg(QString::fromLocal8Bit(exception.what()));
+        }
+        m_impl->discoveredCameras.clear();
+        m_connected = false;
+        m_cameraInfo = {};
+        return false;
+    } catch (...) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("搜索相机异常: 未知错误");
+        }
+        m_impl->discoveredCameras.clear();
+        m_connected = false;
+        m_cameraInfo = {};
+        return false;
+    }
+
     if (m_impl->discoveredCameras.empty()) {
         if (errorMessage != nullptr) {
             *errorMessage = QStringLiteral("未发现可用的 Mech-Eye 相机");
@@ -457,9 +478,28 @@ bool MechEyeWorker::connectCamera(const QString& cameraKey, int timeoutMs, QStri
         QStringLiteral("正在连接相机 %1")
             .arg(QString::fromStdString(selectedIt->serialNumber)));
 
-    const mmind::eye::ErrorStatus status = m_impl->camera.connect(
-        *selectedIt,
-        static_cast<unsigned int>(timeoutMs > 0 ? timeoutMs : 5000));
+    mmind::eye::ErrorStatus status;
+    try {
+        status = m_impl->camera.connect(
+            *selectedIt,
+            static_cast<unsigned int>(timeoutMs > 0 ? timeoutMs : 5000));
+    } catch (const std::exception& exception) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("连接相机异常: %1")
+                .arg(QString::fromLocal8Bit(exception.what()));
+        }
+        m_connected = false;
+        m_cameraInfo = {};
+        return false;
+    } catch (...) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("连接相机异常: 未知错误");
+        }
+        m_connected = false;
+        m_cameraInfo = {};
+        return false;
+    }
+
     if (!status.isOK()) {
         if (errorMessage != nullptr) {
             *errorMessage = QStringLiteral("连接相机失败: %1")
@@ -481,7 +521,6 @@ bool MechEyeWorker::disconnectCamera(QString* errorMessage)
         return true;
     }
 
-#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
     try {
         m_impl->camera.disconnect();
         m_connected = false;
@@ -500,14 +539,6 @@ bool MechEyeWorker::disconnectCamera(QString* errorMessage)
         }
         return false;
     }
-#else
-    m_impl->camera.disconnect();
-    m_connected = false;
-    m_busy = false;
-    m_cameraInfo.connected = false;
-    Q_UNUSED(errorMessage);
-    return true;
-#endif
 }
 
 CaptureResult MechEyeWorker::makeFailureResult(

@@ -84,7 +84,7 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.beginGroup("Modbus");
     settings.setValue("host", "127.0.0.1");
     settings.setValue("port", 502);
-    settings.setValue("unitId", 1);
+    settings.setValue("unitId", 3);
     settings.setValue("timeoutMs", 1000);
     settings.setValue("reconnectIntervalMs", 2000);
     settings.endGroup();
@@ -224,6 +224,13 @@ void ConfigManager::load(const QString& filePath)
     }
 
     qInfo(LOG_CONFIG) << "Loaded config.ini from:" << filePath;
+    qInfo(LOG_CONFIG).noquote()
+        << "Modbus config:"
+        << "host=" << m_modbusConfig.host
+        << "port=" << m_modbusConfig.port
+        << "unitId=" << m_modbusConfig.unitId
+        << "timeoutMs=" << m_modbusConfig.timeoutMs
+        << "reconnectIntervalMs=" << m_modbusConfig.reconnectIntervalMs;
 }
 
 }  // namespace common

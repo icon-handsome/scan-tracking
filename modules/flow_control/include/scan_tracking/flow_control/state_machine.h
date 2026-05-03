@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QtCore/QMap>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QObject>
 #include <QtCore/QTimer>
 #include <QtCore/QVector>
@@ -345,6 +346,9 @@ private:
     quint16 m_progress = 0;                                 // 进度百分比
     bool m_dataValid = false;                               // 数据有效标志
     bool m_isPollingPlc = false;                            // 是否正在轮询 PLC
+    quint64 m_pollRequestSequence = 0;                      // 轮询请求序号
+    quint64 m_activePollRequestSequence = 0;                // 当前未完成轮询请求序号
+    QElapsedTimer m_pollRequestTimer;                       // 当前轮询请求耗时计时器
     int m_consecutiveModbusFailures = 0;                    // 连续 Modbus 失败次数
     QVector<quint16> m_lastCommandBlock;                    // 上一次命令块副本
     QMap<int, scan_tracking::mech_eye::CaptureResult> m_segmentCaptureResults;  // 分段采集结果缓存
