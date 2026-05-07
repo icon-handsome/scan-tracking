@@ -165,14 +165,14 @@ LbPoseResult runLbPoseDetection(
         if (geoHash.set_query_config(config.cosTolerance, config.minPercent) != 0) {
             return makeFailure(QStringLiteral("Failed to set LB query configuration."));
         }
-
+        
         const QString templatePath = buildTemplatePath(config);
         QByteArray templateBytes = templatePath.toLocal8Bit();
         if (geoHash.read_template_pnts(templateBytes.data()) != 0) {
             return makeFailure(QStringLiteral("Failed to load LB template points from %1.").arg(templatePath));
         }
         if (geoHash.build() != 0) {
-            return makeFailure(QStringLiteral("Failed to build LB geometric hash table."));
+			return makeFailure(QStringLiteral("Failed to build LB geometric hash table."));
         }
 
         const int trackResult = geoHash.Get_Track_Pose(

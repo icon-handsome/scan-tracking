@@ -44,6 +44,7 @@ constexpr int kDefaultScanSegmentCaptureTimeoutMs = 30000;
 
 /// 允许的最大连续 Modbus 通信失败次数，超过此值将进入故障状态
 constexpr int kMaxConsecutiveModbusFailures = 3;
+constexpr int kPollLogEveryN = 20;
 
 /**
  * @brief 将浮点数转换为 CDAB 字节序的两个寄存器值
@@ -413,11 +414,13 @@ void StateMachine::pollPlcState()
     m_isPollingPlc = true;  // 标记正在轮询
     m_activePollRequestSequence = ++m_pollRequestSequence;
     m_pollRequestTimer.restart();
-    qInfo(LOG_FLOW).noquote()
-        << "Starting PLC poll request."
-        << "requestSeq=" << m_activePollRequestSequence
-        << "startAddress=" << protocol::registers::kCommandBlockStart
-        << "count=" << protocol::registers::kCommandBlockSize;
+    if (m_activePollRequestSequence == 1 || (m_activePollRequestSequence % kPollLogEveryN) == 0) {
+        qDebug(LOG_FLOW).noquote()
+            << "Starting PLC poll request."
+            << "requestSeq=" << m_activePollRequestSequence
+            << "startAddress=" << protocol::registers::kCommandBlockStart
+            << "count=" << protocol::registers::kCommandBlockSize;
+    }
     // 异步读取命令块寄存器（从 kCommandBlockStart 开始，共 kCommandBlockSize 个寄存器）
     const bool readStarted = m_modbus->readRegisters(protocol::registers::kCommandBlockStart, protocol::registers::kCommandBlockSize);
     if (!readStarted) {
@@ -429,9 +432,9 @@ void StateMachine::pollPlcState()
 
 /**
  * @brief 处理从 PLC 读取的寄存器数据
- * 
+ *
  * 解析命令块，检测触发信号，处理任务完成确认等。
- * 
+ *
  * @param startAddress 起始寄存器地址
  * @param values 读取到的寄存器值向量
  */
@@ -452,52 +455,83 @@ void StateMachine::handleRegistersRead(int startAddress, const QVector<quint16>&
     m_lastCommandBlock = values;       // 保存最新的命令块数据
     resetModbusFailureCounter();       // 通信成功，重置失败计数器
 
-    qInfo(LOG_FLOW).noquote()
-        << "PLC poll completed."
-        << "requestSeq=" << m_activePollRequestSequence
-        << "elapsedMs=" << (m_pollRequestTimer.isValid() ? m_pollRequestTimer.elapsed() : -1);
+    // 判断命令块是否发生业务变化：忽略 PLC_Heartbeat，避免每 100ms 因心跳刷屏
+    bool commandBlockChanged = previousCommandBlock.isEmpty();
+    if (!commandBlockChanged) {
+        const int compareCount = qMin(previousCommandBlock.size(), values.size());
+        for (int index = 1; index < compareCount; ++index) {
+            if (previousCommandBlock.value(index) != values.value(index)) {
+                commandBlockChanged = true;
+                break;
+            }
+        }
+    }
+
+    // 轮询完成日志：节流输出，避免 100ms 轮询刷屏
+    if (m_activePollRequestSequence == 1 || (m_activePollRequestSequence % kPollLogEveryN) == 0) {
+        qDebug(LOG_FLOW).noquote()
+            << "PLC poll completed."
+            << "requestSeq=" << m_activePollRequestSequence
+            << "elapsedMs=" << (m_pollRequestTimer.isValid() ? m_pollRequestTimer.elapsed() : -1);
+    }
+
     m_activePollRequestSequence = 0;
 
-    qInfo(LOG_FLOW).noquote()
-        << "Command block snapshot:"
-        << "PLC_Start=" << protocol::registers::toPlcAddress(protocol::registers::kCommandBlockStart)
-        << "Flow_Enable=" << values.value(protocol::registers::kFlowEnable)
-        << "Reg04=" << values.value(protocol::registers::kSafetyStatusWord)
-        << "Trig_LoadGrasp=" << values.value(19)
-        << "Trig_StationMaterialCheck=" << values.value(20)
-        << "Trig_PoseCheck=" << values.value(21)
-        << "Trig_ScanSegment=" << values.value(22)
-        << "Trig_Inspection=" << values.value(23)
-        << "Trig_UnloadCalc=" << values.value(24)
-        << "Trig_SelfCheck=" << values.value(25)
-        << "Trig_CodeRead=" << values.value(26)
-        << "Trig_ResultReset=" << values.value(27)
-        << "TaskIdHigh=" << values.value(protocol::registers::kTaskIdHigh)
-        << "TaskIdLow=" << values.value(protocol::registers::kTaskIdLow);
-
-    QStringList rawRegisters;
-    rawRegisters.reserve(values.size());
-    for (int index = 0; index < values.size(); ++index) {
-        rawRegisters << QStringLiteral("%1=%2").arg(index).arg(values.value(index));
+    // 命令块快照：只在首次读取或内容变化时打印
+    if (commandBlockChanged) {
+        qInfo(LOG_FLOW).noquote()
+            << "Command block snapshot:"
+            << "PLC_Start=" << protocol::registers::toPlcAddress(protocol::registers::kCommandBlockStart)
+            << "Flow_Enable=" << values.value(protocol::registers::kFlowEnable)
+            << "Reg04=" << values.value(protocol::registers::kSafetyStatusWord)
+            << "Trig_LoadGrasp=" << values.value(19)
+            << "Trig_StationMaterialCheck=" << values.value(20)
+            << "Trig_PoseCheck=" << values.value(21)
+            << "Trig_ScanSegment=" << values.value(22)
+            << "Trig_Inspection=" << values.value(23)
+            << "Trig_UnloadCalc=" << values.value(24)
+            << "Trig_SelfCheck=" << values.value(25)
+            << "Trig_CodeRead=" << values.value(26)
+            << "Trig_ResultReset=" << values.value(27)
+            << "TaskIdHigh=" << values.value(protocol::registers::kTaskIdHigh)
+            << "TaskIdLow=" << values.value(protocol::registers::kTaskIdLow);
     }
-    qInfo(LOG_FLOW).noquote()
-        << "Command block raw registers:"
-        << rawRegisters.join(QStringLiteral(" "));
 
+    // 命令块原始寄存器值：只在首次读取或内容变化时打印
+    if (commandBlockChanged) {
+        QStringList rawRegisters;
+        rawRegisters.reserve(values.size());
+
+        for (int index = 0; index < values.size(); ++index) {
+            rawRegisters << QStringLiteral("%1=%2")
+                .arg(index)
+                .arg(values.value(index));
+        }
+
+        qInfo(LOG_FLOW).noquote()
+            << "Command block raw registers:"
+            << rawRegisters.join(QStringLiteral(" "));
+    }
+
+    // 打印变化字段：只在非首次读取且有字段变化时打印
     if (!previousCommandBlock.isEmpty()) {
         QStringList changedFields;
         const int compareCount = qMin(previousCommandBlock.size(), values.size());
+
         for (int index = 0; index < compareCount; ++index) {
             const quint16 oldValue = previousCommandBlock.value(index);
             const quint16 newValue = values.value(index);
+
             if (oldValue == newValue) {
                 continue;
             }
+
             changedFields << QStringLiteral("%1:%2->%3")
-                               .arg(index)
-                               .arg(oldValue)
-                               .arg(newValue);
+                .arg(index)
+                .arg(oldValue)
+                .arg(newValue);
         }
+
         if (!changedFields.isEmpty()) {
             qInfo(LOG_FLOW).noquote()
                 << "Command block changes:"
@@ -520,11 +554,10 @@ void StateMachine::handleRegistersRead(int startAddress, const QVector<quint16>&
     for (const auto& trigger : protocol::triggerDefinitions()) {
         if (trigger.trigOffset < values.size() && values[trigger.trigOffset] == 1) {
             processTrigger(trigger, values);  // 处理找到的触发
-            break;  // 一次只处理一个触发
+            break;                            // 一次只处理一个触发
         }
     }
 }
-
 /**
  * @brief 处理寄存器读取失败的回调
  * 

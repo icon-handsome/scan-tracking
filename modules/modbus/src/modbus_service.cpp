@@ -19,6 +19,10 @@
 namespace scan_tracking::modbus {
 
 Q_LOGGING_CATEGORY(LOG_MODBUS, "modbus")
+namespace {
+constexpr int kModbusLogEveryN = 20;
+constexpr int kPollStartLogEveryN = 20;
+}
 
 /**
  * @brief 构造函数：初始化客户端和重连定时器
@@ -200,11 +204,14 @@ bool ModbusService::readRegisters(int startAddress, quint16 numberOfEntries)
         startAddress,
         numberOfEntries);
 
-    qInfo(LOG_MODBUS).noquote()
-        << "Read request"
-        << "offset=" << startAddress
-        << "plcAddress=" << (startAddress + 1)
-        << "count=" << numberOfEntries;
+    ++m_readRequestLogCounter;
+    if (m_readRequestLogCounter == 1 || (m_readRequestLogCounter % kPollStartLogEveryN) == 0) {
+        qDebug(LOG_MODBUS).noquote()
+            << "Read request"
+            << "offset=" << startAddress
+            << "plcAddress=" << (startAddress + 1)
+            << "count=" << numberOfEntries;
+    }
 
     // 发送读请求
     if (auto* reply = m_client->sendReadRequest(readUnit, m_unitId)) {
@@ -246,10 +253,13 @@ void ModbusService::handleReadReply(QModbusReply* reply)
         for (uint index = 0; index < unit.valueCount(); ++index) {
             values.push_back(unit.value(index));
         }
-        qDebug(LOG_MODBUS).noquote()
-            << "Modbus read OK | offset=" << unit.startAddress()
-            << "| plcAddress=" << (unit.startAddress() + 1)
-            << "| registerCount=" << unit.valueCount();
+        ++m_readReplyLogCounter;
+        if (m_readReplyLogCounter == 1 || (m_readReplyLogCounter % kModbusLogEveryN) == 0) {
+            qDebug(LOG_MODBUS).noquote()
+                << "Modbus read OK | offset=" << unit.startAddress()
+                << "| plcAddress=" << (unit.startAddress() + 1)
+                << "| registerCount=" << unit.valueCount();
+        }
         emit registersRead(unit.startAddress(), values);
     } else {
         // 失败：记录错误并发出失败信号
@@ -388,12 +398,13 @@ void ModbusService::handleWriteReply(QModbusReply* reply, int startAddress, int 
         emit errorOccurred(error);
     } else {
         // 成功：仅在 DEBUG 模式下记录日志（P2改进）
-#ifdef QT_DEBUG
-        const auto result = reply->result();
-        qDebug(LOG_MODBUS).noquote()
-            << "Modbus write OK | offset=" << startAddress
-            << "| registerCount=" << result.valueCount();
-#endif
+        ++m_writeReplyLogCounter;
+        if (m_writeReplyLogCounter == 1 || (m_writeReplyLogCounter % kModbusLogEveryN) == 0) {
+            const auto result = reply->result();
+            qDebug(LOG_MODBUS).noquote()
+                << "Modbus write OK | offset=" << startAddress
+                << "| registerCount=" << result.valueCount();
+        }
     }
 
     // 延迟删除回复对象

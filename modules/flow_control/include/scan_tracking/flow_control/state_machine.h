@@ -354,8 +354,8 @@ private:
     QMap<int, scan_tracking::mech_eye::CaptureResult> m_segmentCaptureResults;  // 分段采集结果缓存
     QMap<int, scan_tracking::vision::MultiCameraCaptureBundle> m_segmentCaptureBundles;  // 分段视觉 bundle 缓存
 
-    // 允许的最大点云缓存条目数，防止内存无限增长
-    static constexpr int kMaxPointCloudCacheSize = 20;
+
+    static constexpr int kMaxPointCloudCacheSize = 20;    // 允许的最大点云缓存条目数，防止内存无限增长
 };
 
 }  // namespace flow_control

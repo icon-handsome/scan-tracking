@@ -98,8 +98,10 @@ private:
     int m_unitId = 1;
     bool m_reconnectEnabled = true;
     QMutex m_mutex;
+    int m_readRequestLogCounter = 0;
+    int m_readReplyLogCounter = 0;
+    int m_writeReplyLogCounter = 0;
 };
 
 } // namespace modbus
 } // namespace scan_tracking
-

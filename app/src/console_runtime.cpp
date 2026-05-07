@@ -170,7 +170,6 @@ void ConsoleRuntime::initModules()
     visionPipelineService_->start(visionConfig);
     qInfo(appLog) << "Vision integration framework started.";
 
-    modbusService_ = std::make_unique<scan_tracking::modbus::ModbusService>(&application_);
     trackingService_ = std::make_unique<scan_tracking::tracking::TrackingService>();
 
     stateMachine_ = std::make_unique<scan_tracking::flow_control::StateMachine>(
@@ -223,4 +222,3 @@ void ConsoleRuntime::printShutdownStatus()
 }
 
 }  // namespace scan_tracking::app
-
