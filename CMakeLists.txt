@@ -26,13 +26,7 @@ option(SCAN_TRACKING_ENABLE_LB_POSE_DETECTION "Build the legacy LB pose detectio
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Network)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Network)
 
-if(SCAN_TRACKING_ENABLE_LB_POSE_DETECTION)
-    add_subdirectory(third_party/LB)
-endif()
-
-if(SCAN_TRACKING_ENABLE_LANYOU_DETECTION)
-    add_subdirectory(third_party/lanyou_first_detection)
-endif()
+add_subdirectory(third_party)
 
 add_subdirectory(common)
 add_subdirectory(modules)
