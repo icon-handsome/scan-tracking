@@ -142,7 +142,7 @@ public:
     };
 
 private:
-    // 检测结果汇总结构体
+    // 检测结果汇总结构体 
     struct InspectionSummary {
         quint16 resultCode = 1;       // 结果码
         quint16 ngReasonWord0 = 0;    // NG 原因字 0
