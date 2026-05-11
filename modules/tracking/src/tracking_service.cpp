@@ -1,3 +1,12 @@
+/**
+ * @file tracking_service.cpp
+ * @brief 跟踪服务实现文件
+ *
+ * 实现跟踪服务类，提供分段点云的综合检测和位姿校验功能。
+ * 整合蓝优第一工位检测算法，对外表面、内表面和内孔点云进行综合分析，
+ * 并输出检测结果、偏移量和测量参数。
+ */
+
 #include "scan_tracking/tracking/tracking_service.h"
 
 #include <cmath>
@@ -12,11 +21,16 @@ namespace scan_tracking::tracking {
 
 namespace {
 
+/// 有效分段条目结构体
 struct ValidSegmentEntry {
-    int segmentIndex = -1;
-    const scan_tracking::mech_eye::CaptureResult* captureResult = nullptr;
+    int segmentIndex = -1;                                    ///< 分段索引
+    const scan_tracking::mech_eye::CaptureResult* captureResult = nullptr; ///< 采集结果指针
 };
 
+/// 收集有效的分段采集结果
+// @param segmentCaptureResults 分段采集结果映射表
+// @param totalPointCount 总点数输出参数
+// @return 有效分段列表
 std::vector<ValidSegmentEntry> collectValidSegments(
     const QMap<int, scan_tracking::mech_eye::CaptureResult>& segmentCaptureResults,
     int* totalPointCount)
@@ -24,8 +38,10 @@ std::vector<ValidSegmentEntry> collectValidSegments(
     std::vector<ValidSegmentEntry> validSegments;
     int points = 0;
 
+    // 遍历所有分段，筛选出有效的采集结果
     for (auto it = segmentCaptureResults.cbegin(); it != segmentCaptureResults.cend(); ++it) {
         const auto& captureResult = it.value();
+        // 检查采集是否成功且点云有效
         if (!captureResult.success() || !captureResult.pointCloud.isValid()) {
             continue;
         }
@@ -41,12 +57,15 @@ std::vector<ValidSegmentEntry> collectValidSegments(
     return validSegments;
 }
 
+/// 第一工位分段映射配置
 struct FirstStationSegmentMapping {
-    int outerSurfaceSegmentIndex = 1;
-    int innerSurfaceSegmentIndex = 2;
-    int innerHoleSegmentIndex = 3;
+    int outerSurfaceSegmentIndex = 1;   ///< 外表面分段索引
+    int innerSurfaceSegmentIndex = 2;   ///< 内表面分段索引
+    int innerHoleSegmentIndex = 3;      ///< 内孔分段索引
 };
 
+/// 从配置管理器加载第一工位分段映射
+// @return 分段映射配置
 FirstStationSegmentMapping loadFirstStationSegmentMapping()
 {
     FirstStationSegmentMapping mapping;
@@ -62,6 +81,10 @@ FirstStationSegmentMapping loadFirstStationSegmentMapping()
     return mapping;
 }
 
+/// 在有效分段列表中查找指定索引的分段
+// @param validSegments 有效分段列表
+// @param segmentIndex 要查找的分段索引
+// @return 找到则返回采集结果指针，否则返回nullptr
 const scan_tracking::mech_eye::CaptureResult* findValidSegment(
     const std::vector<ValidSegmentEntry>& validSegments,
     int segmentIndex)
@@ -74,6 +97,9 @@ const scan_tracking::mech_eye::CaptureResult* findValidSegment(
     return nullptr;
 }
 
+/// 生成选中的分段索引文本
+// @param mapping 分段映射配置
+// @return 格式化后的分段索引字符串
 QString selectedSegmentText(const FirstStationSegmentMapping& mapping)
 {
     return QStringLiteral("[%1,%2,%3]")
@@ -82,8 +108,10 @@ QString selectedSegmentText(const FirstStationSegmentMapping& mapping)
         .arg(mapping.innerHoleSegmentIndex);
 }
 
+/// 统计检测结果中的有效测量项数量
+// @param detectionResult 蓝优检测结果
+// @return 测量项数量
 quint16 countMeasuredItems(
-    
     const scan_tracking::vision::lanyou::FirstStationDetectionResult& detectionResult)
 {
     quint16 count = 0;
@@ -102,6 +130,10 @@ quint16 countMeasuredItems(
     return count;
 }
 
+/// 组合NG原因文本
+// @param label 原因标签
+// @param errorLog 错误日志
+// @return 组合后的原因文本
 QString composeNgReasonText(const QString& label, const QString& errorLog)
 {
     if (errorLog.trimmed().isEmpty()) {
@@ -112,11 +144,20 @@ QString composeNgReasonText(const QString& label, const QString& errorLog)
 
 }  // namespace
 
+/// 获取跟踪服务状态文本
+// @return 应用名称和状态描述
 std::string TrackingService::statusText() const
 {
     return scan_tracking::common::ApplicationInfo::name() + " core is ready.";
 }
 
+/// 执行分段点云的综合检测（第一工位）
+//
+// 该函数接收多个分段的采集结果，根据配置的映射关系提取外表面、内表面和内孔点云，
+// 调用蓝优第一工位检测算法进行分析，并返回检测结果。
+//
+// @param segmentCaptureResults 分段采集结果映射表
+// @return 检测结果结构体，包含结果码、NG原因、偏移量和测量参数
 InspectionResult TrackingService::inspectSegments(
     const QMap<int, scan_tracking::mech_eye::CaptureResult>& segmentCaptureResults) const
 {
@@ -124,7 +165,10 @@ InspectionResult TrackingService::inspectSegments(
     result.segmentCount = segmentCaptureResults.size();
     result.measureItemCount = 0;
 
+    // 收集有效的分段采集结果
     const auto validSegments = collectValidSegments(segmentCaptureResults, &result.totalPointCount);
+
+    // 检查是否有可用点云
     if (result.totalPointCount <= 0) {
         result.resultCode = 2;
         result.ngReasonWord0 = (1u << 4);
@@ -132,11 +176,15 @@ InspectionResult TrackingService::inspectSegments(
         return result;
     }
 
+    // 加载第一工位分段映射配置
     const auto segmentMapping = loadFirstStationSegmentMapping();
+
+    // 查找所需的三个分段：外表面、内表面、内孔
     const auto* outerSurfaceResult = findValidSegment(validSegments, segmentMapping.outerSurfaceSegmentIndex);
     const auto* innerSurfaceResult = findValidSegment(validSegments, segmentMapping.innerSurfaceSegmentIndex);
     const auto* innerHoleResult = findValidSegment(validSegments, segmentMapping.innerHoleSegmentIndex);
 
+    // 检查必需的三个分段是否都存在
     if (outerSurfaceResult == nullptr || innerSurfaceResult == nullptr || innerHoleResult == nullptr) {
         result.resultCode = 2;
         result.ngReasonWord0 = (1u << 4);
@@ -146,6 +194,7 @@ InspectionResult TrackingService::inspectSegments(
         return result;
     }
 
+    // 构建帧集合，调用蓝优第一工位检测算法
     scan_tracking::vision::lanyou::FirstStationFrameSet frameSet;
     frameSet.outerSurfaceFrame = outerSurfaceResult->pointCloud;
     frameSet.innerSurfaceFrame = innerSurfaceResult->pointCloud;
@@ -153,6 +202,7 @@ InspectionResult TrackingService::inspectSegments(
 
     const auto detection = scan_tracking::vision::lanyou::runFirstStationDetection(frameSet);
 
+    // 检查算法是否真正启动
     if (!detection.invoked) {
         result.resultCode = 2;
         result.ngReasonWord0 = (1u << 4);
@@ -164,6 +214,7 @@ InspectionResult TrackingService::inspectSegments(
         return result;
     }
 
+    // 检查外表面检测结果
     if (!detection.firstOutSuccess) {
         result.resultCode = 2;
         result.ngReasonWord0 = (1u << 5);
@@ -178,6 +229,7 @@ InspectionResult TrackingService::inspectSegments(
         return result;
     }
 
+    // 检查内表面检测结果
     if (!detection.firstInlinerSuccess) {
         result.resultCode = 2;
         result.ngReasonWord0 = (1u << 6);
@@ -192,6 +244,7 @@ InspectionResult TrackingService::inspectSegments(
         return result;
     }
 
+    // 检测成功，填充结果
     result.resultCode = 1;
     result.measureItemCount = countMeasuredItems(detection);
     result.offsetXmm = detection.params.cylinder_center.x();
@@ -215,6 +268,12 @@ InspectionResult TrackingService::inspectSegments(
     return result;
 }
 
+/// 执行位姿校验（LB位姿检测）
+//
+// 使用LB位姿检测算法对左右相机图像进行三维重建和模板匹配，
+// 计算目标物体的位姿并输出4x4变换矩阵。
+//
+// @return 位姿校验结果结构体
 PoseCheckResult TrackingService::checkPose() const
 {
     PoseCheckResult result;
@@ -225,6 +284,7 @@ PoseCheckResult TrackingService::checkPose() const
         return result;
     }
 
+    // 调用LB位姿检测算法
     const auto lbResult = runLegacyLbPoseCheck(configManager->lbPoseConfig());
     result.invoked = lbResult.invoked;
     result.success = lbResult.success;
