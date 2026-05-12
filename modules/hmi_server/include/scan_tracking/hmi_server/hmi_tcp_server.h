@@ -156,6 +156,9 @@ private:
     
     /// 向 Qt 端周期性推送各相机的连接状态与运行阶段
     void pushCameraStatus();
+    
+    /// 向 Qt 端周期性推送设备在线状态字和故障状态字（对应协议 status.device）
+    void pushDeviceStatus();
 
 
     // --- 事件上报连接 ---
@@ -171,6 +174,12 @@ private:
     
     /// 绑定视觉流水线抛出的多相机 Bundle 采集完成信号
     void connectVisionPipelineSignals();
+    
+    /// 安装全局 Qt 日志拦截器，将 qDebug/qInfo/qWarning/qCritical 输出转发为 event.log 推送到远端显控
+    void installLogForwarder();
+    
+    /// 卸载全局 Qt 日志拦截器，恢复原始日志处理器
+    void uninstallLogForwarder();
 
 
     // --- 发送辅助函数 ---
@@ -204,6 +213,12 @@ private:
     tracking::TrackingService* m_trackingService = nullptr;
     vision::HikCameraService* m_hikCameraA = nullptr;
     vision::HikCameraService* m_hikCameraB = nullptr;
+    
+    /// 全局日志拦截器回调需要访问当前实例，使用静态指针保存（单实例模式）
+    static HmiTcpServer* s_instance;
+    
+    /// 安装日志拦截器之前保存的原始日志处理器，卸载时恢复
+    static QtMessageHandler s_previousHandler;
 };
 
 }  // namespace hmi_server

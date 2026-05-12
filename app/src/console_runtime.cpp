@@ -1,4 +1,4 @@
-﻿#include "scan_tracking/app/console_runtime.h"
+#include "scan_tracking/app/console_runtime.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -20,6 +20,7 @@
 #include "scan_tracking/vision/hik_camera_service.h"
 #include "scan_tracking/vision/vision_pipeline_service.h"
 #include "scan_tracking/vision/vision_types.h"
+#include "scan_tracking/hmi_server/hmi_tcp_server.h"
 
 Q_LOGGING_CATEGORY(appLog, "app")
 
@@ -180,6 +181,20 @@ void ConsoleRuntime::initModules()
         &application_);
     stateMachine_->start();
 
+    // HMI TCP 服务端：注入所有依赖后启动监听，放在状态机之后以确保信号绑定正确。
+    hmiTcpServer_ = std::make_unique<scan_tracking::hmi_server::HmiTcpServer>(9900, &application_);
+    hmiTcpServer_->setStateMachine(stateMachine_.get());
+    hmiTcpServer_->setModbusService(modbusService_.get());
+    hmiTcpServer_->setMechEyeService(mechEyeService_.get());
+    hmiTcpServer_->setVisionPipelineService(visionPipelineService_.get());
+    hmiTcpServer_->setTrackingService(trackingService_.get());
+    hmiTcpServer_->setHikCameraServices(hikCameraAService_.get(), hikCameraBService_.get());
+    if (!hmiTcpServer_->start()) {
+        qWarning(appLog) << "HMI TCP server failed to start on port 9900.";
+    } else {
+        qInfo(appLog) << "HMI TCP server started on port 9900.";
+    }
+
     // 等状态机接好信号后再建 Modbus 链路，避免启动期漏掉 connected 事件。
     if (!modbusService_->connectDevice()) {
         qWarning(appLog) << "Modbus connection initiation failed.";
@@ -200,6 +215,12 @@ void ConsoleRuntime::printStartupStatus()
 void ConsoleRuntime::printShutdownStatus()
 {
     // 关闭顺序按依赖逆序执行，避免退出过程中还有异步请求落到已析构对象上。
+    // HmiTcpServer 必须最先停止：它持有所有其他服务的裸指针，
+    // 必须在那些服务析构之前切断 TCP 连接和定时器，防止悬垂指针访问。
+    if (hmiTcpServer_) {
+        hmiTcpServer_->stop();
+        hmiTcpServer_.reset();
+    }
     if (stateMachine_) {
         stateMachine_->stop();
     }

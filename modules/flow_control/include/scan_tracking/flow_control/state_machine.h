@@ -68,6 +68,9 @@ public:
     quint16 warnCode() const { return m_warnCode; }
     quint16 progress() const { return m_progress; }
 
+    /// 获取最近一次 PLC 命令块快照（供 HMI 状态推送使用）
+    const QVector<quint16>& lastCommandBlock() const { return m_lastCommandBlock; }
+
     // 设置报警
     // @param level 报警级别
     // @param code 报警代码
@@ -82,6 +85,42 @@ signals:
     // 协议信号
     // @param message 事件消息
     void protocolEvent(const QString& message);
+
+    // --- HMI 业务事件信号（供 HmiTcpServer 绑定并转发给 Qt 显控） ---
+
+    /// 扫描分段开始
+    void scanStarted(int segmentIndex, quint32 taskId);
+
+    /// 扫描分段完成
+    void scanFinished(int segmentIndex, quint16 resultCode, int imageCount, int cloudFrameCount);
+
+    /// 综合检测完成
+    void inspectionFinished(quint16 resultCode, quint16 ngReasonWord0, quint16 ngReasonWord1,
+                            quint16 measureItemCount, float offsetXmm, float offsetYmm, float offsetZmm,
+                            float stableOffsetXmm, float stableOffsetYmm, float stableOffsetZmm,
+                            const QString& outlinerErrorLog, const QString& inlinerErrorLog,
+                            const QString& message);
+
+    /// 位姿校验完成
+    void poseCheckFinished(bool success, quint16 resultCode, double poseDeviationMm,
+                           const QString& message);
+
+    /// 上料抓取完成
+    void loadGraspFinished(quint16 resultCode, float x, float y, float z,
+                           float rx, float ry, float rz);
+
+    /// 卸料计算完成
+    void unloadCalcFinished(quint16 resultCode, float x, float y, float z,
+                            float rx, float ry, float rz);
+
+    /// 自检完成
+    void selfCheckFinished(quint16 resultCode, quint16 failWord0);
+
+    /// 条码读取完成
+    void codeReadFinished(quint16 resultCode, const QString& codeValue);
+
+    /// 结果复位完成
+    void resultResetFinished(quint16 resultCode);
 
 private slots:
     // 轮询 PLC 状态

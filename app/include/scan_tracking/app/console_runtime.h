@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <QtCore/QCoreApplication>
 #include <memory>
@@ -12,7 +12,9 @@ namespace vision {
 class HikCameraService;
 class VisionPipelineService;
 }
+namespace hmi_server { class HmiTcpServer; }
 }
+#include "scan_tracking/hmi_server/hmi_tcp_server.h"
 
 namespace scan_tracking::app {
 
@@ -28,6 +30,7 @@ private:
     void printShutdownStatus();
     void initModules();
 
+    /// 指针成员声明
     QCoreApplication& application_;
     std::unique_ptr<scan_tracking::modbus::ModbusService> modbusService_;
     std::unique_ptr<scan_tracking::mech_eye::MechEyeService> mechEyeService_;
@@ -36,6 +39,7 @@ private:
     std::unique_ptr<scan_tracking::vision::VisionPipelineService> visionPipelineService_;
     std::unique_ptr<scan_tracking::tracking::TrackingService> trackingService_;
     std::unique_ptr<scan_tracking::flow_control::StateMachine> stateMachine_;
+    std::unique_ptr<scan_tracking::hmi_server::HmiTcpServer> hmiTcpServer_;
 };
 
 }

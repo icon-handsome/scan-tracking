@@ -8,6 +8,7 @@
 #include "scan_tracking/hmi_server/hmi_protocol.h"
 
 #include "scan_tracking/flow_control/state_machine.h"
+#include "scan_tracking/flow_control/plc_protocol.h"
 #include "scan_tracking/modbus/modbus_service.h"
 #include "scan_tracking/mech_eye/mech_eye_service.h"
 #include "scan_tracking/vision/vision_pipeline_service.h"
@@ -19,6 +20,7 @@
 #include <QtNetwork/QHostAddress>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QJsonObject>
+#include <QtCore/QJsonDocument>
 #include <QtCore/QUuid>
 #include <qdatetime.h>
 
@@ -26,6 +28,10 @@ namespace scan_tracking {
 namespace hmi_server {
 
 Q_LOGGING_CATEGORY(LOG_HMI_SERVER, "hmi.server")
+
+// 静态成员初始化：全局日志拦截器回调所需的单例指针和原始日志处理器
+HmiTcpServer* HmiTcpServer::s_instance = nullptr;
+QtMessageHandler HmiTcpServer::s_previousHandler = nullptr;
 
 HmiTcpServer::HmiTcpServer(int port, QObject* parent)
     : QObject(parent)
@@ -62,13 +68,21 @@ bool HmiTcpServer::start()
     qInfo(LOG_HMI_SERVER) << "HMI TCP 服务端启动成功，监听端口:" << m_port;
 
     connectStateMachineSignals();
-    // 其他模块信号可以在这连接...
+    connectModbusSignals();
+    connectMechEyeSignals();
+    connectVisionPipelineSignals();
+    
+    // 安装全局日志拦截器，将 qDebug/qInfo/qWarning/qCritical 输出转发为 event.log 推送到远端 Qt 显控
+    installLogForwarder();
 
     return true;
 }
 
 void HmiTcpServer::stop()
 {
+    // 停止远端日志转发，恢复原始日志处理器
+    uninstallLogForwarder();
+    
     m_statusPushTimer->stop();
     m_heartbeatTimer->stop();
 
@@ -118,6 +132,8 @@ void HmiTcpServer::onNewConnection()
         }
 
         m_session = new HmiSession(socket, this);
+        qInfo(LOG_HMI_SERVER) << "[TCPIP] 新客户端已接入，IP:" << socket->peerAddress().toString() << "端口:" << socket->peerPort();
+        
         connect(m_session, &HmiSession::messageReceived, this, &HmiTcpServer::onMessageReceived);
         connect(m_session, &HmiSession::disconnected, this, &HmiTcpServer::onSessionDisconnected);
         connect(m_session, &HmiSession::heartbeatTimeout, this, &HmiTcpServer::onSessionHeartbeatTimeout);
@@ -132,6 +148,7 @@ void HmiTcpServer::onNewConnection()
 
 void HmiTcpServer::onSessionDisconnected()
 {
+    qInfo(LOG_HMI_SERVER) << "[TCPIP] 客户端连接已断开";
     if (m_session) {
         m_session->deleteLater();
         m_session = nullptr;
@@ -146,16 +163,34 @@ void HmiTcpServer::onSessionHeartbeatTimeout()
         m_session->disconnect();
     }
 }
-
+// 处理接收到的客户端消息，根据 type 字段分发到不同的处理函数
 void HmiTcpServer::onMessageReceived(const QJsonObject& message)
 {
+    // 1. 从 JSON 信封中解析出关键字段
     const QString type = message.value(QLatin1String("type")).toString();
+    const QString msgId = message.value(QLatin1String("msgId")).toString();
     
-    if (type == QLatin1String(msg_type::kHmiHello)) {
+    // [TCPIP关键打印] 将收到的完整 JSON 序列化为字符串，用于存档和追溯
+    QByteArray rawJson = QJsonDocument(message).toJson(QJsonDocument::Compact);
+    
+    // 区分高频消息和关键消息的日志级别
+    if (type == QLatin1String(msg_type::kHeartbeatPing) || type == QLatin1String(msg_type::kHeartbeatPong)) {
+        qDebug(LOG_HMI_SERVER).noquote() << "[TCPIP] [RX_TRACE] " << rawJson;
+    } else {
+        qInfo(LOG_HMI_SERVER).noquote() << "[TCPIP] [RX] " << rawJson;
+    }
+    
+    // ------------------------------------------------------------------
+    // 2. 通信协议命令分发路由 (Dispatcher)
+    // 根据解析出来的 type 字符串，将请求精确投递给对应的处理函数。
+    // 说明：所有 handleXxx 函数内部都会在执行完具体业务后，通过 sendResponse() 
+    // 回传与该请求 msgId 完全一致的响应结果给显控界面，形成请求-响应的闭环。
+    // ------------------------------------------------------------------
+	if (type == QLatin1String(msg_type::kHmiHello)) { 
         handleHmiHello(message);
-    } else if (type == QLatin1String(msg_type::kHeartbeatPing)) {
+	}else if (type == QLatin1String(msg_type::kHeartbeatPing)) {   
         handleHeartbeatPing(message);
-    } else if (type == QLatin1String(msg_type::kCmdStart)) {
+	}else if (type == QLatin1String(msg_type::kCmdStart)) {    
         handleCmdStart(message);
     } else if (type == QLatin1String(msg_type::kCmdStop)) {
         handleCmdStop(message);
@@ -204,6 +239,7 @@ void HmiTcpServer::onStatusPushTimer()
     pushSystemStatus();
     pushPlcStatus();
     pushCameraStatus();
+    pushDeviceStatus();  // 周期性推送设备在线状态字和故障状态字
 }
 
 void HmiTcpServer::onHeartbeatTimer()
@@ -258,9 +294,11 @@ void HmiTcpServer::handleCmdStop(const QJsonObject& message)
 void HmiTcpServer::handleCmdGetStatus(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
+    // 响应 cmd.get_status 时推送全量状态（包含设备状态）
     pushSystemStatus();
     pushPlcStatus();
     pushCameraStatus();
+    pushDeviceStatus();
     sendResponse(QLatin1String(msg_type::kCmdGetStatus), msgId, true, QStringLiteral("Status pushed"));
 }
 
@@ -412,14 +450,26 @@ void HmiTcpServer::pushSystemStatus()
 {
     if (!m_stateMachine) return;
 
+    // 将 AppState 枚举转为协议要求的字符串格式，方便前端显控解析和显示
+    QString appStateStr;
+    switch (m_stateMachine->currentState()) {
+    case flow_control::AppState::Init:     appStateStr = QStringLiteral("Init"); break;
+    case flow_control::AppState::Ready:    appStateStr = QStringLiteral("Ready"); break;
+    case flow_control::AppState::Scanning: appStateStr = QStringLiteral("Scanning"); break;
+    case flow_control::AppState::Error:    appStateStr = QStringLiteral("Error"); break;
+    default:                               appStateStr = QStringLiteral("Unknown"); break;
+    }
+
+    // 构建系统状态的 JSON 负载，涵盖状态机的核心流转信息及报警信息
     QJsonObject payload;
-    payload[QLatin1String("ipcState")] = static_cast<int>(m_stateMachine->ipcState());
-    payload[QLatin1String("appState")] = QString::number(static_cast<int>(m_stateMachine->currentState())); // 或者映射字符串
-    payload[QLatin1String("stage")] = static_cast<int>(m_stateMachine->currentStage());
-    payload[QLatin1String("alarmLevel")] = m_stateMachine->alarmLevel();
-    payload[QLatin1String("alarmCode")] = m_stateMachine->alarmCode();
-    payload[QLatin1String("warnCode")] = m_stateMachine->warnCode();
-    payload[QLatin1String("progress")] = m_stateMachine->progress();
+    payload[QLatin1String("ipcState")] = static_cast<int>(m_stateMachine->ipcState()); // 整体IPC就绪状态
+    payload[QLatin1String("appState")] = appStateStr;                                  // 应用层级的运行状态字
+    payload[QLatin1String("stage")] = static_cast<int>(m_stateMachine->currentStage()); // 当前所处流程阶段(如：扫描、检测、下料等)
+    payload[QLatin1String("alarmLevel")] = m_stateMachine->alarmLevel();               // 当前最高报警等级
+    payload[QLatin1String("alarmCode")] = m_stateMachine->alarmCode();                 // 具体报警代码
+    payload[QLatin1String("warnCode")] = m_stateMachine->warnCode();                   // 提示/警告代码
+    payload[QLatin1String("ipcReady")] = (m_stateMachine->currentState() == flow_control::AppState::Ready) ? 1 : 0; // 是否已准备好接受PLC新指令
+    payload[QLatin1String("progress")] = m_stateMachine->progress();                   // 当前任务的处理进度百分比
     
     sendToClient(buildEnvelope(QLatin1String(msg_type::kStatusSystem), nextEventId(), payload));
 }
@@ -427,21 +477,121 @@ void HmiTcpServer::pushSystemStatus()
 void HmiTcpServer::pushPlcStatus()
 {
     if (!m_modbusService) return;
+    
+    // 构建 PLC 状态 JSON 负载
     QJsonObject payload;
-    payload[QLatin1String("modbusConnected")] = m_modbusService->isConnected();
-    // 根据需要补充 PLC 其他状态寄存器
+    payload[QLatin1String("modbusConnected")] = m_modbusService->isConnected(); // IPC 与 PLC 的物理网络连接状态
+
+    // 从状态机的命令块快照中读取最新 PLC 寄存器状态，避免直接查询底层 Modbus 产生阻塞
+    if (m_stateMachine) {
+        namespace regs = flow_control::protocol::registers;
+        const auto& cb = m_stateMachine->lastCommandBlock();
+        // 确保命令块数据长度足够
+        if (cb.size() > regs::kScanSegmentTotal) {
+            payload[QLatin1String("plcHeartbeat")]    = cb.value(regs::kPlcHeartbeat);     // PLC 生命心跳信号
+            payload[QLatin1String("plcSystemState")]  = cb.value(regs::kPlcSystemState);   // PLC 侧统筹状态机字
+            payload[QLatin1String("workMode")]        = cb.value(regs::kStationWorkMode);  // 工位工作模式 (自动/手动)
+            payload[QLatin1String("flowEnable")]      = cb.value(regs::kFlowEnable);       // 自动流程使能开关
+            payload[QLatin1String("safetyWord")]      = cb.value(regs::kSafetyStatusWord); // 门锁、光栅、急停等物理安全信号状态字
+            // 拼接高低 16 位任务 ID，形成唯一的 32 位当前生产追溯码
+            payload[QLatin1String("taskId")]          = static_cast<int>(
+                (static_cast<quint32>(cb.value(regs::kTaskIdHigh)) << 16) |
+                static_cast<quint32>(cb.value(regs::kTaskIdLow)));
+            payload[QLatin1String("productType")]     = cb.value(regs::kProductType);      // 当前生产的产品型号代码
+            payload[QLatin1String("recipeId")]        = cb.value(regs::kRecipeId);         // 配方 ID
+            payload[QLatin1String("scanSegmentIndex")] = cb.value(regs::kScanSegmentIndex); // PLC 要求的当前扫描段序号
+            payload[QLatin1String("scanSegmentTotal")] = cb.value(regs::kScanSegmentTotal); // 产品总计包含的扫描段数
+        }
+    }
+
     sendToClient(buildEnvelope(QLatin1String(msg_type::kStatusPlc), nextEventId(), payload));
 }
 
 void HmiTcpServer::pushCameraStatus()
 {
+    // 构建外部感知硬件状态 JSON 负载
     QJsonObject payload;
+    
+    // 1. 获取梅卡曼德 3D 相机状态
     if (m_mechEyeService) {
         QJsonObject mechEyeObj;
         mechEyeObj[QLatin1String("state")] = static_cast<int>(m_mechEyeService->state());
+        // 判断相机是否真正可用(非空闲且非错误状态)
+        mechEyeObj[QLatin1String("connected")] = (m_mechEyeService->state() != mech_eye::CameraRuntimeState::Idle
+                                                   && m_mechEyeService->state() != mech_eye::CameraRuntimeState::Error);
         payload[QLatin1String("mechEye")] = mechEyeObj;
     }
+    
+    // 2. 获取第一路海康黑白相机的连接状态
+    if (m_hikCameraA) {
+        QJsonObject hikAObj;
+        hikAObj[QLatin1String("roleName")] = m_hikCameraA->roleName();
+        hikAObj[QLatin1String("connected")] = m_hikCameraA->isConnected();
+        payload[QLatin1String("hikA")] = hikAObj;
+    }
+    
+    // 3. 获取第二路海康黑白相机的连接状态
+    if (m_hikCameraB) {
+        QJsonObject hikBObj;
+        hikBObj[QLatin1String("roleName")] = m_hikCameraB->roleName();
+        hikBObj[QLatin1String("connected")] = m_hikCameraB->isConnected();
+        payload[QLatin1String("hikB")] = hikBObj;
+    }
+    
+    // 4. 获取多相机视觉编排调度器的工作状态
+    if (m_visionPipeline) {
+        QJsonObject pipelineObj;
+        pipelineObj[QLatin1String("state")] = static_cast<int>(m_visionPipeline->state());
+        payload[QLatin1String("pipeline")] = pipelineObj;
+    }
+    
     sendToClient(buildEnvelope(QLatin1String(msg_type::kStatusCamera), nextEventId(), payload));
+}
+
+void HmiTcpServer::pushDeviceStatus()
+{
+    // 构建外设详细设备在线状态字和故障状态字
+    quint16 onlineWord0 = 0;
+    quint16 faultWord0 = 0;
+
+    // 根据底层状态机的物理设备定义，严格映射在线状态字各 Bit 的含义：
+    // Bit 0: IPC 系统在线
+    // Bit 1: HMI-IPC 通信正常
+    // Bit 2: 3D 传感器（MechEye）在线
+    // Bit 4: 2D 相机连接在线（海康相机）
+    // Bit 5: 跟踪与算法服务在线
+    // Bit 6: Modbus 连接在线
+    
+    onlineWord0 |= (1 << 0); // IPC系统本身运行即在线
+    
+    if (hasClient()) {
+        onlineWord0 |= (1 << 1);
+    }
+    
+    if (m_mechEyeService && m_mechEyeService->state() != mech_eye::CameraRuntimeState::Idle 
+        && m_mechEyeService->state() != mech_eye::CameraRuntimeState::Error) {
+        onlineWord0 |= (1 << 2);
+    }
+    
+    // 任意一台 2D 相机在线即视为 Bit4 在线
+    if ((m_hikCameraA && m_hikCameraA->isConnected()) || 
+        (m_hikCameraB && m_hikCameraB->isConnected())) {
+        onlineWord0 |= (1 << 4);
+    }
+    
+    if (m_trackingService) {
+        onlineWord0 |= (1 << 5);
+    }
+    
+    if (m_modbusService && m_modbusService->isConnected()) {
+        onlineWord0 |= (1 << 6);
+    }
+
+    QJsonObject payload;
+    payload[QLatin1String("onlineWord0")] = onlineWord0;
+    payload[QLatin1String("faultWord0")] = faultWord0;
+    
+    sendToClient(buildEnvelope(QLatin1String(msg_type::kStatusDevice), nextEventId(), payload));
 }
 
 // --- 事件连接 ---
@@ -449,15 +599,240 @@ void HmiTcpServer::pushCameraStatus()
 void HmiTcpServer::connectStateMachineSignals()
 {
     if (!m_stateMachine) return;
-    
-    // 例如监听协议事件报警
+
+    // 绑定核心业务报警事件：将状态机发出的协议级错误拦截并封装为 event.alarm 向远端推送
     connect(m_stateMachine, &flow_control::StateMachine::protocolEvent, this, [this](const QString& message) {
         QJsonObject payload;
         payload[QLatin1String("message")] = message;
         payload[QLatin1String("level")] = m_stateMachine->alarmLevel();
         payload[QLatin1String("code")] = m_stateMachine->alarmCode();
+        payload[QLatin1String("timestamp")] = QDateTime::currentMSecsSinceEpoch();
         sendToClient(buildEnvelope(QLatin1String(msg_type::kEventAlarm), nextEventId(), payload));
     });
+
+    // 绑定扫描分段启动事件：告知显控界面哪一段扫描正在拍摄
+    connect(m_stateMachine, &flow_control::StateMachine::scanStarted, this,
+        [this](int segmentIndex, quint32 taskId) {
+        QJsonObject payload;
+        payload[QLatin1String("segmentIndex")] = segmentIndex;
+        payload[QLatin1String("taskId")] = static_cast<int>(taskId);
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventScanStarted), nextEventId(), payload));
+    });
+
+    // 绑定扫描分段完成事件：推送当前段是否采图成功及有效帧数
+    connect(m_stateMachine, &flow_control::StateMachine::scanFinished, this,
+        [this](int segmentIndex, quint16 resultCode, int imageCount, int cloudFrameCount) {
+        QJsonObject payload;
+        payload[QLatin1String("segmentIndex")] = segmentIndex;
+        payload[QLatin1String("resultCode")] = resultCode; // 1 表示成功
+        payload[QLatin1String("imageCount")] = imageCount;
+        payload[QLatin1String("cloudFrameCount")] = cloudFrameCount;
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventScanFinished), nextEventId(), payload));
+    });
+
+    // 绑定综合检测算法结束事件：推送所有工艺偏移量计算结果及缺陷诊断信息（如划痕、裂纹等特征字）
+    connect(m_stateMachine, &flow_control::StateMachine::inspectionFinished, this,
+        [this](quint16 resultCode, quint16 ngReasonWord0, quint16 ngReasonWord1,
+               quint16 measureItemCount, float offsetXmm, float offsetYmm, float offsetZmm,
+               float stableOffsetXmm, float stableOffsetYmm, float stableOffsetZmm,
+               const QString& outlinerErrorLog, const QString& inlinerErrorLog,
+               const QString& message) {
+        QJsonObject payload;
+        payload[QLatin1String("resultCode")] = resultCode;
+        payload[QLatin1String("ngReasonWord0")] = ngReasonWord0;    // 主要 NG 原因位图
+        payload[QLatin1String("ngReasonWord1")] = ngReasonWord1;    // 辅助 NG 原因位图
+        payload[QLatin1String("measureItemCount")] = measureItemCount;
+        payload[QLatin1String("offsetXmm")] = static_cast<double>(offsetXmm); // 相对基础模板的绝对偏移量
+        payload[QLatin1String("offsetYmm")] = static_cast<double>(offsetYmm);
+        payload[QLatin1String("offsetZmm")] = static_cast<double>(offsetZmm);
+        payload[QLatin1String("stableOffsetXmm")] = static_cast<double>(stableOffsetXmm); // 平滑滤波后的偏移量
+        payload[QLatin1String("stableOffsetYmm")] = static_cast<double>(stableOffsetYmm);
+        payload[QLatin1String("stableOffsetZmm")] = static_cast<double>(stableOffsetZmm);
+        payload[QLatin1String("outlinerErrorLog")] = outlinerErrorLog; // 外部轮廓瑕疵诊断日志
+        payload[QLatin1String("inlinerErrorLog")] = inlinerErrorLog;   // 内部孔径瑕疵诊断日志
+        payload[QLatin1String("message")] = message;
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventInspectionFinished), nextEventId(), payload));
+    });
+
+    // 位姿校验完成
+    connect(m_stateMachine, &flow_control::StateMachine::poseCheckFinished, this,
+        [this](bool success, quint16 resultCode, double poseDeviationMm, const QString& message) {
+        QJsonObject payload;
+        payload[QLatin1String("success")] = success;
+        payload[QLatin1String("resultCode")] = resultCode;
+        payload[QLatin1String("poseDeviationMm")] = poseDeviationMm;
+        payload[QLatin1String("message")] = message;
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventPoseCheckFinished), nextEventId(), payload));
+    });
+
+    // 上料抓取完成
+    connect(m_stateMachine, &flow_control::StateMachine::loadGraspFinished, this,
+        [this](quint16 resultCode, float x, float y, float z, float rx, float ry, float rz) {
+        QJsonObject payload;
+        payload[QLatin1String("resultCode")] = resultCode;
+        payload[QLatin1String("x")] = static_cast<double>(x);
+        payload[QLatin1String("y")] = static_cast<double>(y);
+        payload[QLatin1String("z")] = static_cast<double>(z);
+        payload[QLatin1String("rx")] = static_cast<double>(rx);
+        payload[QLatin1String("ry")] = static_cast<double>(ry);
+        payload[QLatin1String("rz")] = static_cast<double>(rz);
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventLoadGraspFinished), nextEventId(), payload));
+    });
+
+    // 卸料计算完成
+    connect(m_stateMachine, &flow_control::StateMachine::unloadCalcFinished, this,
+        [this](quint16 resultCode, float x, float y, float z, float rx, float ry, float rz) {
+        QJsonObject payload;
+        payload[QLatin1String("resultCode")] = resultCode;
+        payload[QLatin1String("x")] = static_cast<double>(x);
+        payload[QLatin1String("y")] = static_cast<double>(y);
+        payload[QLatin1String("z")] = static_cast<double>(z);
+        payload[QLatin1String("rx")] = static_cast<double>(rx);
+        payload[QLatin1String("ry")] = static_cast<double>(ry);
+        payload[QLatin1String("rz")] = static_cast<double>(rz);
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventUnloadCalcFinished), nextEventId(), payload));
+    });
+
+    // 自检完成
+    connect(m_stateMachine, &flow_control::StateMachine::selfCheckFinished, this,
+        [this](quint16 resultCode, quint16 failWord0) {
+        QJsonObject payload;
+        payload[QLatin1String("resultCode")] = resultCode;
+        payload[QLatin1String("failWord0")] = failWord0;
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventSelfCheckFinished), nextEventId(), payload));
+    });
+
+    // 条码读取完成
+    connect(m_stateMachine, &flow_control::StateMachine::codeReadFinished, this,
+        [this](quint16 resultCode, const QString& codeValue) {
+        QJsonObject payload;
+        payload[QLatin1String("resultCode")] = resultCode;
+        payload[QLatin1String("codeValue")] = codeValue;
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventCodeReadFinished), nextEventId(), payload));
+    });
+
+    // 结果复位完成
+    connect(m_stateMachine, &flow_control::StateMachine::resultResetFinished, this,
+        [this](quint16 resultCode) {
+        QJsonObject payload;
+        payload[QLatin1String("resultCode")] = resultCode;
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventResultResetFinished), nextEventId(), payload));
+    });
+}
+
+void HmiTcpServer::connectModbusSignals()
+{
+    if (!m_modbusService) return;
+
+    connect(m_modbusService, &modbus::ModbusService::connected, this, [this]() {
+        QJsonObject payload;
+        payload[QLatin1String("message")] = QStringLiteral("Modbus connected");
+        payload[QLatin1String("level")] = 0;
+        payload[QLatin1String("code")] = 0;
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventAlarm), nextEventId(), payload));
+    });
+
+    connect(m_modbusService, &modbus::ModbusService::disconnected, this, [this]() {
+        QJsonObject payload;
+        payload[QLatin1String("message")] = QStringLiteral("Modbus disconnected");
+        payload[QLatin1String("level")] = 3;
+        payload[QLatin1String("code")] = 900;
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventAlarm), nextEventId(), payload));
+    });
+
+    connect(m_modbusService, &modbus::ModbusService::errorOccurred, this, [this](const QString& errorString) {
+        QJsonObject payload;
+        payload[QLatin1String("message")] = errorString;
+        payload[QLatin1String("level")] = 2;
+        payload[QLatin1String("code")] = 901;
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventAlarm), nextEventId(), payload));
+    });
+}
+
+void HmiTcpServer::connectMechEyeSignals()
+{
+    if (!m_mechEyeService) return;
+
+    connect(m_mechEyeService, &mech_eye::MechEyeService::captureFinished, this,
+        [this](scan_tracking::mech_eye::CaptureResult result) {
+        QJsonObject payload;
+        payload[QLatin1String("requestId")] = static_cast<qint64>(result.requestId);
+        payload[QLatin1String("cameraKey")] = result.cameraKey;
+        payload[QLatin1String("pointCount")] = static_cast<int>(result.pointCloud.pointCount);
+        payload[QLatin1String("elapsedMs")] = static_cast<int>(result.elapsedMs);
+        payload[QLatin1String("errorCode")] = static_cast<int>(result.errorCode);
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventImageCaptured), nextEventId(), payload));
+    });
+
+    connect(m_mechEyeService, &mech_eye::MechEyeService::fatalError, this,
+        [this](scan_tracking::mech_eye::CaptureErrorCode code, QString message) {
+        QJsonObject payload;
+        payload[QLatin1String("message")] = message;
+        payload[QLatin1String("level")] = 3;
+        payload[QLatin1String("code")] = static_cast<int>(code);
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventAlarm), nextEventId(), payload));
+    });
+}
+
+void HmiTcpServer::connectVisionPipelineSignals()
+{
+    if (!m_visionPipeline) return;
+
+    connect(m_visionPipeline, &vision::VisionPipelineService::bundleCaptureFinished, this,
+        [this](scan_tracking::vision::MultiCameraCaptureBundle bundle) {
+        QJsonObject payload;
+        payload[QLatin1String("segmentIndex")] = bundle.request.segmentIndex;
+        payload[QLatin1String("taskId")] = static_cast<int>(bundle.request.taskId);
+        payload[QLatin1String("mechOk")] = bundle.mechEyeResult.success();
+        payload[QLatin1String("hikAOk")] = bundle.hikCameraAResult.success();
+        payload[QLatin1String("hikBOk")] = bundle.hikCameraBResult.success();
+        sendToClient(buildEnvelope(QLatin1String(msg_type::kEventBundleCaptured), nextEventId(), payload));
+    });
+}
+
+// --- 日志转发实现 ---
+
+void HmiTcpServer::installLogForwarder()
+{
+    // 保存当前实例指针，供全局回调函数使用
+    s_instance = this;
+    
+    // 拦截全局 Qt 日志输出，并保存原有处理器以支持链式调用
+    s_previousHandler = qInstallMessageHandler([](QtMsgType type, const QMessageLogContext& context, const QString& msg) {
+        if (s_instance && s_instance->hasClient()) {
+            QJsonObject payload;
+            int severity = 0;
+            switch (type) {
+            case QtDebugMsg: severity = 0; break;
+            case QtInfoMsg: severity = 1; break;
+            case QtWarningMsg: severity = 2; break;
+            case QtCriticalMsg: severity = 3; break;
+            case QtFatalMsg: severity = 4; break;
+            }
+            payload[QLatin1String("severity")] = severity;
+            payload[QLatin1String("category")] = QString::fromLatin1(context.category ? context.category : "default");
+            payload[QLatin1String("message")] = msg;
+            payload[QLatin1String("file")] = QString::fromLatin1(context.file ? context.file : "");
+            payload[QLatin1String("line")] = context.line;
+            payload[QLatin1String("timestamp")] = QDateTime::currentMSecsSinceEpoch();
+            
+            s_instance->sendToClient(buildEnvelope(QLatin1String(msg_type::kEventLog), s_instance->nextEventId(), payload));
+        }
+        
+        // 链式调用：保证本地控制台或本地文件日志依然能够正常输出
+        if (s_previousHandler) {
+            s_previousHandler(type, context, msg);
+        }
+    });
+}
+
+void HmiTcpServer::uninstallLogForwarder()
+{
+    if (s_previousHandler) {
+        qInstallMessageHandler(s_previousHandler);
+        s_previousHandler = nullptr;
+    }
+    s_instance = nullptr;
 }
 
 // --- 辅助发送 ---
@@ -465,6 +840,26 @@ void HmiTcpServer::connectStateMachineSignals()
 void HmiTcpServer::sendToClient(const QJsonObject& envelope)
 {
     if (m_session) {
+        // [TCPIP关键打印] 将发送的完整 JSON 序列化为单行字符串，用于存档
+        QByteArray rawJson = QJsonDocument(envelope).toJson(QJsonDocument::Compact);
+        QString type = envelope.value(QLatin1String("type")).toString();
+        
+        // 区分高频消息和关键消息：
+        // 状态推送、心跳、日志等高频且数据量大的报文使用 Debug 级别（避免撑爆 Info 级别的主日志文件）
+        // 核心控制命令、业务事件的回执使用 Info 级别（永久存档）
+        if (type == QLatin1String(msg_type::kStatusSystem) || 
+            type == QLatin1String(msg_type::kStatusPlc) || 
+            type == QLatin1String(msg_type::kStatusCamera) || 
+            type == QLatin1String(msg_type::kStatusDevice) || 
+            type == QLatin1String(msg_type::kHeartbeatPing) || 
+            type == QLatin1String(msg_type::kHeartbeatPong) ||
+            type == QLatin1String(msg_type::kEventLog)) {
+            
+            qDebug(LOG_HMI_SERVER).noquote() << "[TCPIP] [TX_TRACE] " << rawJson;
+        } else {
+            qInfo(LOG_HMI_SERVER).noquote() << "[TCPIP] [TX] " << rawJson;
+        }
+        
         m_session->sendMessage(envelope);
     }
 }

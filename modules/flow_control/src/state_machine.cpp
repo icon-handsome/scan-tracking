@@ -744,9 +744,12 @@ void StateMachine::executeLoadGraspTask()
         << "success=" << poseSource.success
         << "message=" << poseSource.message;
     writeLoadGraspResult();   // 写入加载位姿结果到 PLC 寄存器
-    completeActiveTask(poseSource.success ? 1 : 7, poseSource.success ? protocol::AckState::Completed
-                                                                       : protocol::AckState::Failed,
+    const quint16 resultCode = poseSource.success ? 1 : 7;
+    completeActiveTask(resultCode, poseSource.success ? protocol::AckState::Completed
+                                                       : protocol::AckState::Failed,
                        poseSource.success);
+    emit loadGraspFinished(resultCode, poseSource.x, poseSource.y, poseSource.z,
+                           poseSource.rx, poseSource.ry, poseSource.rz);
 }
 
 void StateMachine::executeStationMaterialCheckTask()
@@ -786,9 +789,12 @@ void StateMachine::executeUnloadCalcTask()
         << "success=" << poseSource.success
         << "message=" << poseSource.message;
     writeUnloadCalcResult();  // 写入卸料位姿结果到 PLC 寄存器
-    completeActiveTask(poseSource.success ? 1 : 7, poseSource.success ? protocol::AckState::Completed
-                                                                       : protocol::AckState::Failed,
+    const quint16 resultCode = poseSource.success ? 1 : 7;
+    completeActiveTask(resultCode, poseSource.success ? protocol::AckState::Completed
+                                                       : protocol::AckState::Failed,
                        poseSource.success);
+    emit unloadCalcFinished(resultCode, poseSource.x, poseSource.y, poseSource.z,
+                            poseSource.rx, poseSource.ry, poseSource.rz);
 }
 
 /**
@@ -864,6 +870,7 @@ void StateMachine::executeScanSegmentTask()
         << "segmentIndex=" << m_activeTask.scanSegmentIndex
         << "segmentTotal=" << m_activeTask.scanSegmentTotal
         << "timeoutMs=" << captureTimeoutMs;
+    emit scanStarted(m_activeTask.scanSegmentIndex, m_activeTask.taskId);
 }
 
 void StateMachine::onVisionBundleCaptureFinished(scan_tracking::vision::MultiCameraCaptureBundle bundle)
@@ -905,6 +912,7 @@ void StateMachine::onVisionBundleCaptureFinished(scan_tracking::vision::MultiCam
         << "hikAFrame=" << bundle.hikCameraAResult.frame.width << "x" << bundle.hikCameraAResult.frame.height
         << "hikBFrame=" << bundle.hikCameraBResult.frame.width << "x" << bundle.hikCameraBResult.frame.height;
     completeActiveTask(1);
+    emit scanFinished(m_activeTask.scanSegmentIndex, 1, 2, result.pointCloud.pointCount > 0 ? 1 : 0);
 }
 
 /**
@@ -918,6 +926,7 @@ void StateMachine::executePoseCheckTask()
         qWarning(LOG_FLOW).noquote() << "Tracking service unavailable for pose check.";
         writeFloatPlaceholder(protocol::registers::kPoseDeviationMm, 0.0f);
         completeActiveTask(7, protocol::AckState::Failed, false);
+        emit poseCheckFinished(false, 7, 0.0, QStringLiteral("Tracking service unavailable"));
         return;
     }
 
@@ -931,6 +940,7 @@ void StateMachine::executePoseCheckTask()
             << "Pose check did not invoke LB algorithm:"
             << poseResult.message;
         completeActiveTask(7, protocol::AckState::Failed, false);
+        emit poseCheckFinished(false, 7, poseResult.poseDeviationMm, poseResult.message);
         return;
     }
 
@@ -942,6 +952,7 @@ void StateMachine::executePoseCheckTask()
             << "resultCode=" << resultCode
             << "deviationMm=" << poseResult.poseDeviationMm;
         completeActiveTask(resultCode, protocol::AckState::Failed, false);
+        emit poseCheckFinished(false, resultCode, poseResult.poseDeviationMm, poseResult.message);
         return;
     }
 
@@ -952,6 +963,7 @@ void StateMachine::executePoseCheckTask()
         << "rt00=" << poseResult.rt[0]
         << "hasPoseMatrix=" << poseResult.hasPoseMatrix();
     completeActiveTask(1, protocol::AckState::Completed, true);
+    emit poseCheckFinished(true, 1, poseResult.poseDeviationMm, poseResult.message);
 }
 
 void StateMachine::executeSelfCheckTask()
@@ -986,6 +998,7 @@ void StateMachine::executeSelfCheckTask()
         });
     }
     completeActiveTask(resultCode, resultCode == 1 ? protocol::AckState::Completed : protocol::AckState::Failed, resultCode == 1);
+    emit selfCheckFinished(resultCode, failWords.value(0));
 }
 
 void StateMachine::executeCodeReadTask()
@@ -995,6 +1008,7 @@ void StateMachine::executeCodeReadTask()
         writeAsciiPlaceholder(protocol::registers::kCodeValueAscii, protocol::registers::kCodeValueRegisterCount, QStringLiteral("RD"));
     }
     completeActiveTask(9, protocol::AckState::Failed, false);
+    emit codeReadFinished(9, QStringLiteral("RD"));
 }
 
 /**
@@ -1053,6 +1067,12 @@ void StateMachine::executeInspectionTask()
         summary.resultCode,
         protocol::AckState::Completed,
         summary.resultCode == 1);
+    emit inspectionFinished(
+        summary.resultCode, summary.ngReasonWord0, summary.ngReasonWord1,
+        summary.measureItemCount, summary.offsetXmm, summary.offsetYmm, summary.offsetZmm,
+        trackingResult.stableOffsetXmm, trackingResult.stableOffsetYmm, trackingResult.stableOffsetZmm,
+        trackingResult.outlinerErrorLog, trackingResult.inlinerErrorLog,
+        trackingResult.message);
     resetScanSegmentCache();  // 检测完成，清空扫描缓存释放内存
 }
 
@@ -1079,6 +1099,7 @@ void StateMachine::executeResultResetTask()
     }
     // 完成任务，返回成功
     completeActiveTask(1);
+    emit resultResetFinished(1);
 }
 
 /**

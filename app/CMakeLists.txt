@@ -1,4 +1,4 @@
-﻿set(scan_tracking_app_sources
+set(scan_tracking_app_sources
     src/main.cpp
     src/console_runtime.cpp
     include/scan_tracking/app/console_runtime.h
@@ -22,6 +22,7 @@ target_link_libraries(scan_tracking
         scan_tracking_tracking
         scan_tracking_modbus
         scan_tracking_flow_control
+        scan_tracking_hmi_server
 )
 
 target_compile_features(scan_tracking PRIVATE cxx_std_17)
