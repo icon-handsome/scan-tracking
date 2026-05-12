@@ -103,7 +103,7 @@ signals:
 
     /// 位姿校验完成
     void poseCheckFinished(bool success, quint16 resultCode, double poseDeviationMm,
-                           const QString& message);
+                           const QVector<double>& rt, const QString& message);
 
     /// 上料抓取完成
     void loadGraspFinished(quint16 resultCode, float x, float y, float z,

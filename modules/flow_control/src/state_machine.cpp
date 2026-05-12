@@ -922,11 +922,18 @@ void StateMachine::onVisionBundleCaptureFinished(scan_tracking::vision::MultiCam
  */
 void StateMachine::executePoseCheckTask()
 {
+    const QVector<double> identityRt = {
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    };
+
     if (m_tracking == nullptr) {
         qWarning(LOG_FLOW).noquote() << "Tracking service unavailable for pose check.";
         writeFloatPlaceholder(protocol::registers::kPoseDeviationMm, 0.0f);
         completeActiveTask(7, protocol::AckState::Failed, false);
-        emit poseCheckFinished(false, 7, 0.0, QStringLiteral("Tracking service unavailable"));
+        emit poseCheckFinished(false, 7, 0.0, identityRt, QStringLiteral("Tracking service unavailable"));
         return;
     }
 
@@ -940,8 +947,14 @@ void StateMachine::executePoseCheckTask()
             << "Pose check did not invoke LB algorithm:"
             << poseResult.message;
         completeActiveTask(7, protocol::AckState::Failed, false);
-        emit poseCheckFinished(false, 7, poseResult.poseDeviationMm, poseResult.message);
+        emit poseCheckFinished(false, 7, poseResult.poseDeviationMm, identityRt, poseResult.message);
         return;
+    }
+
+    QVector<double> rt;
+    rt.reserve(static_cast<int>(poseResult.rt.size()));
+    for (double value : poseResult.rt) {
+        rt.append(value);
     }
 
     if (!poseResult.success) {
@@ -952,7 +965,7 @@ void StateMachine::executePoseCheckTask()
             << "resultCode=" << resultCode
             << "deviationMm=" << poseResult.poseDeviationMm;
         completeActiveTask(resultCode, protocol::AckState::Failed, false);
-        emit poseCheckFinished(false, resultCode, poseResult.poseDeviationMm, poseResult.message);
+        emit poseCheckFinished(false, resultCode, poseResult.poseDeviationMm, rt, poseResult.message);
         return;
     }
 
@@ -963,7 +976,7 @@ void StateMachine::executePoseCheckTask()
         << "rt00=" << poseResult.rt[0]
         << "hasPoseMatrix=" << poseResult.hasPoseMatrix();
     completeActiveTask(1, protocol::AckState::Completed, true);
-    emit poseCheckFinished(true, 1, poseResult.poseDeviationMm, poseResult.message);
+    emit poseCheckFinished(true, 1, poseResult.poseDeviationMm, rt, poseResult.message);
 }
 
 void StateMachine::executeSelfCheckTask()

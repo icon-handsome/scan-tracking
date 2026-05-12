@@ -93,6 +93,8 @@ private:
     
     /// 处理 Qt 端发来的心跳 ping 包，返回 pong
     void handleHeartbeatPing(const QJsonObject& message);
+
+    void handleHeartbeatPong(const QJsonObject& message);
     
     /// 处理启动指令，触发核心状态机进入启动状态
     void handleCmdStart(const QJsonObject& message);
@@ -150,15 +152,23 @@ private:
     
     /// 向 Qt 端周期性推送系统整体运行状态（如 IPCState、报警级别、整体进度等）
     void pushSystemStatus();
+
+    QJsonObject buildSystemStatusPayload() const;
     
     /// 向 Qt 端周期性推送 PLC 连接状态及内部部分寄存器运行状态
     void pushPlcStatus();
+
+    QJsonObject buildPlcStatusPayload() const;
     
     /// 向 Qt 端周期性推送各相机的连接状态与运行阶段
     void pushCameraStatus();
+
+    QJsonObject buildCameraStatusPayload() const;
     
     /// 向 Qt 端周期性推送设备在线状态字和故障状态字（对应协议 status.device）
     void pushDeviceStatus();
+
+    QJsonObject buildDeviceStatusPayload() const;
 
 
     // --- 事件上报连接 ---
