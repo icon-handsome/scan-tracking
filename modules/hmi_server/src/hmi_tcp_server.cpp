@@ -14,6 +14,7 @@
 #include "scan_tracking/vision/vision_pipeline_service.h"
 #include "scan_tracking/vision/hik_camera_service.h"
 #include "scan_tracking/tracking/tracking_service.h"
+#include "scan_tracking/common/config_manager.h"
 
 #include <QtNetwork/QTcpServer>
 #include <QtNetwork/QTcpSocket>
@@ -335,8 +336,104 @@ void HmiTcpServer::handleCmdClearAlarm(const QJsonObject& message)
 void HmiTcpServer::handleCmdGetConfig(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
-    // 暂时不实现热更新配置，返回空对象
-    sendResponse(QLatin1String(msg_type::kCmdGetConfig), msgId, true, QStringLiteral("Not supported"));
+    
+    // 从 ConfigManager 单例读取所有配置并序列化为 JSON
+    auto* cfgMgr = common::ConfigManager::instance();
+    if (!cfgMgr) {
+        sendResponse(QLatin1String(msg_type::kCmdGetConfig), msgId, false, QStringLiteral("ConfigManager not initialized"));
+        return;
+    }
+    
+    QJsonObject configPayload;
+    
+    // 1. App 配置
+    QJsonObject appObj;
+    appObj[QLatin1String("version")] = cfgMgr->appConfig().version;
+    appObj[QLatin1String("environment")] = cfgMgr->appConfig().environment;
+    configPayload[QLatin1String("app")] = appObj;
+    
+    // 2. Logger 配置
+    QJsonObject loggerObj;
+    loggerObj[QLatin1String("level")] = cfgMgr->loggerConfig().level;
+    loggerObj[QLatin1String("rotateDays")] = cfgMgr->loggerConfig().rotateDays;
+    configPayload[QLatin1String("logger")] = loggerObj;
+    
+    // 3. Modbus 配置
+    QJsonObject modbusObj;
+    modbusObj[QLatin1String("host")] = cfgMgr->modbusConfig().host;
+    modbusObj[QLatin1String("port")] = cfgMgr->modbusConfig().port;
+    modbusObj[QLatin1String("unitId")] = cfgMgr->modbusConfig().unitId;
+    modbusObj[QLatin1String("timeoutMs")] = cfgMgr->modbusConfig().timeoutMs;
+    modbusObj[QLatin1String("reconnectIntervalMs")] = cfgMgr->modbusConfig().reconnectIntervalMs;
+    configPayload[QLatin1String("modbus")] = modbusObj;
+    
+    // 4. Camera 配置
+    QJsonObject cameraObj;
+    cameraObj[QLatin1String("defaultCamera")] = cfgMgr->cameraConfig().defaultCamera;
+    cameraObj[QLatin1String("scanTimeoutMs")] = cfgMgr->cameraConfig().scanTimeoutMs;
+    configPayload[QLatin1String("camera")] = cameraObj;
+    
+    // 5. Vision 配置
+    QJsonObject visionObj;
+    visionObj[QLatin1String("mechEyeCameraKey")] = cfgMgr->visionConfig().mechEyeCameraKey;
+    visionObj[QLatin1String("mechCaptureTimeoutMs")] = cfgMgr->visionConfig().mechCaptureTimeoutMs;
+    visionObj[QLatin1String("hikConnectTimeoutMs")] = cfgMgr->visionConfig().hikConnectTimeoutMs;
+    visionObj[QLatin1String("hikCaptureTimeoutMs")] = cfgMgr->visionConfig().hikCaptureTimeoutMs;
+    visionObj[QLatin1String("hikSdkRoot")] = cfgMgr->visionConfig().hikSdkRoot;
+    
+    QJsonObject hikAObj;
+    hikAObj[QLatin1String("logicalName")] = cfgMgr->visionConfig().hikCameraA.logicalName;
+    hikAObj[QLatin1String("cameraKey")] = cfgMgr->visionConfig().hikCameraA.cameraKey;
+    hikAObj[QLatin1String("ipAddress")] = cfgMgr->visionConfig().hikCameraA.ipAddress;
+    hikAObj[QLatin1String("serialNumber")] = cfgMgr->visionConfig().hikCameraA.serialNumber;
+    visionObj[QLatin1String("hikCameraA")] = hikAObj;
+    
+    QJsonObject hikBObj;
+    hikBObj[QLatin1String("logicalName")] = cfgMgr->visionConfig().hikCameraB.logicalName;
+    hikBObj[QLatin1String("cameraKey")] = cfgMgr->visionConfig().hikCameraB.cameraKey;
+    hikBObj[QLatin1String("ipAddress")] = cfgMgr->visionConfig().hikCameraB.ipAddress;
+    hikBObj[QLatin1String("serialNumber")] = cfgMgr->visionConfig().hikCameraB.serialNumber;
+    visionObj[QLatin1String("hikCameraB")] = hikBObj;
+    
+    configPayload[QLatin1String("vision")] = visionObj;
+    
+    // 6. FlowControl 配置
+    QJsonObject flowControlObj;
+    flowControlObj[QLatin1String("pollIntervalMs")] = cfgMgr->flowControlConfig().pollIntervalMs;
+    flowControlObj[QLatin1String("heartbeatIntervalMs")] = cfgMgr->flowControlConfig().heartbeatIntervalMs;
+    flowControlObj[QLatin1String("simulatedProcessingMs")] = cfgMgr->flowControlConfig().simulatedProcessingMs;
+    configPayload[QLatin1String("flowControl")] = flowControlObj;
+    
+    // 7. Tracking 配置
+    QJsonObject trackingObj;
+    trackingObj[QLatin1String("firstStationOuterSegmentIndex")] = cfgMgr->trackingConfig().firstStationOuterSegmentIndex;
+    trackingObj[QLatin1String("firstStationInnerSegmentIndex")] = cfgMgr->trackingConfig().firstStationInnerSegmentIndex;
+    trackingObj[QLatin1String("firstStationHoleSegmentIndex")] = cfgMgr->trackingConfig().firstStationHoleSegmentIndex;
+    configPayload[QLatin1String("tracking")] = trackingObj;
+    
+    // 8. LbPose 配置
+    QJsonObject lbPoseObj;
+    lbPoseObj[QLatin1String("dataRoot")] = cfgMgr->lbPoseConfig().dataRoot;
+    lbPoseObj[QLatin1String("leftPattern")] = cfgMgr->lbPoseConfig().leftPattern;
+    lbPoseObj[QLatin1String("rightPattern")] = cfgMgr->lbPoseConfig().rightPattern;
+    lbPoseObj[QLatin1String("templateFile")] = cfgMgr->lbPoseConfig().templateFile;
+    lbPoseObj[QLatin1String("minDistance")] = static_cast<double>(cfgMgr->lbPoseConfig().minDistance);
+    lbPoseObj[QLatin1String("maxDistance")] = static_cast<double>(cfgMgr->lbPoseConfig().maxDistance);
+    lbPoseObj[QLatin1String("cosTolerance")] = static_cast<double>(cfgMgr->lbPoseConfig().cosTolerance);
+    lbPoseObj[QLatin1String("minPercent")] = static_cast<double>(cfgMgr->lbPoseConfig().minPercent);
+    configPayload[QLatin1String("lbPose")] = lbPoseObj;
+    
+    // 构建响应
+    QJsonObject payload = buildResponsePayload(true, QStringLiteral("Configuration retrieved"));
+    payload[QLatin1String("config")] = configPayload;
+    
+    QJsonObject envelope;
+    envelope[QStringLiteral("version")]   = QLatin1String(kProtocolVersion);
+    envelope[QStringLiteral("msgId")]     = msgId;
+    envelope[QStringLiteral("type")]      = QLatin1String(msg_type::kCmdGetConfig);
+    envelope[QStringLiteral("timestamp")] = QDateTime::currentMSecsSinceEpoch();
+    envelope[QStringLiteral("payload")]   = payload;
+    sendToClient(envelope);
 }
 
 void HmiTcpServer::handleCmdModbusConnect(const QJsonObject& message)
@@ -364,10 +461,14 @@ void HmiTcpServer::handleCmdModbusDisconnect(const QJsonObject& message)
 void HmiTcpServer::handleCmdRefreshCamera(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
+    
+    // 刷新 MechEye 3D 相机连接状态
     if (m_mechEyeService) {
-        // 由于没有直接重新连接的方法，可以调用一个占位日志或者进行状态查询
-        sendResponse(QLatin1String(msg_type::kCmdRefreshCamera), msgId, true, QStringLiteral("Camera refreshed"));
+        qInfo(LOG_HMI_SERVER) << "[TCPIP] 收到相机刷新请求，正在刷新 MechEye 相机状态...";
+        m_mechEyeService->requestRefreshStatus();
+        sendResponse(QLatin1String(msg_type::kCmdRefreshCamera), msgId, true, QStringLiteral("Camera refresh requested"));
     } else {
+        qWarning(LOG_HMI_SERVER) << "[TCPIP] 相机刷新失败：MechEye 服务不可用";
         sendResponse(QLatin1String(msg_type::kCmdRefreshCamera), msgId, false, QStringLiteral("Camera service unavailable"));
     }
 }
