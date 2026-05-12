@@ -1,5 +1,6 @@
-﻿add_subdirectory(mech_eye)
+add_subdirectory(mech_eye)
 add_subdirectory(vision)
 add_subdirectory(tracking)
 add_subdirectory(modbus)
 add_subdirectory(flow_control)
+add_subdirectory(hmi_server)

@@ -61,6 +61,19 @@ public:
     // @return 当前应用状态
     AppState currentState() const { return m_state; }
 
+    protocol::IpcState ipcState() const { return m_ipcState; }
+    protocol::Stage currentStage() const { return m_currentStage; }
+    quint16 alarmLevel() const { return m_alarmLevel; }
+    quint16 alarmCode() const { return m_alarmCode; }
+    quint16 warnCode() const { return m_warnCode; }
+    quint16 progress() const { return m_progress; }
+
+    // 设置报警
+    // @param level 报警级别
+    // @param code 报警代码
+    // @param message 报警信息
+    void setAlarm(quint16 level, quint16 code, const QString& message);
+
 signals:
     // 状态改变信号
     // @param newState 新的状态
@@ -228,12 +241,6 @@ private:
 
     // 清空扫描分段缓存（点云 + 视觉 bundle）
     void resetScanSegmentCache();
-
-    // 设置报警
-    // @param level 报警级别
-    // @param code 报警代码
-    // @param message 报警信息
-    void setAlarm(quint16 level, quint16 code, const QString& message);
 
     // 记录 Modbus 故障
     // @param alarmCode 报警代码

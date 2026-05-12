@@ -14,7 +14,7 @@
 #include <iomanip> 
 #include <cmath>    
 #include <pcl/common/transforms.h> 
-#include <pcl/common/common.h>     
+#include <pcl/common/common.h>
 #include <pcl/filters/passthrough.h> 
 #include <Eigen/Eigenvalues>
 
@@ -144,7 +144,6 @@ bool PointsModel::EuclideanClusterExtraction(
         extract.filter(*cluster);
         cluster_clouds.push_back(cluster);
     }
-
     return true;
 }
 
