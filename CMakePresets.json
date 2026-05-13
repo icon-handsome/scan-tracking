@@ -11,11 +11,17 @@
       "hidden": true,
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
+      "environment": {
+        "INCLUDE": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.29.30133/include;C:/Program Files/Microsoft Visual Studio/18/Community/VC/Auxiliary/VS/include;C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/cppwinrt;C:/Program Files (x86)/Windows Kits/NETFXSDK/4.8/include/um",
+        "LIB": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.29.30133/lib/x64;C:/Program Files (x86)/Windows Kits/NETFXSDK/4.8/lib/um/x64;C:/Program Files (x86)/Windows Kits/10/lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/lib/10.0.26100.0/um/x64",
+        "LIBPATH": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.29.30133/lib/x64;C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.29.30133/lib/x86/store/references;C:/Program Files (x86)/Windows Kits/10/UnionMetadata/10.0.26100.0;C:/Program Files (x86)/Windows Kits/10/References/10.0.26100.0;C:/Windows/Microsoft.NET/Framework64/v4.0.30319",
+        "PATH": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.29.30133/bin/Hostx64/x64;C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/VCPackages;C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64;C:/Program Files (x86)/Windows Kits/10/bin/x64;$penv{PATH}"
+      },
       "cacheVariables": {
-        "CMAKE_PREFIX_PATH": "C:/Qt/Qt5.12.12/5.12.12/msvc2017_64",
-        "Qt5_DIR": "C:/Qt/Qt5.12.12/5.12.12/msvc2017_64/lib/cmake/Qt5",
-        "CMAKE_C_COMPILER": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe",
-        "CMAKE_CXX_COMPILER": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe",
+        "CMAKE_PREFIX_PATH": "C:/Qt/5.15.2/msvc2019_64",
+        "Qt5_DIR": "C:/Qt/5.15.2/msvc2019_64/lib/cmake/Qt5",
+        "CMAKE_C_COMPILER": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.29.30133/bin/Hostx64/x64/cl.exe",
+        "CMAKE_CXX_COMPILER": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.29.30133/bin/Hostx64/x64/cl.exe",
         "CMAKE_RC_COMPILER": "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/rc.exe",
         "CMAKE_MT": "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/mt.exe",
         "WindowsSdkDir": "C:/Program Files (x86)/Windows Kits/10/",

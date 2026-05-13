@@ -1,8 +1,10 @@
 ﻿# CMake / Build
 build/
 build-*/
+out/
 testdata/
-tools/
+tools/*
+!tools/scan_tracking_dev.cmd
 first/
 .cmake/
 CMakeLists.txt.user

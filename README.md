@@ -5,7 +5,8 @@
 ## 本机环境
 
 - Windows + MSVC
-- Qt 5.12.12
+- Qt 5.15.2: `C:\Qt\5.15.2\msvc2019_64`
+- MSVC v142 / 19.29 x64: `C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.29.30133`
 - CMake 3.21+
 - Ninja
 - Windows SDK
@@ -20,6 +21,13 @@
 1. 用 Visual Studio 打开仓库根目录 `D:\work\LY\IPC-192.168.110.173_track-main`
 2. 选择 CMake 预设 `win-msvc2019-qtcore-ninja-debug`
 3. 直接运行 `scan-tracking.exe`
+
+项目默认启用严格工具链检查。请固定使用仓库内 CMake 预设：
+
+- `win-msvc2019-qtcore-ninja-debug`
+- `win-msvc2019-qtcore-ninja-release`
+
+不要使用 Qt Creator 自动生成的旧 Kit、`out/` 缓存目录，或未带 preset 的手写 CMake 配置；选错 Qt、MSVC 版本或 x86 工具链时，CMake 会在配置阶段直接报错。
 
 ## 配置
 
