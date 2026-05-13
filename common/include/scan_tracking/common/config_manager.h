@@ -44,6 +44,7 @@ struct VisionConfig {
     QString hikSdkRoot;
     VisionCameraEndpointConfig hikCameraA;
     VisionCameraEndpointConfig hikCameraB;
+    VisionCameraEndpointConfig hikCameraC;
 };
 
 struct FlowControlConfig {

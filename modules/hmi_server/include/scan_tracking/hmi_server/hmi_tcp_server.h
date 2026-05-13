@@ -14,6 +14,7 @@
  */
 
 #include <QtCore/QObject>
+#include <QtCore/QHash>
 #include <QtCore/QTimer>
 #include <QtCore/QString>
 

@@ -173,34 +173,34 @@ void HmiTcpServer::onSessionHeartbeatTimeout()
 void HmiTcpServer::initializeMessageHandlers()
 {
     // 连接管理消息
-    m_messageHandlers[QLatin1String(msg_type::kHmiHello)]       = &HmiTcpServer::handleHmiHello;
-    m_messageHandlers[QLatin1String(msg_type::kHeartbeatPing)]  = &HmiTcpServer::handleHeartbeatPing;
-    m_messageHandlers[QLatin1String(msg_type::kHeartbeatPong)]  = &HmiTcpServer::handleHeartbeatPong;
+    m_messageHandlers[QString::fromLatin1(msg_type::kHmiHello)]       = &HmiTcpServer::handleHmiHello;
+    m_messageHandlers[QString::fromLatin1(msg_type::kHeartbeatPing)]  = &HmiTcpServer::handleHeartbeatPing;
+    m_messageHandlers[QString::fromLatin1(msg_type::kHeartbeatPong)]  = &HmiTcpServer::handleHeartbeatPong;
     
     // 基础控制命令
-    m_messageHandlers[QLatin1String(msg_type::kCmdStart)]       = &HmiTcpServer::handleCmdStart;
-    m_messageHandlers[QLatin1String(msg_type::kCmdStop)]        = &HmiTcpServer::handleCmdStop;
-    m_messageHandlers[QLatin1String(msg_type::kCmdReset)]       = &HmiTcpServer::handleCmdReset;
-    m_messageHandlers[QLatin1String(msg_type::kCmdClearAlarm)]  = &HmiTcpServer::handleCmdClearAlarm;
-    m_messageHandlers[QLatin1String(msg_type::kCmdGetStatus)]   = &HmiTcpServer::handleCmdGetStatus;
-    m_messageHandlers[QLatin1String(msg_type::kCmdGetConfig)]   = &HmiTcpServer::handleCmdGetConfig;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdStart)]       = &HmiTcpServer::handleCmdStart;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdStop)]        = &HmiTcpServer::handleCmdStop;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdReset)]       = &HmiTcpServer::handleCmdReset;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdClearAlarm)]  = &HmiTcpServer::handleCmdClearAlarm;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdGetStatus)]   = &HmiTcpServer::handleCmdGetStatus;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdGetConfig)]   = &HmiTcpServer::handleCmdGetConfig;
     
     // Modbus 控制命令
-    m_messageHandlers[QLatin1String(msg_type::kCmdModbusConnect)]    = &HmiTcpServer::handleCmdModbusConnect;
-    m_messageHandlers[QLatin1String(msg_type::kCmdModbusDisconnect)] = &HmiTcpServer::handleCmdModbusDisconnect;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdModbusConnect)]    = &HmiTcpServer::handleCmdModbusConnect;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdModbusDisconnect)] = &HmiTcpServer::handleCmdModbusDisconnect;
     
     // 相机控制命令
-    m_messageHandlers[QLatin1String(msg_type::kCmdRefreshCamera)]    = &HmiTcpServer::handleCmdRefreshCamera;
-    m_messageHandlers[QLatin1String(msg_type::kCmdCaptureMechEye)]   = &HmiTcpServer::handleCmdCaptureMechEye;
-    m_messageHandlers[QLatin1String(msg_type::kCmdCaptureBundle)]    = &HmiTcpServer::handleCmdCaptureBundle;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdRefreshCamera)]    = &HmiTcpServer::handleCmdRefreshCamera;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdCaptureMechEye)]   = &HmiTcpServer::handleCmdCaptureMechEye;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdCaptureBundle)]    = &HmiTcpServer::handleCmdCaptureBundle;
     
     // 直接触发命令（占位实现）
-    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerScan)]         = &HmiTcpServer::handleCmdTriggerScan;
-    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerInspection)]   = &HmiTcpServer::handleCmdTriggerInspection;
-    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerSelfCheck)]    = &HmiTcpServer::handleCmdTriggerSelfCheck;
-    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerPoseCheck)]    = &HmiTcpServer::handleCmdTriggerPoseCheck;
-    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerCodeRead)]     = &HmiTcpServer::handleCmdTriggerCodeRead;
-    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerResultReset)]  = &HmiTcpServer::handleCmdTriggerResultReset;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdTriggerScan)]         = &HmiTcpServer::handleCmdTriggerScan;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdTriggerInspection)]   = &HmiTcpServer::handleCmdTriggerInspection;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdTriggerSelfCheck)]    = &HmiTcpServer::handleCmdTriggerSelfCheck;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdTriggerPoseCheck)]    = &HmiTcpServer::handleCmdTriggerPoseCheck;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdTriggerCodeRead)]     = &HmiTcpServer::handleCmdTriggerCodeRead;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdTriggerResultReset)]  = &HmiTcpServer::handleCmdTriggerResultReset;
 }
 
 // 处理接收到的客户端消息，根据 type 字段分发到不同的处理函数

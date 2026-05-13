@@ -108,6 +108,10 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("hikCameraBKey", "192.168.10.13");
     settings.setValue("hikCameraBIp", "192.168.10.13");
     settings.setValue("hikCameraBSerial", "");
+    settings.setValue("hikCameraCName", "hik_camera_c");
+    settings.setValue("hikCameraCKey", "192.168.8.100");
+    settings.setValue("hikCameraCIp", "192.168.8.100");
+    settings.setValue("hikCameraCSerial", "");
     settings.endGroup();
 
     settings.beginGroup("LbPose");
@@ -185,6 +189,10 @@ void ConfigManager::load(const QString& filePath)
     m_visionConfig.hikCameraB.cameraKey = settings.value("hikCameraBKey", "192.168.10.13").toString();
     m_visionConfig.hikCameraB.ipAddress = settings.value("hikCameraBIp", "192.168.10.13").toString();
     m_visionConfig.hikCameraB.serialNumber = settings.value("hikCameraBSerial", "").toString();
+    m_visionConfig.hikCameraC.logicalName = settings.value("hikCameraCName", "hik_camera_c").toString();
+    m_visionConfig.hikCameraC.cameraKey = settings.value("hikCameraCKey", "192.168.8.100").toString();
+    m_visionConfig.hikCameraC.ipAddress = settings.value("hikCameraCIp", "192.168.8.100").toString();
+    m_visionConfig.hikCameraC.serialNumber = settings.value("hikCameraCSerial", "").toString();
     settings.endGroup();
 
     settings.beginGroup("LbPose");

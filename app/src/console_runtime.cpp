@@ -19,6 +19,7 @@
 #include "scan_tracking/tracking/tracking_service.h"
 #include "scan_tracking/vision/hik_camera_service.h"
 #include "scan_tracking/vision/vision_pipeline_service.h"
+#include "scan_tracking/vision/hik_camera_c_controller.h"
 #include "scan_tracking/vision/vision_types.h"
 #include "scan_tracking/hmi_server/hmi_tcp_server.h"
 
@@ -149,6 +150,58 @@ void ConsoleRuntime::initModules()
     hikCameraAService_->start(visionConfig.hikCameraA, visionConfig.hikCaptureTimeoutMs);
     hikCameraBService_->start(visionConfig.hikCameraB, visionConfig.hikCaptureTimeoutMs);
 
+    // 第三台海康相机（独立用途，不同型号）
+    hikCameraCService_ = std::make_unique<scan_tracking::vision::HikCameraService>(
+        QStringLiteral("hik_camera_c"));
+
+    QObject::connect(
+        hikCameraCService_.get(),
+        &scan_tracking::vision::HikCameraService::stateChanged,
+        [](const QString& roleName, const QString& stateText, const QString& description) {
+            qInfo(appLog) << "[HikCamera]" << roleName << stateText << description;
+        });
+    QObject::connect(
+        hikCameraCService_.get(),
+        &scan_tracking::vision::HikCameraService::fatalError,
+        [](scan_tracking::vision::VisionErrorCode code, const QString& message) {
+            qCritical(appLog) << "[HikCamera] hik_camera_c fatal error:" 
+                              << static_cast<int>(code) << message;
+        });
+
+    hikCameraCService_->start(visionConfig.hikCameraC, visionConfig.hikCaptureTimeoutMs);
+    qInfo(appLog) << "HikCamera C service started.";
+
+    // 海康相机 C 控制器（独立管理第三台相机）
+    hikCameraCController_ = std::make_unique<scan_tracking::vision::HikCameraCController>(
+        hikCameraCService_.get());
+
+    QObject::connect(
+        hikCameraCController_.get(),
+        &scan_tracking::vision::HikCameraCController::stateChanged,
+        [](scan_tracking::vision::HikCameraCState state, const QString& description) {
+            qInfo(appLog) << "[HikCameraCController] state =" << static_cast<int>(state) << description;
+        });
+    QObject::connect(
+        hikCameraCController_.get(),
+        &scan_tracking::vision::HikCameraCController::testCaptureFinished,
+        [](const scan_tracking::vision::HikPoseCaptureResult& result) {
+            qInfo(appLog) << "[HikCameraCController] Test capture finished:"
+                          << "requestId=" << result.requestId
+                          << "success=" << result.success()
+                          << "frame=" << result.frame.width << "x" << result.frame.height
+                          << "elapsed=" << result.elapsedMs << "ms";
+        });
+    QObject::connect(
+        hikCameraCController_.get(),
+        &scan_tracking::vision::HikCameraCController::fatalError,
+        [](scan_tracking::vision::VisionErrorCode code, const QString& message) {
+            qCritical(appLog) << "[HikCameraCController] fatal error:" 
+                              << static_cast<int>(code) << message;
+        });
+
+    hikCameraCController_->start(visionConfig);
+    qInfo(appLog) << "HikCamera C controller started.";
+
     // 统一视觉编排层负责把“1 份点云 + 2 份矩阵”收口为一个算法输入包。
     visionPipelineService_ = std::make_unique<scan_tracking::vision::VisionPipelineService>(
         mechEyeService_.get(),
@@ -227,11 +280,17 @@ void ConsoleRuntime::printShutdownStatus()
     if (visionPipelineService_) {
         visionPipelineService_->stop();
     }
+    if (hikCameraCController_) {
+        hikCameraCController_->stop();
+    }
     if (hikCameraAService_) {
         hikCameraAService_->stop();
     }
     if (hikCameraBService_) {
         hikCameraBService_->stop();
+    }
+    if (hikCameraCService_) {
+        hikCameraCService_->stop();
     }
     if (mechEyeService_) {
         mechEyeService_->stop();
