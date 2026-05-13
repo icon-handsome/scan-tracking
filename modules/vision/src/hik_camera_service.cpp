@@ -126,7 +126,43 @@ void HikCameraService::start(
 
 void HikCameraService::stop()
 {
+    qInfo() << "[停止] === 开始停止流程 ===";
+    qInfo() << "[停止] m_captureInFlight =" << m_captureInFlight.load();
+    
     m_started = false;
+    
+    // 先停止所有正在进行的操作
+    if (m_impl != nullptr && m_impl->handle != nullptr) {
+        qInfo() << "[停止] 正在停止相机采集...";
+        // 停止采集 - 这应该会中断 GetImageBuffer/GetOneFrameTimeout
+        const int stopResult = MV_CC_StopGrabbing(m_impl->handle);
+        if (stopResult == MV_OK) {
+            qInfo() << "[停止] 相机采集已停止";
+        } else {
+            qWarning() << "[停止] StopGrabbing 失败，错误码=0x" << QString::number(stopResult, 16);
+        }
+    }
+    
+    // 等待采集线程结束（最多等待6秒，因为采图超时是5秒）
+    qInfo() << "[停止] 等待采集线程结束...";
+    int waitCount = 0;
+    const int maxWaitCount = 600;  // 6秒 = 600 * 10ms
+    while (m_captureInFlight.load() && waitCount < maxWaitCount) {
+        QThread::msleep(10);
+        ++waitCount;
+        
+        // 每秒打印一次进度
+        if (waitCount % 100 == 0) {
+            qInfo() << "[停止] 等待中..." << (waitCount / 100) << "秒";
+        }
+    }
+    
+    if (m_captureInFlight.load()) {
+        qWarning() << "[停止] 采集线程未能在" << (maxWaitCount / 100) << "秒内结束，强制继续关闭";
+    } else {
+        qInfo() << "[停止] 采集线程已结束，耗时" << (waitCount * 10) << "ms";
+    }
+    
     closeDevice();
 
     if (m_impl != nullptr && m_impl->sdkReady) {
@@ -163,13 +199,29 @@ QString HikCameraService::resolveCameraKey(const QString& preferredCameraKey) co
 
 bool HikCameraService::captureMonoFrame(int timeoutMs, const QString& cameraKey, QString* errorMessage)
 {
-    QMutexLocker locker(&m_impl->mutex);
-    if (m_impl->handle == nullptr || !m_impl->connected) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("海康相机尚未连接，无法抓取黑白图：%1").arg(cameraKey);
+    // 先获取 handle 的副本，避免在长时间等待期间持有锁
+    void* handle = nullptr;
+    {
+        QMutexLocker locker(&m_impl->mutex);
+        if (m_impl->handle == nullptr || !m_impl->connected) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("海康相机尚未连接，无法抓取黑白图：%1").arg(cameraKey);
+            }
+            return false;
         }
-        return false;
+        
+        // 检查是否正在停止
+        if (!m_started) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("相机服务正在停止，取消采图");
+            }
+            qInfo() << "[采图] 相机服务正在停止，取消采图";
+            return false;
+        }
+        
+        handle = m_impl->handle;
     }
+    // 锁已释放，可以安全地进行长时间等待
 
     // 增加超时时间到 5 秒
     const unsigned int waitMs = static_cast<unsigned int>(timeoutMs > 0 ? timeoutMs : m_defaultCaptureTimeoutMs);
@@ -181,7 +233,7 @@ bool HikCameraService::captureMonoFrame(int timeoutMs, const QString& cameraKey,
     // 这个 API 更适合连续采集模式
     
     // 相机已经在连接时启动了采集
-    const int startResult = MV_CC_StartGrabbing(m_impl->handle);
+    const int startResult = MV_CC_StartGrabbing(handle);
     if (startResult != MV_OK && startResult != MV_E_CALLORDER) {
         if (errorMessage) {
             *errorMessage = QStringLiteral("MV_CC_StartGrabbing 失败，错误码=0x%1")
@@ -199,8 +251,22 @@ bool HikCameraService::captureMonoFrame(int timeoutMs, const QString& cameraKey,
     qInfo() << "[采图] 等待图像数据...";
     
     // 尝试使用 GetImageBuffer（推荐用于连续采集）
+    // 注意：这里不持有锁，所以 handle 可能在等待期间被销毁
+    // 但 StopGrabbing 应该会中断这个调用
     MV_FRAME_OUT pFrameInfo = {0};
-    int getBufferResult = MV_CC_GetImageBuffer(m_impl->handle, &pFrameInfo, actualWaitMs);
+    int getBufferResult = MV_CC_GetImageBuffer(handle, &pFrameInfo, actualWaitMs);
+    
+    // 检查是否在等待期间被停止
+    if (!m_started) {
+        if (getBufferResult == MV_OK && pFrameInfo.pBufAddr != nullptr) {
+            MV_CC_FreeImageBuffer(handle, &pFrameInfo);
+        }
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("相机服务正在停止，采图被中断");
+        }
+        qInfo() << "[采图] 相机服务正在停止，采图被中断";
+        return false;
+    }
     
     if (getBufferResult == MV_OK && pFrameInfo.pBufAddr != nullptr) {
         qInfo() << "[采图] GetImageBuffer 成功获取图像";
@@ -227,9 +293,11 @@ bool HikCameraService::captureMonoFrame(int timeoutMs, const QString& cameraKey,
             frame.sourceCameraKey = cameraKey;
             
             // 释放图像缓冲区
-            MV_CC_FreeImageBuffer(m_impl->handle, &pFrameInfo);
+            MV_CC_FreeImageBuffer(handle, &pFrameInfo);
             
             if (frame.isValid()) {
+                // 更新状态时需要加锁
+                QMutexLocker locker(&m_impl->mutex);
                 m_impl->lastFrameWidth = width;
                 m_impl->lastFrameHeight = height;
                 m_impl->lastFrameId = pFrameInfo.stFrameInfo.nFrameNum;
@@ -242,7 +310,7 @@ bool HikCameraService::captureMonoFrame(int timeoutMs, const QString& cameraKey,
             }
         }
         
-        MV_CC_FreeImageBuffer(m_impl->handle, &pFrameInfo);
+        MV_CC_FreeImageBuffer(handle, &pFrameInfo);
     }
     
     qWarning() << "[采图] GetImageBuffer 失败，尝试 GetOneFrameTimeout，错误码=0x" << QString::number(getBufferResult, 16);
@@ -253,11 +321,20 @@ bool HikCameraService::captureMonoFrame(int timeoutMs, const QString& cameraKey,
     std::memset(&frameInfo, 0, sizeof(frameInfo));
     
     const int grabResult = MV_CC_GetOneFrameTimeout(
-        m_impl->handle,
+        handle,
         buffer.data(),
         static_cast<unsigned int>(buffer.size()),
         &frameInfo,
         actualWaitMs);
+    
+    // 再次检查是否在等待期间被停止
+    if (!m_started) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("相机服务正在停止，采图被中断");
+        }
+        qInfo() << "[采图] 相机服务正在停止，采图被中断";
+        return false;
+    }
 
     if (grabResult != MV_OK) {
         if (errorMessage) {
@@ -304,10 +381,15 @@ bool HikCameraService::captureMonoFrame(int timeoutMs, const QString& cameraKey,
         return false;
     }
 
-    m_impl->lastFrameWidth = width;
-    m_impl->lastFrameHeight = height;
-    m_impl->lastFrameId = frameInfo.nFrameNum;
-    m_impl->lastPixelFormat = QStringLiteral("Mono8");
+    // 更新状态时需要加锁
+    {
+        QMutexLocker locker(&m_impl->mutex);
+        m_impl->lastFrameWidth = width;
+        m_impl->lastFrameHeight = height;
+        m_impl->lastFrameId = frameInfo.nFrameNum;
+        m_impl->lastPixelFormat = QStringLiteral("Mono8");
+    }
+    
     if (errorMessage) {
         errorMessage->clear();
     }
@@ -499,6 +581,17 @@ bool HikCameraService::openMatchedDevice(const QString& preferredCameraKey, QStr
     // 配置相机参数
     int ret = 0;
     
+    // 检查是否为读码相机（ID Reader）
+    MVCC_STRINGVALUE deviceType;
+    memset(&deviceType, 0, sizeof(MVCC_STRINGVALUE));
+    if (MV_CC_GetStringValue(handle, "DeviceType", &deviceType) == MV_OK) {
+        QString devType = QString::fromLocal8Bit(deviceType.chCurValue);
+        qInfo() << "设备类型:" << devType;
+        if (devType.contains("ID", Qt::CaseInsensitive) || devType.contains("Reader", Qt::CaseInsensitive)) {
+            qInfo() << "检测到读码相机，使用读码模式";
+        }
+    }
+    
     // 1. 设置触发模式为关闭（连续采集）
     ret = MV_CC_SetEnumValue(handle, "TriggerMode", 0);
     if (ret != MV_OK) {
@@ -507,15 +600,15 @@ bool HikCameraService::openMatchedDevice(const QString& preferredCameraKey, QStr
         qInfo() << "设置 TriggerMode=0 (连续采集) 成功";
     }
     
-    // 2. 设置像素格式为 Mono8
+    // 2. 尝试设置像素格式为 Mono8（读码相机可能不支持）
     ret = MV_CC_SetEnumValue(handle, "PixelFormat", 0x01080001);
     if (ret != MV_OK) {
-        qWarning() << "设置 PixelFormat 失败，错误码=0x" << QString::number(ret, 16);
+        qWarning() << "设置 PixelFormat 失败（读码相机可能不支持），错误码=0x" << QString::number(ret, 16);
     } else {
         qInfo() << "设置 PixelFormat=Mono8 成功";
     }
     
-    // 3. 设置曝光时间（微秒）- 增加到 50ms
+    // 3. 设置曝光时间（微秒）
     ret = MV_CC_SetFloatValue(handle, "ExposureTime", 50000.0f);
     if (ret != MV_OK) {
         qWarning() << "设置 ExposureTime 失败，错误码=0x" << QString::number(ret, 16);
@@ -551,7 +644,13 @@ bool HikCameraService::openMatchedDevice(const QString& preferredCameraKey, QStr
         qInfo() << "设置 AcquisitionMode=2 (Continuous)";
     }
     
-    // 7. 启动采集（提前启动，让相机开始准备图像）
+    // 7. 对于读码相机，尝试启用图像输出
+    ret = MV_CC_SetBoolValue(handle, "ImageOutputEnable", true);
+    if (ret == MV_OK) {
+        qInfo() << "启用图像输出成功（读码相机）";
+    }
+    
+    // 8. 启动采集（提前启动，让相机开始准备图像）
     ret = MV_CC_StartGrabbing(handle);
     if (ret != MV_OK) {
         qWarning() << "提前启动采集失败，错误码=0x" << QString::number(ret, 16);

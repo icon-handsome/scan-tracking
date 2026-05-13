@@ -18,7 +18,7 @@
 #include "scan_tracking/mech_eye/mech_eye_types.h"
 
 namespace scan_tracking {
-namespace tracking {
+namespace tracking {    
 
 /// 检测结果结构体，封装第一工位综合检测的完整输出
 struct InspectionResult {

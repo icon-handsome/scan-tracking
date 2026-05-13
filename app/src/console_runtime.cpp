@@ -150,7 +150,7 @@ void ConsoleRuntime::initModules()
     hikCameraAService_->start(visionConfig.hikCameraA, visionConfig.hikCaptureTimeoutMs);
     hikCameraBService_->start(visionConfig.hikCameraB, visionConfig.hikCaptureTimeoutMs);
 
-    // 第三台海康相机（独立用途，不同型号）
+    // 第三台海康相机（独立用途，不同型号 - 读码相机）
     hikCameraCService_ = std::make_unique<scan_tracking::vision::HikCameraService>(
         QStringLiteral("hik_camera_c"));
 
@@ -169,9 +169,10 @@ void ConsoleRuntime::initModules()
         });
 
     hikCameraCService_->start(visionConfig.hikCameraC, visionConfig.hikCaptureTimeoutMs);
-    qInfo(appLog) << "HikCamera C service started.";
+    qInfo(appLog) << "HikCamera C service started (connection only, no capture).";
 
     // 海康相机 C 控制器（独立管理第三台相机）
+    // 注意：已移除自动采图功能，只保留连接监控
     hikCameraCController_ = std::make_unique<scan_tracking::vision::HikCameraCController>(
         hikCameraCService_.get());
 
@@ -183,16 +184,6 @@ void ConsoleRuntime::initModules()
         });
     QObject::connect(
         hikCameraCController_.get(),
-        &scan_tracking::vision::HikCameraCController::testCaptureFinished,
-        [](const scan_tracking::vision::HikPoseCaptureResult& result) {
-            qInfo(appLog) << "[HikCameraCController] Test capture finished:"
-                          << "requestId=" << result.requestId
-                          << "success=" << result.success()
-                          << "frame=" << result.frame.width << "x" << result.frame.height
-                          << "elapsed=" << result.elapsedMs << "ms";
-        });
-    QObject::connect(
-        hikCameraCController_.get(),
         &scan_tracking::vision::HikCameraCController::fatalError,
         [](scan_tracking::vision::VisionErrorCode code, const QString& message) {
             qCritical(appLog) << "[HikCameraCController] fatal error:" 
@@ -200,7 +191,7 @@ void ConsoleRuntime::initModules()
         });
 
     hikCameraCController_->start(visionConfig);
-    qInfo(appLog) << "HikCamera C controller started.";
+    qInfo(appLog) << "HikCamera C controller started (connection monitoring only).";
 
     // 统一视觉编排层负责把“1 份点云 + 2 份矩阵”收口为一个算法输入包。
     visionPipelineService_ = std::make_unique<scan_tracking::vision::VisionPipelineService>(
