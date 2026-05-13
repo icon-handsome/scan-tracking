@@ -49,6 +49,9 @@ HmiTcpServer::HmiTcpServer(int port, QObject* parent)
 
     m_heartbeatTimer->setInterval(2000); // 2000ms 心跳
     connect(m_heartbeatTimer, &QTimer::timeout, this, &HmiTcpServer::onHeartbeatTimer);
+    
+    // 初始化消息处理函数映射表
+    initializeMessageHandlers();
 }
 
 HmiTcpServer::~HmiTcpServer()
@@ -165,6 +168,41 @@ void HmiTcpServer::onSessionHeartbeatTimeout()
         m_session->disconnect();
     }
 }
+
+// 初始化消息处理函数映射表
+void HmiTcpServer::initializeMessageHandlers()
+{
+    // 连接管理消息
+    m_messageHandlers[QLatin1String(msg_type::kHmiHello)]       = &HmiTcpServer::handleHmiHello;
+    m_messageHandlers[QLatin1String(msg_type::kHeartbeatPing)]  = &HmiTcpServer::handleHeartbeatPing;
+    m_messageHandlers[QLatin1String(msg_type::kHeartbeatPong)]  = &HmiTcpServer::handleHeartbeatPong;
+    
+    // 基础控制命令
+    m_messageHandlers[QLatin1String(msg_type::kCmdStart)]       = &HmiTcpServer::handleCmdStart;
+    m_messageHandlers[QLatin1String(msg_type::kCmdStop)]        = &HmiTcpServer::handleCmdStop;
+    m_messageHandlers[QLatin1String(msg_type::kCmdReset)]       = &HmiTcpServer::handleCmdReset;
+    m_messageHandlers[QLatin1String(msg_type::kCmdClearAlarm)]  = &HmiTcpServer::handleCmdClearAlarm;
+    m_messageHandlers[QLatin1String(msg_type::kCmdGetStatus)]   = &HmiTcpServer::handleCmdGetStatus;
+    m_messageHandlers[QLatin1String(msg_type::kCmdGetConfig)]   = &HmiTcpServer::handleCmdGetConfig;
+    
+    // Modbus 控制命令
+    m_messageHandlers[QLatin1String(msg_type::kCmdModbusConnect)]    = &HmiTcpServer::handleCmdModbusConnect;
+    m_messageHandlers[QLatin1String(msg_type::kCmdModbusDisconnect)] = &HmiTcpServer::handleCmdModbusDisconnect;
+    
+    // 相机控制命令
+    m_messageHandlers[QLatin1String(msg_type::kCmdRefreshCamera)]    = &HmiTcpServer::handleCmdRefreshCamera;
+    m_messageHandlers[QLatin1String(msg_type::kCmdCaptureMechEye)]   = &HmiTcpServer::handleCmdCaptureMechEye;
+    m_messageHandlers[QLatin1String(msg_type::kCmdCaptureBundle)]    = &HmiTcpServer::handleCmdCaptureBundle;
+    
+    // 直接触发命令（占位实现）
+    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerScan)]         = &HmiTcpServer::handleCmdTriggerScan;
+    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerInspection)]   = &HmiTcpServer::handleCmdTriggerInspection;
+    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerSelfCheck)]    = &HmiTcpServer::handleCmdTriggerSelfCheck;
+    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerPoseCheck)]    = &HmiTcpServer::handleCmdTriggerPoseCheck;
+    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerCodeRead)]     = &HmiTcpServer::handleCmdTriggerCodeRead;
+    m_messageHandlers[QLatin1String(msg_type::kCmdTriggerResultReset)]  = &HmiTcpServer::handleCmdTriggerResultReset;
+}
+
 // 处理接收到的客户端消息，根据 type 字段分发到不同的处理函数
 void HmiTcpServer::onMessageReceived(const QJsonObject& message)
 {
@@ -184,55 +222,17 @@ void HmiTcpServer::onMessageReceived(const QJsonObject& message)
     
     // ------------------------------------------------------------------
     // 2. 通信协议命令分发路由 (Dispatcher)
-    // 根据解析出来的 type 字符串，将请求精确投递给对应的处理函数。
+    // 使用 QHash 映射表进行 O(1) 时间复杂度的快速查找和分发。
     // 说明：所有 handleXxx 函数内部都会在执行完具体业务后，通过 sendResponse() 
     // 回传与该请求 msgId 完全一致的响应结果给显控界面，形成请求-响应的闭环。
     // ------------------------------------------------------------------
-	if (type == QLatin1String(msg_type::kHmiHello)) { 
-        handleHmiHello(message);
-	}else if (type == QLatin1String(msg_type::kHeartbeatPing)) {   
-        handleHeartbeatPing(message);
-    } else if (type == QLatin1String(msg_type::kHeartbeatPong)) {
-        handleHeartbeatPong(message);
-	}else if (type == QLatin1String(msg_type::kCmdStart)) {    
-        handleCmdStart(message);
-    } else if (type == QLatin1String(msg_type::kCmdStop)) {
-        handleCmdStop(message);
-    } else if (type == QLatin1String(msg_type::kCmdGetStatus)) {
-        handleCmdGetStatus(message);
-    } else if (type == QLatin1String(msg_type::kCmdReset)) {
-        handleCmdReset(message);
-    } else if (type == QLatin1String(msg_type::kCmdClearAlarm)) {
-        handleCmdClearAlarm(message);
-    } else if (type == QLatin1String(msg_type::kCmdGetConfig)) {
-        handleCmdGetConfig(message);
-    } else if (type == QLatin1String(msg_type::kCmdModbusConnect)) {
-        handleCmdModbusConnect(message);
-    } else if (type == QLatin1String(msg_type::kCmdModbusDisconnect)) {
-        handleCmdModbusDisconnect(message);
-    } else if (type == QLatin1String(msg_type::kCmdRefreshCamera)) {
-        handleCmdRefreshCamera(message);
-    } else if (type == QLatin1String(msg_type::kCmdTriggerScan)) {
-        handleCmdTriggerScan(message);
-    } else if (type == QLatin1String(msg_type::kCmdTriggerInspection)) {
-        handleCmdTriggerInspection(message);
-    } else if (type == QLatin1String(msg_type::kCmdTriggerSelfCheck)) {
-        handleCmdTriggerSelfCheck(message);
-    } else if (type == QLatin1String(msg_type::kCmdTriggerPoseCheck)) {
-        handleCmdTriggerPoseCheck(message);
-    } else if (type == QLatin1String(msg_type::kCmdTriggerCodeRead)) {
-        handleCmdTriggerCodeRead(message);
-    } else if (type == QLatin1String(msg_type::kCmdTriggerResultReset)) {
-        handleCmdTriggerResultReset(message);
-    } else if (type == QLatin1String(msg_type::kCmdCaptureMechEye)) {
-        handleCmdCaptureMechEye(message);
-    } else if (type == QLatin1String(msg_type::kCmdCaptureBundle)) {
-        handleCmdCaptureBundle(message);
-    }
-    // ... 其他命令处理
-    else {
+    auto it = m_messageHandlers.find(type);
+    if (it != m_messageHandlers.end()) {
+        // 找到对应的处理函数，调用成员函数指针
+        (this->*it.value())(message);
+    } else {
+        // 未知消息类型，返回错误响应
         qWarning(LOG_HMI_SERVER) << "收到未知类型的消息:" << type;
-        const QString msgId = message.value(QLatin1String("msgId")).toString();
         sendResponse(type, msgId, false, QStringLiteral("Unknown command type"));
     }
 }

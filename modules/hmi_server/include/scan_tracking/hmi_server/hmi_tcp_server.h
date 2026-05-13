@@ -88,6 +88,12 @@ private slots:
 private:
     // --- 命令处理函数 ---
     
+    /// 消息处理函数指针类型定义
+    using MessageHandler = void (HmiTcpServer::*)(const QJsonObject&);
+    
+    /// 初始化消息处理函数映射表
+    void initializeMessageHandlers();
+    
     /// 处理 Qt 端的 hmi.hello 握手请求
     void handleHmiHello(const QJsonObject& message);
     
@@ -223,6 +229,9 @@ private:
     tracking::TrackingService* m_trackingService = nullptr;
     vision::HikCameraService* m_hikCameraA = nullptr;
     vision::HikCameraService* m_hikCameraB = nullptr;
+    
+    /// 消息类型到处理函数的映射表（用于快速分发消息）
+    QHash<QString, MessageHandler> m_messageHandlers;
     
     /// 全局日志拦截器回调需要访问当前实例，使用静态指针保存（单实例模式）
     static HmiTcpServer* s_instance;
