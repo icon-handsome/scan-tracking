@@ -171,8 +171,8 @@ void ConsoleRuntime::initModules()
     hikCameraCService_->start(visionConfig.hikCameraC, visionConfig.hikCaptureTimeoutMs);
     qInfo(appLog) << "HikCamera C service started (connection only, no capture).";
 
-    // 海康相机 C 控制器（独立管理第三台相机）
-    // 注意：已移除自动采图功能，只保留连接监控
+    // 海康相机 C 控制器（独立管理第三台相机 - 智能相机）
+    // 使用 TCP 通信协议进行控制和图像获取
     hikCameraCController_ = std::make_unique<scan_tracking::vision::HikCameraCController>(
         hikCameraCService_.get());
 
@@ -189,9 +189,32 @@ void ConsoleRuntime::initModules()
             qCritical(appLog) << "[HikCameraCController] fatal error:" 
                               << static_cast<int>(code) << message;
         });
+    QObject::connect(
+        hikCameraCController_.get(),
+        &scan_tracking::vision::HikCameraCController::captureCompleted,
+        [](scan_tracking::vision::CaptureType type, const QByteArray& imageData) {
+            QString typeStr;
+            switch (type) {
+                case scan_tracking::vision::CaptureType::SurfaceDefect:
+                    typeStr = "SurfaceDefect";
+                    break;
+                case scan_tracking::vision::CaptureType::WeldDefect:
+                    typeStr = "WeldDefect";
+                    break;
+                case scan_tracking::vision::CaptureType::NumberRecognition:
+                    typeStr = "NumberRecognition";
+                    break;
+                default:
+                    typeStr = "Unknown";
+                    break;
+            }
+            qInfo(appLog) << "[HikCameraCController] Capture completed, type:" << typeStr
+                          << "image size:" << imageData.size() << "bytes";
+        });
 
     hikCameraCController_->start(visionConfig);
-    qInfo(appLog) << "HikCamera C controller started (connection monitoring only).";
+    qInfo(appLog) << "HikCamera C controller started (TCP communication mode).";
+
 
     // 统一视觉编排层负责把“1 份点云 + 2 份矩阵”收口为一个算法输入包。
     visionPipelineService_ = std::make_unique<scan_tracking::vision::VisionPipelineService>(

@@ -126,41 +126,27 @@ void HikCameraService::start(
 
 void HikCameraService::stop()
 {
-    qInfo() << "[停止] === 开始停止流程 ===";
-    qInfo() << "[停止] m_captureInFlight =" << m_captureInFlight.load();
-    
     m_started = false;
     
     // 先停止所有正在进行的操作
     if (m_impl != nullptr && m_impl->handle != nullptr) {
-        qInfo() << "[停止] 正在停止相机采集...";
         // 停止采集 - 这应该会中断 GetImageBuffer/GetOneFrameTimeout
         const int stopResult = MV_CC_StopGrabbing(m_impl->handle);
-        if (stopResult == MV_OK) {
-            qInfo() << "[停止] 相机采集已停止";
-        } else {
-            qWarning() << "[停止] StopGrabbing 失败，错误码=0x" << QString::number(stopResult, 16);
+        if (stopResult != MV_OK) {
+            qWarning() << "StopGrabbing failed, error code=0x" << QString::number(stopResult, 16);
         }
     }
     
     // 等待采集线程结束（最多等待6秒，因为采图超时是5秒）
-    qInfo() << "[停止] 等待采集线程结束...";
     int waitCount = 0;
     const int maxWaitCount = 600;  // 6秒 = 600 * 10ms
     while (m_captureInFlight.load() && waitCount < maxWaitCount) {
         QThread::msleep(10);
         ++waitCount;
-        
-        // 每秒打印一次进度
-        if (waitCount % 100 == 0) {
-            qInfo() << "[停止] 等待中..." << (waitCount / 100) << "秒";
-        }
     }
     
     if (m_captureInFlight.load()) {
-        qWarning() << "[停止] 采集线程未能在" << (maxWaitCount / 100) << "秒内结束，强制继续关闭";
-    } else {
-        qInfo() << "[停止] 采集线程已结束，耗时" << (waitCount * 10) << "ms";
+        qWarning() << "Capture thread did not finish within" << (maxWaitCount / 100) << "seconds, forcing shutdown";
     }
     
     closeDevice();

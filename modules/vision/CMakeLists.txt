@@ -1,11 +1,13 @@
 add_library(scan_tracking_vision STATIC
     src/hik_camera_service.cpp
     src/hik_camera_c_controller.cpp
+    src/hik_smart_camera_tcp_server.cpp
     src/lb_pose_detection_adapter.cpp
     src/vision_pipeline_service.cpp
     include/scan_tracking/vision/vision_types.h
     include/scan_tracking/vision/hik_camera_service.h
     include/scan_tracking/vision/hik_camera_c_controller.h
+    include/scan_tracking/vision/hik_smart_camera_tcp_server.h
     include/scan_tracking/vision/lb_pose_detection_adapter.h
     include/scan_tracking/vision/vision_pipeline_service.h
 )
@@ -23,6 +25,7 @@ target_include_directories(scan_tracking_vision
 target_link_libraries(scan_tracking_vision
     PUBLIC
         Qt5::Core
+        Qt5::Network
         scan_tracking_common
         scan_tracking_mech_eye
     PRIVATE
