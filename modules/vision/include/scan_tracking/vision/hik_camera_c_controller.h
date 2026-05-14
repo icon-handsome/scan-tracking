@@ -9,12 +9,14 @@
 
 #include "scan_tracking/common/config_manager.h"
 #include "scan_tracking/vision/vision_types.h"
+#include "scan_tracking/vision/hik_smart_camera_ftp_monitor.h"
 
 namespace scan_tracking {
 namespace vision {
 
 class HikCameraService;
 class HikSmartCameraTcpServer;
+class HikSmartCameraFtpMonitor;
 
 enum class HikCameraCState {
     Idle = 0,
@@ -42,13 +44,16 @@ public:
 
     void start(const scan_tracking::common::VisionConfig& config);
     void stop();
-
     bool isStarted() const { return m_started; }
     HikCameraCState state() const { return m_state; }
 
     // TCP 通信接口
     bool isTcpServerRunning() const;
     bool isCameraConnectedToTcp() const;
+    
+    // FTP 监控接口
+    bool isFtpMonitorRunning() const;
+    QString ftpDirectory() const;
     
     // 拍照接口
     bool requestCapture(CaptureType type = CaptureType::SurfaceDefect);
@@ -60,6 +65,7 @@ signals:
     void stateChanged(scan_tracking::vision::HikCameraCState state, QString description);
     void fatalError(scan_tracking::vision::VisionErrorCode code, QString message);
     void captureCompleted(CaptureType type, QByteArray imageData);
+    void imageReceived(CaptureType type, QString filePath, qint64 fileSize);  // FTP图像接收信号
 
 private slots:
     void onCameraCStateChanged(QString roleName, QString stateText, QString description);
@@ -75,6 +81,13 @@ private slots:
     void onTcpImageDataReceived(QString cameraIp, QByteArray imageData);
     void onTcpError(QString errorMessage);
     
+    // FTP 监控器信号槽
+    void onFtpMonitorStarted(QString directory);
+    void onFtpMonitorStopped();
+    void onFtpNewImageDetected(ImageFileInfo imageInfo);
+    void onFtpImageReady(ImageFileInfo imageInfo);
+    void onFtpError(QString errorMessage);
+    
     // 测试定时器
     void onTestCaptureTimer();
 
@@ -83,16 +96,20 @@ private:
     void setState(HikCameraCState state, const QString& description);
     void initializeTcpServer();
     void cleanupTcpServer();
+    void initializeFtpMonitor();
+    void cleanupFtpMonitor();
     bool saveImageToFile(const QByteArray& imageData, CaptureType type);
     QString getCaptureTypeString(CaptureType type) const;
 
     HikCameraService* m_hikCameraCService = nullptr;
     HikSmartCameraTcpServer* m_tcpServer = nullptr;
+    HikSmartCameraFtpMonitor* m_ftpMonitor = nullptr;
     QTimer* m_testCaptureTimer = nullptr;
     scan_tracking::common::VisionConfig m_config;
     bool m_started = false;
     HikCameraCState m_state = HikCameraCState::Idle;
     QString m_smartCameraIp;  // 智能相机 IP (192.168.8.100)
+    QString m_ftpDirectory;   // FTP 上传目录 (D:\HikCameraFTP)
     CaptureType m_currentCaptureType = CaptureType::SurfaceDefect;
     int m_captureCounter = 0;
 };

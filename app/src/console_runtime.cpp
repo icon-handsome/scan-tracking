@@ -208,8 +208,8 @@ void ConsoleRuntime::initModules()
                     typeStr = "Unknown";
                     break;
             }
-            qInfo(appLog) << "[HikCameraCController] Capture completed, type:" << typeStr
-                          << "image size:" << imageData.size() << "bytes";
+            qInfo(appLog) << "[HikCameraCController] Capture completed:" << typeStr
+                          << imageData.size() << "bytes";
         });
 
     hikCameraCController_->start(visionConfig);

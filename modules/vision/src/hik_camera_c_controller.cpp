@@ -8,6 +8,7 @@
 
 #include "scan_tracking/vision/hik_camera_service.h"
 #include "scan_tracking/vision/hik_smart_camera_tcp_server.h"
+#include "scan_tracking/vision/hik_smart_camera_ftp_monitor.h"
 
 Q_LOGGING_CATEGORY(hikCControllerLog, "vision.hik_camera_c_controller")
 
@@ -22,6 +23,7 @@ void HikCameraCController::registerMetaTypes()
     }
     qRegisterMetaType<scan_tracking::vision::HikCameraCState>("scan_tracking::vision::HikCameraCState");
     qRegisterMetaType<scan_tracking::vision::CaptureType>("scan_tracking::vision::CaptureType");
+    qRegisterMetaType<scan_tracking::vision::ImageFileInfo>("scan_tracking::vision::ImageFileInfo");
     registered = true;
 }
 
@@ -38,6 +40,7 @@ HikCameraCController::HikCameraCController(
 
 HikCameraCController::~HikCameraCController()
 {
+    cleanupFtpMonitor();
     cleanupTcpServer();
     
     if (m_testCaptureTimer) {
@@ -56,6 +59,7 @@ void HikCameraCController::start(const scan_tracking::common::VisionConfig& conf
 
     m_config = config;
     m_smartCameraIp = config.hikCameraC.ipAddress;  // 192.168.8.100
+    m_ftpDirectory = QStringLiteral("D:\\HikCameraFTP");  // FTP 上传目录
 
     if (m_hikCameraCService == nullptr) {
         setState(HikCameraCState::Error, QStringLiteral("海康相机 C 服务未初始化"));
@@ -90,6 +94,9 @@ void HikCameraCController::start(const scan_tracking::common::VisionConfig& conf
     // 初始化 TCP 服务器
     initializeTcpServer();
 
+    // 初始化 FTP 监控器
+    initializeFtpMonitor();
+
     // 检查相机是否已连接
     if (m_hikCameraCService->isConnected()) {
         qInfo(hikCControllerLog) << "Camera C SDK connection established";
@@ -109,6 +116,7 @@ void HikCameraCController::stop()
     }
 
     m_started = false;
+    cleanupFtpMonitor();
     cleanupTcpServer();
     setState(HikCameraCState::Stopped, QStringLiteral("海康相机 C 控制器已停止"));
     qInfo(hikCControllerLog) << "HikCameraCController stopped.";
@@ -165,7 +173,7 @@ void HikCameraCController::initializeTcpServer()
         qInfo(hikCControllerLog) << "TCP server started successfully on" << listenIp << ":" << listenPort;
     }
 }
-
+// 清理 TCP 服务器资源
 void HikCameraCController::cleanupTcpServer()
 {
     if (m_tcpServer != nullptr) {
@@ -176,6 +184,48 @@ void HikCameraCController::cleanupTcpServer()
     }
 }
 
+void HikCameraCController::initializeFtpMonitor()
+{
+    if (m_ftpMonitor != nullptr) {
+        qWarning(hikCControllerLog) << "FTP monitor already initialized";
+        return;
+    }
+
+    m_ftpMonitor = new HikSmartCameraFtpMonitor(this);
+
+    // 连接 FTP 监控器信号
+    connect(m_ftpMonitor, &HikSmartCameraFtpMonitor::monitorStarted,
+            this, &HikCameraCController::onFtpMonitorStarted);
+    connect(m_ftpMonitor, &HikSmartCameraFtpMonitor::monitorStopped,
+            this, &HikCameraCController::onFtpMonitorStopped);
+    connect(m_ftpMonitor, &HikSmartCameraFtpMonitor::newImageDetected,
+            this, &HikCameraCController::onFtpNewImageDetected);
+    connect(m_ftpMonitor, &HikSmartCameraFtpMonitor::imageReady,
+            this, &HikCameraCController::onFtpImageReady);
+    connect(m_ftpMonitor, &HikSmartCameraFtpMonitor::error,
+            this, &HikCameraCController::onFtpError);
+
+    // 启动 FTP 监控器
+    if (!m_ftpMonitor->start(m_ftpDirectory)) {
+        qCritical(hikCControllerLog) << "Failed to start FTP monitor for directory:" << m_ftpDirectory;
+        emit fatalError(VisionErrorCode::InvalidConfig, 
+                      QStringLiteral("FTP monitor start failed for directory: %1").arg(m_ftpDirectory));
+    } else {
+        qInfo(hikCControllerLog) << "FTP monitor started successfully for directory:" << m_ftpDirectory;
+    }
+}
+
+void HikCameraCController::cleanupFtpMonitor()
+{
+    if (m_ftpMonitor != nullptr) {
+        m_ftpMonitor->stop();
+        m_ftpMonitor->deleteLater();
+        m_ftpMonitor = nullptr;
+        qInfo(hikCControllerLog) << "FTP monitor cleaned up";
+    }
+}
+
+// 检查 TCP 服务器是否正在运行
 bool HikCameraCController::isTcpServerRunning() const
 {
     return m_tcpServer != nullptr && m_tcpServer->isListening();
@@ -187,6 +237,16 @@ bool HikCameraCController::isCameraConnectedToTcp() const
         return false;
     }
     return m_tcpServer->connectedCameras().contains(m_smartCameraIp);
+}
+
+bool HikCameraCController::isFtpMonitorRunning() const
+{
+    return m_ftpMonitor != nullptr && m_ftpMonitor->isMonitoring();
+}
+
+QString HikCameraCController::ftpDirectory() const
+{
+    return m_ftpDirectory;
 }
 
 bool HikCameraCController::requestCapture(CaptureType type)
@@ -342,13 +402,9 @@ void HikCameraCController::onTcpCameraConnected(QString cameraIp, quint16 camera
     if (cameraIp == m_smartCameraIp) {
         setState(HikCameraCState::Ready, QStringLiteral("智能相机已通过 TCP 连接并就绪"));
         
-        // 连接成功后，延迟3秒进行第一次测试拍照
-        QTimer::singleShot(3000, this, [this]() {
-            if (m_started && isCameraConnectedToTcp()) {
-                qInfo(hikCControllerLog) << "Performing initial test capture...";
-                requestCapture(CaptureType::SurfaceDefect);
-            }
-        });
+        // 连接成功后，启动自动拍照测试（每10秒一次）
+        enableTestMode(true, 10000);
+        qInfo(hikCControllerLog) << "Auto capture enabled: every 10 seconds";
     } else {
         qWarning(hikCControllerLog) << "Unexpected camera IP connected:" << cameraIp 
                                     << "(expected:" << m_smartCameraIp << ")";
@@ -425,6 +481,39 @@ void HikCameraCController::onTestCaptureTimer()
     
     qInfo(hikCControllerLog) << "Test capture triggered, type:" << getCaptureTypeString(currentType);
     requestCapture(currentType);
+}
+
+// ============================================================================
+// FTP 监控器信号槽
+// ============================================================================
+
+void HikCameraCController::onFtpMonitorStarted(QString directory)
+{
+    qInfo(hikCControllerLog) << "FTP monitor started, watching directory:" << directory;
+}
+
+void HikCameraCController::onFtpMonitorStopped()
+{
+    qInfo(hikCControllerLog) << "FTP monitor stopped";
+}
+
+void HikCameraCController::onFtpNewImageDetected(ImageFileInfo imageInfo)
+{
+    // 静默处理，不打印日志
+}
+
+void HikCameraCController::onFtpImageReady(ImageFileInfo imageInfo)
+{
+    // 静默处理，只发射信号
+    emit imageReceived(imageInfo.captureType, imageInfo.filePath, imageInfo.fileSize);
+    
+    // TODO: 这里可以触发后续的图像处理流程
+    // 例如：调用缺陷识别算法、OCR识别等
+}
+
+void HikCameraCController::onFtpError(QString errorMessage)
+{
+    qWarning(hikCControllerLog) << "FTP monitor error:" << errorMessage;
 }
 
 }  // namespace vision
