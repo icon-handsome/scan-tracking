@@ -114,7 +114,7 @@ LanyouSmokeResult runFirstOutDetectionSmoke(
         const auto result = makeFailure(
             LanyouIssueCode::InputEmpty,
             inputPointCount,
-            QStringLiteral("No valid input points for Lanyou FirstOut detector."));
+            QStringLiteral("蓝友 FirstOut 检测器没有有效的输入点。"));
         logFailure(result);
         return result;
     }
@@ -129,7 +129,7 @@ LanyouSmokeResult runFirstOutDetectionSmoke(
         const auto result = makeFailure(
             LanyouIssueCode::PointCloudInvalid,
             inputPointCount,
-            QStringLiteral("Detected %1 invalid point(s) in input cloud.").arg(invalidPointCount));
+            QStringLiteral("在输入点云中检测到 %1 个无效点。").arg(invalidPointCount));
         logFailure(result);
         return result;
     }
@@ -143,7 +143,7 @@ LanyouSmokeResult runFirstOutDetectionSmoke(
         if (!result.success) {
             result.issueCode = LanyouIssueCode::AlgorithmFailure;
             result.issueTag = issueTag(result.issueCode);
-            result.message = QStringLiteral("Lanyou FirstOut detector returned false for smoke input.");
+            result.message = QStringLiteral("蓝友 FirstOut 检测器对烟雾输入返回失败。");
             logFailure(result);
             return result;
         }
@@ -153,26 +153,26 @@ LanyouSmokeResult runFirstOutDetectionSmoke(
             result.success = false;
             result.issueCode = LanyouIssueCode::ResultInvalid;
             result.issueTag = issueTag(result.issueCode);
-            result.message = QStringLiteral("Lanyou FirstOut detector returned success, but output parameters are invalid.");
+            result.message = QStringLiteral("蓝友 FirstOut 检测器返回成功，但输出参数无效。");
             logFailure(result);
             return result;
         }
 
         result.issueCode = LanyouIssueCode::Success;
         result.issueTag = issueTag(result.issueCode);
-        result.message = QStringLiteral("Lanyou FirstOut detector returned success.");
+        result.message = QStringLiteral("蓝友 FirstOut 检测器返回成功。");
     } catch (const std::exception& ex) {
         result.success = false;
         result.issueCode = LanyouIssueCode::AlgorithmFailure;
         result.issueTag = issueTag(result.issueCode);
-        result.message = QStringLiteral("Lanyou FirstOut detector threw exception: %1")
+        result.message = QStringLiteral("蓝友 FirstOut 检测器抛出异常：%1")
                              .arg(QString::fromLocal8Bit(ex.what()));
         logFailure(result);
     } catch (...) {
         result.success = false;
         result.issueCode = LanyouIssueCode::AlgorithmFailure;
         result.issueTag = issueTag(result.issueCode);
-        result.message = QStringLiteral("Lanyou FirstOut detector threw an unknown exception.");
+        result.message = QStringLiteral("蓝友 FirstOut 检测器抛出未知异常。");
         logFailure(result);
     }
 

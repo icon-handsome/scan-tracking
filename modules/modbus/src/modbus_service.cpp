@@ -73,20 +73,20 @@ bool ModbusService::connectDevice()
     // 如果已在连接中或已连接，忽略本次请求
     if (m_client->state() == QModbusDevice::ConnectedState ||
         m_client->state() == QModbusDevice::ConnectingState) {
-        qInfo(LOG_MODBUS) << "Connect request ignored because client is already active.";
+        qInfo(LOG_MODBUS) << "连接请求被忽略，因为客户端已处于活动状态。";
         return true;
     }
 
     // 如果处于过渡状态（如正在断开），也忽略
     if (m_client->state() != QModbusDevice::UnconnectedState) {
-        qInfo(LOG_MODBUS) << "Connect request ignored because client is transitioning.";
+        qInfo(LOG_MODBUS) << "连接请求被忽略，因为客户端正在转换状态。";
         return false;
     }
 
     // 从配置管理器读取连接参数
     auto* configManager = common::ConfigManager::instance();
     if (configManager == nullptr) {
-        const QString error = QStringLiteral("ConfigManager not loaded");
+        const QString error = QStringLiteral("ConfigManager 未加载");
         qCritical(LOG_MODBUS) << error;
         emit errorOccurred(error);
         return false;
@@ -103,16 +103,16 @@ bool ModbusService::connectDevice()
     m_reconnectTimer->setInterval(conf.reconnectIntervalMs);
 
     qInfo(LOG_MODBUS).noquote()
-        << "Connecting to Modbus server" << conf.host
+        << "正在连接到 Modbus 服务器" << conf.host
         << ":" << conf.port
         << "unitId=" << m_unitId;
 
     // 尝试建立连接，失败则调度重连
     if (!m_client->connectDevice()) {
         const QString error = m_client->errorString();
-        qCritical(LOG_MODBUS).noquote() << "Modbus client setup failed:" << error;
+        qCritical(LOG_MODBUS).noquote() << "Modbus 客户端设置失败：" << error;
         emit errorOccurred(error);
-        scheduleReconnect(QStringLiteral("client setup failed"));
+        scheduleReconnect(QStringLiteral("客户端设置失败"));
         return false;
     }
 
@@ -131,7 +131,7 @@ void ModbusService::disconnectDevice()
     // 禁用重连，防止断开后再次尝试连接
     m_reconnectEnabled = false;
     m_reconnectTimer->stop();
-    qInfo(LOG_MODBUS) << "Disconnecting Modbus client and disabling reconnect.";
+    qInfo(LOG_MODBUS) << "正在断开 Modbus 客户端并禁用重连。";
     
     // 调用底层断开接口
     m_client->disconnectDevice();
@@ -145,25 +145,25 @@ void ModbusService::onStateChanged(QModbusDevice::State state)
     // 连接成功：停止重连定时器，发出信号
     if (state == QModbusDevice::ConnectedState) {
         m_reconnectTimer->stop();
-        qInfo(LOG_MODBUS) << "Modbus connected.";
+        qInfo(LOG_MODBUS) << "Modbus 已连接。";
         emit connected();
         return;
     }
 
     // 正在连接：仅记录日志
     if (state == QModbusDevice::ConnectingState) {
-        qInfo(LOG_MODBUS) << "Modbus connection attempt in progress.";
+        qInfo(LOG_MODBUS) << "Modbus 连接尝试进行中。";
         return;
     }
 
     // 未连接：发出断开信号，根据标志决定是否重连
     if (state == QModbusDevice::UnconnectedState) {
-        qWarning(LOG_MODBUS) << "Modbus unconnected.";
+        qWarning(LOG_MODBUS) << "Modbus 未连接。";
         emit disconnected();
         if (m_reconnectEnabled) {
-            scheduleReconnect(QStringLiteral("connection dropped"));
+            scheduleReconnect(QStringLiteral("连接断开"));
         } else {
-            qInfo(LOG_MODBUS) << "Reconnect skipped because service is stopping.";
+            qInfo(LOG_MODBUS) << "跳过重连，因为服务正在停止。";
         }
     }
 }
@@ -180,8 +180,8 @@ void ModbusService::onModbusError(QModbusDevice::Error error)
 
     // 获取错误描述并上报
     const QString errorString =
-        m_client ? m_client->errorString() : QStringLiteral("Unknown Modbus error");
-    qWarning(LOG_MODBUS).noquote() << "Modbus error:" << errorString << "(code" << error << ")";
+        m_client ? m_client->errorString() : QStringLiteral("未知 Modbus 错误");
+    qWarning(LOG_MODBUS).noquote() << "Modbus 错误：" << errorString << "(代码" << error << ")";
     emit errorOccurred(errorString);
 }
 
@@ -193,8 +193,8 @@ bool ModbusService::readRegisters(int startAddress, quint16 numberOfEntries)
     QMutexLocker locker(&m_mutex);
     // 检查连接状态
     if (!isConnected()) {
-        qWarning(LOG_MODBUS) << "Cannot read registers while disconnected.";
-        emit registerReadFailed(startAddress, QStringLiteral("Modbus client is disconnected"));
+        qWarning(LOG_MODBUS) << "无法在断开连接时读取寄存器。";
+        emit registerReadFailed(startAddress, QStringLiteral("Modbus 客户端已断开连接"));
         return false;
     }
 
@@ -207,7 +207,7 @@ bool ModbusService::readRegisters(int startAddress, quint16 numberOfEntries)
     ++m_readRequestLogCounter;
     if (m_readRequestLogCounter == 1 || (m_readRequestLogCounter % kPollStartLogEveryN) == 0) {
         qDebug(LOG_MODBUS).noquote()
-            << "Read request"
+            << "读取请求"
             << "offset=" << startAddress
             << "plcAddress=" << (startAddress + 1)
             << "count=" << numberOfEntries;
@@ -229,7 +229,7 @@ bool ModbusService::readRegisters(int startAddress, quint16 numberOfEntries)
 
     // 请求创建失败，记录错误
     const QString error = m_client->errorString();
-    qCritical(LOG_MODBUS).noquote() << "Read request creation failed:" << error;
+    qCritical(LOG_MODBUS).noquote() << "读取请求创建失败：" << error;
     emit registerReadFailed(startAddress, error);
     emit errorOccurred(error);
     return false;
@@ -256,7 +256,7 @@ void ModbusService::handleReadReply(QModbusReply* reply)
         ++m_readReplyLogCounter;
         if (m_readReplyLogCounter == 1 || (m_readReplyLogCounter % kModbusLogEveryN) == 0) {
             qDebug(LOG_MODBUS).noquote()
-                << "Modbus read OK | offset=" << unit.startAddress()
+                << "Modbus 读取成功 | offset=" << unit.startAddress()
                 << "| plcAddress=" << (unit.startAddress() + 1)
                 << "| registerCount=" << unit.valueCount();
         }
@@ -264,7 +264,7 @@ void ModbusService::handleReadReply(QModbusReply* reply)
     } else {
         // 失败：记录错误并发出失败信号
         const QString error = reply->errorString();
-        qWarning(LOG_MODBUS).noquote() << "Modbus read failed:" << error;
+        qWarning(LOG_MODBUS).noquote() << "Modbus 读取失败：" << error;
         emit registerReadFailed(reply->result().startAddress(), error);
         emit errorOccurred(error);
     }
@@ -289,7 +289,7 @@ bool ModbusService::writeRegisters(int startAddress, const QVector<quint16>& val
     QMutexLocker locker(&m_mutex);
     // 检查连接状态
     if (!isConnected()) {
-        qWarning(LOG_MODBUS) << "Skipping write while disconnected.";
+        qWarning(LOG_MODBUS) << "在断开连接时跳过写入。";
         return false;
     }
 
@@ -317,7 +317,7 @@ bool ModbusService::writeRegisters(int startAddress, const QVector<quint16>& val
 
     // 请求创建失败
     const QString error = m_client->errorString();
-    qCritical(LOG_MODBUS).noquote() << "Write request creation failed:" << error;
+    qCritical(LOG_MODBUS).noquote() << "写入请求创建失败：" << error;
     emit errorOccurred(error);
     return false;
 }
@@ -329,7 +329,7 @@ void ModbusService::reconnectIfNeeded()
 {
     // 检查重连是否被禁用
     if (!m_reconnectEnabled) {
-        qInfo(LOG_MODBUS) << "Reconnect timer fired after shutdown request; skipping.";
+        qInfo(LOG_MODBUS) << "重连定时器在关闭请求后触发；跳过。";
         return;
     }
 
@@ -338,7 +338,7 @@ void ModbusService::reconnectIfNeeded()
         return;
     }
 
-    qInfo(LOG_MODBUS) << "Attempting Modbus reconnect.";
+    qInfo(LOG_MODBUS) << "尝试 Modbus 重连。";
     // 发起重连
     connectDevice();
 }
@@ -361,15 +361,15 @@ void ModbusService::scheduleReconnect(const QString& reason)
     // 如果已有重连任务在排队，避免重复调度
     if (m_reconnectTimer->isActive()) {
         qInfo(LOG_MODBUS).noquote()
-            << "Reconnect already scheduled in" << m_reconnectTimer->remainingTime()
-            << "ms after" << reason;
+            << "重连已在" << m_reconnectTimer->remainingTime()
+            << "毫秒后调度，原因：" << reason;
         return;
     }
 
     // 启动重连定时器
     qWarning(LOG_MODBUS).noquote()
-        << "Scheduling Modbus reconnect in" << m_reconnectTimer->interval()
-        << "ms due to" << reason;
+        << "在" << m_reconnectTimer->interval()
+        << "毫秒后调度 Modbus 重连，原因：" << reason;
     m_reconnectTimer->start();
 }
 
@@ -388,10 +388,10 @@ void ModbusService::handleWriteReply(QModbusReply* reply, int startAddress, int 
         // 记录详细错误信息：地址、数量、错误码
         const auto result = reply->result();
         qWarning(LOG_MODBUS).noquote()
-            << "Modbus write FAILED | offset=" << startAddress
+            << "Modbus 写入失败 | offset=" << startAddress
             << "| registerCount=" << result.valueCount()
             << "| errorCode=" << static_cast<int>(reply->error())
-            << "| errorDetail:" << error;
+            << "| errorDetail：" << error;
         
         // 发出细粒度失败信号（P1修复）
         emit registerWriteFailed(startAddress, error);
@@ -402,7 +402,7 @@ void ModbusService::handleWriteReply(QModbusReply* reply, int startAddress, int 
         if (m_writeReplyLogCounter == 1 || (m_writeReplyLogCounter % kModbusLogEveryN) == 0) {
             const auto result = reply->result();
             qDebug(LOG_MODBUS).noquote()
-                << "Modbus write OK | offset=" << startAddress
+                << "Modbus 写入成功 | offset=" << startAddress
                 << "| registerCount=" << result.valueCount();
         }
     }

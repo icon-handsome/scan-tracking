@@ -67,7 +67,7 @@ bool HikSmartCameraFtpMonitor::start(const QString& ftpDirectory)
     // 扫描现有文件
     scanDirectory();
 
-    qInfo(hikFtpMonitorLog) << "FTP monitor started, watching:" << m_ftpDirectory;
+    qInfo(hikFtpMonitorLog) << "FTP 监控器已启动，监控目录：" << m_ftpDirectory;
     emit monitorStarted(m_ftpDirectory);
     return true;
 }
@@ -86,7 +86,7 @@ void HikSmartCameraFtpMonitor::stop()
     }
 
     m_pendingFiles.clear();
-    qInfo(hikFtpMonitorLog) << "FTP monitor stopped";
+    qInfo(hikFtpMonitorLog) << "FTP 监控器已停止";
     emit monitorStopped();
 }
 

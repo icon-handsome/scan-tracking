@@ -117,7 +117,7 @@ void MechEyeService::stop()
     if (m_workerThread != nullptr) {
         m_workerThread->quit();
         if (!m_workerThread->wait(10000)) {
-            qCritical(LOG_MECHEYE_SVC) << "Mech-Eye worker thread did not exit in time.";
+            qCritical(LOG_MECHEYE_SVC) << "Mech-Eye worker 线程未能及时退出。";
         }
     }
 

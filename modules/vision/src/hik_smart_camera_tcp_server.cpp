@@ -39,7 +39,7 @@ HikSmartCameraSession::~HikSmartCameraSession()
             m_socket->waitForDisconnected(1000);
         }
     }
-    qInfo(hikTcpLog) << "Camera session destroyed:" << m_cameraIp;
+    qInfo(hikTcpLog) << "相机会话已销毁：" << m_cameraIp;
 }
 
 bool HikSmartCameraSession::isConnected() const
@@ -66,7 +66,7 @@ bool HikSmartCameraSession::sendCommand(const QString& command)
     }
 
     m_socket->flush();
-    qInfo(hikTcpLog) << "Sent command to" << m_cameraIp << ":" << command.trimmed();
+    qInfo(hikTcpLog) << "发送命令到" << m_cameraIp << "：" << command.trimmed();
     return true;
 }
 
@@ -108,7 +108,7 @@ void HikSmartCameraSession::processReceivedData(const QByteArray& data)
         return;
     }
 
-    qInfo(hikTcpLog) << "Received from" << m_cameraIp << ":" << message;
+    qInfo(hikTcpLog) << "从" << m_cameraIp << "接收到：" << message;
 
     // 处理心跳包
     if (message == "hello") {
@@ -131,7 +131,7 @@ void HikSmartCameraSession::updateHeartbeat()
 
 void HikSmartCameraSession::onDisconnected()
 {
-    qInfo(hikTcpLog) << "Camera disconnected:" << m_cameraIp;
+    qInfo(hikTcpLog) << "相机已断开连接：" << m_cameraIp;
     emit disconnected(m_cameraIp);
 }
 
@@ -183,7 +183,7 @@ bool HikSmartCameraTcpServer::start(const QString& listenIp, quint16 port)
 
     startHeartbeatMonitor();
 
-    qInfo(hikTcpLog) << "TCP server started on" << listenIp << ":" << port;
+    qInfo(hikTcpLog) << "TCP 服务器已启动，地址" << listenIp << ":" << port;
     emit serverStarted(listenIp, port);
     return true;
 }
@@ -204,7 +204,7 @@ void HikSmartCameraTcpServer::stop()
 
     m_tcpServer->close();
 
-    qInfo(hikTcpLog) << "TCP server stopped";
+    qInfo(hikTcpLog) << "TCP 服务器已停止";
     emit serverStopped();
 }
 
@@ -323,7 +323,7 @@ void HikSmartCameraTcpServer::startHeartbeatMonitor()
 {
     if (!m_heartbeatTimer->isActive()) {
         m_heartbeatTimer->start();
-        qInfo(hikTcpLog) << "Heartbeat monitor started";
+        qInfo(hikTcpLog) << "心跳监控已启动";
     }
 }
 
@@ -331,7 +331,7 @@ void HikSmartCameraTcpServer::stopHeartbeatMonitor()
 {
     if (m_heartbeatTimer->isActive()) {
         m_heartbeatTimer->stop();
-        qInfo(hikTcpLog) << "Heartbeat monitor stopped";
+        qInfo(hikTcpLog) << "心跳监控已停止";
     }
 }
 

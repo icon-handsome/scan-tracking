@@ -233,7 +233,7 @@ void HmiTcpServer::onMessageReceived(const QJsonObject& message)
     } else {
         // 未知消息类型，返回错误响应
         qWarning(LOG_HMI_SERVER) << "收到未知类型的消息:" << type;
-        sendResponse(type, msgId, false, QStringLiteral("Unknown command type"));
+        sendResponse(type, msgId, false, QStringLiteral("未知命令类型"));
     }
 }
 
@@ -257,7 +257,7 @@ void HmiTcpServer::onHeartbeatTimer()
 void HmiTcpServer::handleHmiHello(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
-    sendResponse(QLatin1String(msg_type::kHmiHello), msgId, true, QStringLiteral("Welcome"));
+    sendResponse(QLatin1String(msg_type::kHmiHello), msgId, true, QStringLiteral("欢迎"));
 }
 
 void HmiTcpServer::handleHeartbeatPing(const QJsonObject& message)
@@ -283,9 +283,9 @@ void HmiTcpServer::handleCmdStart(const QJsonObject& message)
     const QString msgId = message.value(QLatin1String("msgId")).toString();
     if (m_stateMachine) {
         m_stateMachine->start();
-        sendResponse(QLatin1String(msg_type::kCmdStart), msgId, true, QStringLiteral("State machine started"));
+        sendResponse(QLatin1String(msg_type::kCmdStart), msgId, true, QStringLiteral("状态机已启动"));
     } else {
-        sendResponse(QLatin1String(msg_type::kCmdStart), msgId, false, QStringLiteral("State machine unavailable"));
+        sendResponse(QLatin1String(msg_type::kCmdStart), msgId, false, QStringLiteral("状态机不可用"));
     }
 }
 
@@ -294,16 +294,16 @@ void HmiTcpServer::handleCmdStop(const QJsonObject& message)
     const QString msgId = message.value(QLatin1String("msgId")).toString();
     if (m_stateMachine) {
         m_stateMachine->stop();
-        sendResponse(QLatin1String(msg_type::kCmdStop), msgId, true, QStringLiteral("State machine stopped"));
+        sendResponse(QLatin1String(msg_type::kCmdStop), msgId, true, QStringLiteral("状态机已停止"));
     } else {
-        sendResponse(QLatin1String(msg_type::kCmdStop), msgId, false, QStringLiteral("State machine unavailable"));
+        sendResponse(QLatin1String(msg_type::kCmdStop), msgId, false, QStringLiteral("状态机不可用"));
     }
 }
 
 void HmiTcpServer::handleCmdGetStatus(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
-    QJsonObject payload = buildResponsePayload(true, QStringLiteral("Status returned"));
+    QJsonObject payload = buildResponsePayload(true, QStringLiteral("状态已返回"));
     payload[QLatin1String("system")] = buildSystemStatusPayload();
     payload[QLatin1String("plc")] = buildPlcStatusPayload();
     payload[QLatin1String("camera")] = buildCameraStatusPayload();
@@ -316,9 +316,9 @@ void HmiTcpServer::handleCmdReset(const QJsonObject& message)
     const QString msgId = message.value(QLatin1String("msgId")).toString();
     if (m_stateMachine) {
         m_stateMachine->start(); // 目前系统使用 start 作为重启/复位的入口
-        sendResponse(QLatin1String(msg_type::kCmdReset), msgId, true, QStringLiteral("State machine reset"));
+        sendResponse(QLatin1String(msg_type::kCmdReset), msgId, true, QStringLiteral("状态机已复位"));
     } else {
-        sendResponse(QLatin1String(msg_type::kCmdReset), msgId, false, QStringLiteral("State machine unavailable"));
+        sendResponse(QLatin1String(msg_type::kCmdReset), msgId, false, QStringLiteral("状态机不可用"));
     }
 }
 
@@ -327,9 +327,9 @@ void HmiTcpServer::handleCmdClearAlarm(const QJsonObject& message)
     const QString msgId = message.value(QLatin1String("msgId")).toString();
     if (m_stateMachine) {
         m_stateMachine->setAlarm(0, 0, QString());
-        sendResponse(QLatin1String(msg_type::kCmdClearAlarm), msgId, true, QStringLiteral("Alarms cleared"));
+        sendResponse(QLatin1String(msg_type::kCmdClearAlarm), msgId, true, QStringLiteral("报警已清除"));
     } else {
-        sendResponse(QLatin1String(msg_type::kCmdClearAlarm), msgId, false, QStringLiteral("State machine unavailable"));
+        sendResponse(QLatin1String(msg_type::kCmdClearAlarm), msgId, false, QStringLiteral("状态机不可用"));
     }
 }
 
@@ -340,7 +340,7 @@ void HmiTcpServer::handleCmdGetConfig(const QJsonObject& message)
     // 从 ConfigManager 单例读取所有配置并序列化为 JSON
     auto* cfgMgr = common::ConfigManager::instance();
     if (!cfgMgr) {
-        sendResponse(QLatin1String(msg_type::kCmdGetConfig), msgId, false, QStringLiteral("ConfigManager not initialized"));
+        sendResponse(QLatin1String(msg_type::kCmdGetConfig), msgId, false, QStringLiteral("配置管理器未初始化"));
         return;
     }
     
@@ -424,7 +424,7 @@ void HmiTcpServer::handleCmdGetConfig(const QJsonObject& message)
     configPayload[QLatin1String("lbPose")] = lbPoseObj;
     
     // 构建响应
-    QJsonObject payload = buildResponsePayload(true, QStringLiteral("Configuration retrieved"));
+    QJsonObject payload = buildResponsePayload(true, QStringLiteral("配置已获取"));
     payload[QLatin1String("config")] = configPayload;
     
     QJsonObject envelope;
@@ -441,9 +441,9 @@ void HmiTcpServer::handleCmdModbusConnect(const QJsonObject& message)
     const QString msgId = message.value(QLatin1String("msgId")).toString();
     if (m_modbusService) {
         m_modbusService->connectDevice();
-        sendResponse(QLatin1String(msg_type::kCmdModbusConnect), msgId, true, QStringLiteral("Connecting to Modbus"));
+        sendResponse(QLatin1String(msg_type::kCmdModbusConnect), msgId, true, QStringLiteral("正在连接 Modbus"));
     } else {
-        sendResponse(QLatin1String(msg_type::kCmdModbusConnect), msgId, false, QStringLiteral("Modbus service unavailable"));
+        sendResponse(QLatin1String(msg_type::kCmdModbusConnect), msgId, false, QStringLiteral("Modbus 服务不可用"));
     }
 }
 
@@ -452,9 +452,9 @@ void HmiTcpServer::handleCmdModbusDisconnect(const QJsonObject& message)
     const QString msgId = message.value(QLatin1String("msgId")).toString();
     if (m_modbusService) {
         m_modbusService->disconnectDevice();
-        sendResponse(QLatin1String(msg_type::kCmdModbusDisconnect), msgId, true, QStringLiteral("Disconnected from Modbus"));
+        sendResponse(QLatin1String(msg_type::kCmdModbusDisconnect), msgId, true, QStringLiteral("已断开 Modbus 连接"));
     } else {
-        sendResponse(QLatin1String(msg_type::kCmdModbusDisconnect), msgId, false, QStringLiteral("Modbus service unavailable"));
+        sendResponse(QLatin1String(msg_type::kCmdModbusDisconnect), msgId, false, QStringLiteral("Modbus 服务不可用"));
     }
 }
 
@@ -466,47 +466,47 @@ void HmiTcpServer::handleCmdRefreshCamera(const QJsonObject& message)
     if (m_mechEyeService) {
         qInfo(LOG_HMI_SERVER) << "[TCPIP] 收到相机刷新请求，正在刷新 MechEye 相机状态...";
         m_mechEyeService->requestRefreshStatus();
-        sendResponse(QLatin1String(msg_type::kCmdRefreshCamera), msgId, true, QStringLiteral("Camera refresh requested"));
+        sendResponse(QLatin1String(msg_type::kCmdRefreshCamera), msgId, true, QStringLiteral("相机刷新请求已发送"));
     } else {
         qWarning(LOG_HMI_SERVER) << "[TCPIP] 相机刷新失败：MechEye 服务不可用";
-        sendResponse(QLatin1String(msg_type::kCmdRefreshCamera), msgId, false, QStringLiteral("Camera service unavailable"));
+        sendResponse(QLatin1String(msg_type::kCmdRefreshCamera), msgId, false, QStringLiteral("相机服务不可用"));
     }
 }
 
 void HmiTcpServer::handleCmdTriggerScan(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
-    sendResponse(QLatin1String(msg_type::kCmdTriggerScan), msgId, false, QStringLiteral("Direct trigger not implemented, use PLC or StateMachine"));
+    sendResponse(QLatin1String(msg_type::kCmdTriggerScan), msgId, false, QStringLiteral("直接触发未实现，请使用 PLC 或状态机"));
 }
 
 void HmiTcpServer::handleCmdTriggerInspection(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
-    sendResponse(QLatin1String(msg_type::kCmdTriggerInspection), msgId, false, QStringLiteral("Direct trigger not implemented, use PLC"));
+    sendResponse(QLatin1String(msg_type::kCmdTriggerInspection), msgId, false, QStringLiteral("直接触发未实现，请使用 PLC"));
 }
 
 void HmiTcpServer::handleCmdTriggerSelfCheck(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
-    sendResponse(QLatin1String(msg_type::kCmdTriggerSelfCheck), msgId, false, QStringLiteral("Direct trigger not implemented, use PLC"));
+    sendResponse(QLatin1String(msg_type::kCmdTriggerSelfCheck), msgId, false, QStringLiteral("直接触发未实现，请使用 PLC"));
 }
 
 void HmiTcpServer::handleCmdTriggerPoseCheck(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
-    sendResponse(QLatin1String(msg_type::kCmdTriggerPoseCheck), msgId, false, QStringLiteral("Direct trigger not implemented, use PLC"));
+    sendResponse(QLatin1String(msg_type::kCmdTriggerPoseCheck), msgId, false, QStringLiteral("直接触发未实现，请使用 PLC"));
 }
 
 void HmiTcpServer::handleCmdTriggerCodeRead(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
-    sendResponse(QLatin1String(msg_type::kCmdTriggerCodeRead), msgId, false, QStringLiteral("Direct trigger not implemented, use PLC"));
+    sendResponse(QLatin1String(msg_type::kCmdTriggerCodeRead), msgId, false, QStringLiteral("直接触发未实现，请使用 PLC"));
 }
 
 void HmiTcpServer::handleCmdTriggerResultReset(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
-    sendResponse(QLatin1String(msg_type::kCmdTriggerResultReset), msgId, false, QStringLiteral("Direct trigger not implemented, use PLC"));
+    sendResponse(QLatin1String(msg_type::kCmdTriggerResultReset), msgId, false, QStringLiteral("直接触发未实现，请使用 PLC"));
 }
 
 void HmiTcpServer::handleCmdCaptureMechEye(const QJsonObject& message)
@@ -515,7 +515,7 @@ void HmiTcpServer::handleCmdCaptureMechEye(const QJsonObject& message)
     const QString cameraKey = message.value(QLatin1String("payload")).toObject().value(QLatin1String("cameraKey")).toString();
     if (m_mechEyeService) {
         quint64 reqId = m_mechEyeService->requestCapture(cameraKey, mech_eye::CaptureMode::Capture3DOnly);
-        QJsonObject payload = buildResponsePayload(true, QStringLiteral("Capture requested"));
+        QJsonObject payload = buildResponsePayload(true, QStringLiteral("采集请求已发送"));
         payload[QLatin1String("requestId")] = static_cast<qint64>(reqId);
         
         QJsonObject envelope;
@@ -526,7 +526,7 @@ void HmiTcpServer::handleCmdCaptureMechEye(const QJsonObject& message)
         envelope[QStringLiteral("payload")]   = payload;
         sendToClient(envelope);
     } else {
-        sendResponse(QLatin1String(msg_type::kCmdCaptureMechEye), msgId, false, QStringLiteral("Camera service unavailable"));
+        sendResponse(QLatin1String(msg_type::kCmdCaptureMechEye), msgId, false, QStringLiteral("相机服务不可用"));
     }
 }
 
@@ -538,7 +538,7 @@ void HmiTcpServer::handleCmdCaptureBundle(const QJsonObject& message)
         quint32 taskId = message.value(QLatin1String("payload")).toObject().value(QLatin1String("taskId")).toInt(0);
         quint64 reqId = m_visionPipeline->requestCaptureBundle(segmentIndex, taskId);
         
-        QJsonObject payload = buildResponsePayload(true, QStringLiteral("Bundle capture requested"));
+        QJsonObject payload = buildResponsePayload(true, QStringLiteral("组合采集请求已发送"));
         payload[QLatin1String("requestId")] = static_cast<qint64>(reqId);
         
         QJsonObject envelope;
@@ -549,7 +549,7 @@ void HmiTcpServer::handleCmdCaptureBundle(const QJsonObject& message)
         envelope[QStringLiteral("payload")]   = payload;
         sendToClient(envelope);
     } else {
-        sendResponse(QLatin1String(msg_type::kCmdCaptureBundle), msgId, false, QStringLiteral("Vision pipeline unavailable"));
+        sendResponse(QLatin1String(msg_type::kCmdCaptureBundle), msgId, false, QStringLiteral("视觉流水线不可用"));
     }
 }
 

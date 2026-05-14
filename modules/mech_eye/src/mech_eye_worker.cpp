@@ -342,7 +342,7 @@ void MechEyeWorker::performCapture(const scan_tracking::mech_eye::CaptureRequest
         m_busy = false;
         setRuntimeState(CameraRuntimeState::Ready, QStringLiteral("采集成功，等待下一次触发"));
         qInfo(LOG_MECHEYE_WORKER).noquote()
-            << "Capture success"
+            << "采集成功"
             << "requestId=" << result.requestId
             << "pointCount=" << result.pointCloud.pointCount
             << "normalCount=" << result.pointCloud.normalCount()

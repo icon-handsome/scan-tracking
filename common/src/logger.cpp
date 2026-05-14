@@ -90,7 +90,7 @@ void Logger::openLogFile(const QDate& target_date) {
     
     log_file_->setFileName(file_path);
     if (!log_file_->open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        std::cerr << "CRITICAL: Logger failed to open target file: " << file_path.toStdString() << "\n";
+        std::cerr << "严重错误：Logger 无法打开目标文件：" << file_path.toStdString() << "\n";
     }
 }
 

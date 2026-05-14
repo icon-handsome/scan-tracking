@@ -280,7 +280,7 @@ PoseCheckResult TrackingService::checkPose() const
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
     if (configManager == nullptr) {
         result.resultCode = 7;
-        result.message = QStringLiteral("ConfigManager unavailable for LB pose check.");
+        result.message = QStringLiteral("LB 位姿检查时 ConfigManager 不可用。");
         return result;
     }
 

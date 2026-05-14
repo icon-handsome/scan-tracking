@@ -188,7 +188,7 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
     const QFileInfo dataRootInfo(dataRootText);
     if (!dataRootInfo.exists()) {
         result.resultCode = 9;
-        result.message = QStringLiteral("LB pose data root does not exist: %1").arg(summarizePath(dataRootText));
+        result.message = QStringLiteral("LB 位姿数据根目录不存在：%1").arg(summarizePath(dataRootText));
         qWarning(LOG_LB_POSE).noquote() << result.message;
         return result;
     }
@@ -202,7 +202,7 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
     // 检查左右相机图像是否都存在
     if (leftFiles.empty() || rightFiles.empty()) {
         result.resultCode = 5;
-        result.message = QStringLiteral("LB pose input images missing: left=%1, right=%2")
+        result.message = QStringLiteral("LB 位姿输入图像缺失：左=%1，右=%2")
                           .arg(static_cast<int>(leftFiles.size()))
                           .arg(static_cast<int>(rightFiles.size()));
         qWarning(LOG_LB_POSE).noquote() << result.message;
@@ -212,7 +212,7 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
     // 检查左右图像数量是否匹配
     if (leftFiles.size() != rightFiles.size()) {
         result.resultCode = 9;
-        result.message = QStringLiteral("LB pose image count mismatch: left=%1, right=%2")
+        result.message = QStringLiteral("LB 位姿图像数量不匹配：左=%1，右=%2")
                           .arg(static_cast<int>(leftFiles.size()))
                           .arg(static_cast<int>(rightFiles.size()));
         qWarning(LOG_LB_POSE).noquote() << result.message;
@@ -224,7 +224,7 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
     cv::Mat rightImage = cv::imread(rightFiles.front(), cv::IMREAD_UNCHANGED);
     if (leftImage.empty() || rightImage.empty()) {
         result.resultCode = 5;
-        result.message = QStringLiteral("LB pose failed to load stereo images: left=%1 right=%2")
+        result.message = QStringLiteral("LB 位姿加载立体图像失败：左=%1 右=%2")
                           .arg(QString::fromStdString(leftFiles.front()))
                           .arg(QString::fromStdString(rightFiles.front()));
         qWarning(LOG_LB_POSE).noquote() << result.message;
@@ -243,7 +243,7 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
         const int reconResult = recon.Get_3D_Recon_Marker(leftImage, rightImage);
         if (reconResult != 0 || recon.frame_3d_points.empty()) {
             result.resultCode = 7;
-            result.message = QStringLiteral("LB pose 3D reconstruction failed, code=%1, points=%2")
+            result.message = QStringLiteral("LB 位姿 3D 重建失败，代码=%1，点数=%2")
                               .arg(reconResult)
                               .arg(static_cast<int>(recon.frame_3d_points.size()));
             qWarning(LOG_LB_POSE).noquote() << result.message;
@@ -257,7 +257,7 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
         if (geoHash.set_template_config(config.minDistance, config.maxDistance) != 0 ||
             geoHash.set_query_config(config.cosTolerance, config.minPercent) != 0) {
             result.resultCode = 7;
-            result.message = QStringLiteral("LB pose failed to set hash config.");
+            result.message = QStringLiteral("LB 位姿设置哈希配置失败。");
             qWarning(LOG_LB_POSE).noquote() << result.message;
             return result;
         }
@@ -266,7 +266,7 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
         std::string templatePathBytes = toCvPath(templateText);
         if (geoHash.read_template_pnts(templatePathBytes.data()) != 0) {
             result.resultCode = 9;
-            result.message = QStringLiteral("LB pose template file not found or invalid: %1")
+            result.message = QStringLiteral("LB 位姿模板文件未找到或无效：%1")
                               .arg(summarizePath(templateText));
             qWarning(LOG_LB_POSE).noquote() << result.message;
             return result;
@@ -275,7 +275,7 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
         // 构建哈希索引
         if (geoHash.build() != 0) {
             result.resultCode = 7;
-            result.message = QStringLiteral("LB pose hash build failed.");
+            result.message = QStringLiteral("LB 位姿哈希构建失败。");
             qWarning(LOG_LB_POSE).noquote() << result.message;
             return result;
         }
@@ -289,7 +289,7 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
         // 检查位姿估计结果
         if (trackResult != 0 || !isValidRt(geoHash.Rt)) {
             result.resultCode = 7;
-            result.message = QStringLiteral("LB pose Get_Track_Pose failed, code=%1").arg(trackResult);
+            result.message = QStringLiteral("LB 位姿 Get_Track_Pose 失败，代码=%1").arg(trackResult);
             qWarning(LOG_LB_POSE).noquote() << result.message;
             return result;
         }
@@ -299,7 +299,7 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
         result.resultCode = 1;
         result.poseDeviationMm = translationNormMm(geoHash.Rt);
         result.rt = toRtArray(geoHash.Rt);
-        result.message = QStringLiteral("LB pose detection succeeded.");
+        result.message = QStringLiteral("LB 位姿检测成功。");
         qInfo(LOG_LB_POSE).noquote()
             << "LB pose succeeded"
             << "inputPoints=" << result.inputPointCount
@@ -308,13 +308,13 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
     } catch (const std::exception& ex) {
         // 捕获标准异常
         result.resultCode = 7;
-        result.message = QStringLiteral("LB pose exception: %1").arg(QString::fromLocal8Bit(ex.what()));
+        result.message = QStringLiteral("LB 位姿异常：%1").arg(QString::fromLocal8Bit(ex.what()));
         qWarning(LOG_LB_POSE).noquote() << result.message;
         return result;
     } catch (...) {
         // 捕获未知异常
         result.resultCode = 7;
-        result.message = QStringLiteral("LB pose unknown exception.");
+        result.message = QStringLiteral("LB 位姿未知异常。");
         qWarning(LOG_LB_POSE).noquote() << result.message;
         return result;
     }

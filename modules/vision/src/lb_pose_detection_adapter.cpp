@@ -138,41 +138,41 @@ LbPoseResult runLbPoseDetection(
     result.rightImageHeight = rightFrame.height;
 
     if (!leftFrame.isValid() || !rightFrame.isValid()) {
-        return makeFailure(QStringLiteral("LB pose detection requires two valid grayscale frames."));
+        return makeFailure(QStringLiteral("LB 位姿检测需要两个有效的灰度图像帧。"));
     }
 
     const cv::Mat leftImage = frameToGrayMat(leftFrame);
     const cv::Mat rightImage = frameToGrayMat(rightFrame);
     if (leftImage.empty() || rightImage.empty()) {
-        return makeFailure(QStringLiteral("Failed to convert Hik frames to cv::Mat grayscale images."));
+        return makeFailure(QStringLiteral("将海康图像帧转换为 cv::Mat 灰度图像失败。"));
     }
 
     try {
         TR_INSPECT_3D_Recon_Marker recon;
         const auto calib = makeDefaultCalibSet();
         if (recon.Set_Calib_Config(calib.I1, calib.D1, calib.E1, calib.I2, calib.D2, calib.E2) != 0) {
-            return makeFailure(QStringLiteral("Failed to configure default stereo calibration."));
+            return makeFailure(QStringLiteral("配置默认立体标定失败。"));
         }
 
         if (recon.Get_3D_Recon_Marker(const_cast<cv::Mat&>(leftImage), const_cast<cv::Mat&>(rightImage)) != 0) {
-            return makeFailure(QStringLiteral("TR_INSPECT_3D_Recon_Marker failed to reconstruct stereo points."));
+            return makeFailure(QStringLiteral("TR_INSPECT_3D_Recon_Marker 重建立体点云失败。"));
         }
 
         FastGeoHash geoHash(config.maxDistance, config.minDistance);
         if (geoHash.set_template_config(config.minDistance, config.maxDistance) != 0) {
-            return makeFailure(QStringLiteral("Failed to set LB template configuration."));
+            return makeFailure(QStringLiteral("设置 LB 模板配置失败。"));
         }
         if (geoHash.set_query_config(config.cosTolerance, config.minPercent) != 0) {
-            return makeFailure(QStringLiteral("Failed to set LB query configuration."));
+            return makeFailure(QStringLiteral("设置 LB 查询配置失败。"));
         }
         
         const QString templatePath = buildTemplatePath(config);
         QByteArray templateBytes = templatePath.toLocal8Bit();
         if (geoHash.read_template_pnts(templateBytes.data()) != 0) {
-            return makeFailure(QStringLiteral("Failed to load LB template points from %1.").arg(templatePath));
+            return makeFailure(QStringLiteral("从 %1 加载 LB 模板点云失败。").arg(templatePath));
         }
         if (geoHash.build() != 0) {
-			return makeFailure(QStringLiteral("Failed to build LB geometric hash table."));
+			return makeFailure(QStringLiteral("构建 LB 几何哈希表失败。"));
         }
 
         const int trackResult = geoHash.Get_Track_Pose(
@@ -180,21 +180,21 @@ LbPoseResult runLbPoseDetection(
             config.cosTolerance,
             config.minPercent);
         if (trackResult != 0) {
-            return makeFailure(QStringLiteral("LB tracking returned error code %1.").arg(trackResult));
+            return makeFailure(QStringLiteral("LB 跟踪返回错误代码 %1。").arg(trackResult));
         }
 
         result.success = true;
-        result.message = QStringLiteral("LB pose detection completed successfully.");
+        result.message = QStringLiteral("LB 位姿检测成功完成。");
         result.framePointCount = static_cast<int>(recon.frame_3d_points.size());
         result.poseMatrix = toPoseMatrix(geoHash.Rt, QStringLiteral("lb_pose_detection"), 0);
         if (!result.poseMatrix.isValid()) {
-            return makeFailure(QStringLiteral("LB pose detection produced an invalid Rt matrix."));
+            return makeFailure(QStringLiteral("LB 位姿检测产生了无效的 Rt 矩阵。"));
         }
         return result;
     } catch (const std::exception& ex) {
-        return makeFailure(QStringLiteral("LB pose detection threw exception: %1").arg(QString::fromLocal8Bit(ex.what())));
+        return makeFailure(QStringLiteral("LB 位姿检测抛出异常：%1").arg(QString::fromLocal8Bit(ex.what())));
     } catch (...) {
-        return makeFailure(QStringLiteral("LB pose detection threw an unknown exception."));
+        return makeFailure(QStringLiteral("LB 位姿检测抛出未知异常。"));
     }
 }
 

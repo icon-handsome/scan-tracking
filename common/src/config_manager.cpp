@@ -31,7 +31,7 @@ void ConfigManager::initialize()
 {
     if (!s_instance) {
         s_instance = new ConfigManager();
-        qInfo(LOG_CONFIG) << "ConfigManager initialized.";
+        qInfo(LOG_CONFIG) << "ConfigManager 已初始化。";
     }
 }
 
@@ -40,14 +40,14 @@ void ConfigManager::cleanup()
     if (s_instance) {
         delete s_instance;
         s_instance = nullptr;
-        qInfo(LOG_CONFIG) << "ConfigManager cleaned up.";
+        qInfo(LOG_CONFIG) << "ConfigManager 已清理。";
     }
 }
 
 ConfigManager* ConfigManager::instance()
 {
     if (!s_instance) {
-        qWarning(LOG_CONFIG) << "ConfigManager::instance() called before initialize()!";
+        qWarning(LOG_CONFIG) << "ConfigManager::instance() 在 initialize() 之前被调用！";
     }
     return s_instance;
 }
@@ -138,7 +138,7 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.endGroup();
 
     settings.sync();
-    qInfo(LOG_CONFIG) << "Generated default config.ini at" << settings.fileName();
+    qInfo(LOG_CONFIG) << "已在" << settings.fileName() << "生成默认 config.ini";
 }
 
 void ConfigManager::load(const QString& filePath)
@@ -148,7 +148,7 @@ void ConfigManager::load(const QString& filePath)
 
     QSettings settings(filePath, QSettings::IniFormat);
     if (!fileExists) {
-        qWarning(LOG_CONFIG) << "config.ini not found or empty. Generating defaults...";
+        qWarning(LOG_CONFIG) << "config.ini 未找到或为空。正在生成默认配置...";
         writeDefaults(settings);
     }
 
@@ -231,9 +231,9 @@ void ConfigManager::load(const QString& filePath)
         logger->setMinLevel(minType);
     }
 
-    qInfo(LOG_CONFIG) << "Loaded config.ini from:" << filePath;
+    qInfo(LOG_CONFIG) << "已从以下位置加载 config.ini：" << filePath;
     qInfo(LOG_CONFIG).noquote()
-        << "Modbus config:"
+        << "Modbus 配置："
         << "host=" << m_modbusConfig.host
         << "port=" << m_modbusConfig.port
         << "unitId=" << m_modbusConfig.unitId

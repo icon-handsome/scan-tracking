@@ -14,7 +14,7 @@ LbPoseResult runLbPoseDetection(
     result.rightImageWidth = rightFrame.width;
     result.rightImageHeight = rightFrame.height;
     result.success = false;
-    result.message = QStringLiteral("LB pose detection is disabled in this build.");
+    result.message = QStringLiteral("此构建版本中 LB 位姿检测已禁用。");
     return result;
 }
 

@@ -79,7 +79,7 @@ int ConsoleRuntime::run()
 
 void ConsoleRuntime::initModules()
 {
-    qInfo(appLog) << "Initializing modules...";
+    qInfo(appLog) << "正在初始化模块...";
     int startupStage = 5;
     const QByteArray startupStageEnv = qgetenv("SCAN_TRACKING_STARTUP_STAGE");
 	bool startupStageOk = false;
@@ -89,18 +89,18 @@ void ConsoleRuntime::initModules()
             startupStage = 5;
         }
     }
-    qInfo(appLog) << "Startup stage =" << startupStage
+    qInfo(appLog) << "启动阶段 =" << startupStage
                   << "(0=Modbus, 1=+MechEye, 2=+Hik, 3=+VisionPipeline, 4=+Tracking, 5=+StateMachine)";
 
     modbusService_ = std::make_unique<scan_tracking::modbus::ModbusService>(&application_);
-    qInfo(appLog) << "Modbus service created.";
+    qInfo(appLog) << "Modbus 服务已创建。";
 
     if (startupStage < 1) {
-        qInfo(appLog) << "Startup stage stops at Modbus only.";
+        qInfo(appLog) << "启动阶段仅到 Modbus。";
         if (!modbusService_->connectDevice()) {
-            qWarning(appLog) << "Modbus connection initiation failed.";
+            qWarning(appLog) << "Modbus 连接初始化失败。";
         }
-        qInfo(appLog) << "All modules initialized.";
+        qInfo(appLog) << "所有模块已初始化。";
         return;
     }
     // MechEye 服务先启动，保证后续状态机和视觉集成层都能复用同一份点云采集入口。
@@ -110,18 +110,18 @@ void ConsoleRuntime::initModules()
         mechEyeService_.get(),
         &scan_tracking::mech_eye::MechEyeService::stateChanged,
         [](scan_tracking::mech_eye::CameraRuntimeState state, const QString& description) {
-            qInfo(appLog) << "[MechEye] state =" << static_cast<int>(state) << description;
+            qInfo(appLog) << "[MechEye] 状态 =" << static_cast<int>(state) << description;
         });
 
     QObject::connect(
         mechEyeService_.get(),
         &scan_tracking::mech_eye::MechEyeService::fatalError,
         [](scan_tracking::mech_eye::CaptureErrorCode code, const QString& message) {
-            qCritical(appLog) << "[MechEye] fatal error:" << static_cast<int>(code) << message;
+            qCritical(appLog) << "[MechEye] 致命错误：" << static_cast<int>(code) << message;
         });
 
     mechEyeService_->start();
-    qInfo(appLog) << "MechEye service started.";
+    qInfo(appLog) << "MechEye 服务已启动。";
 
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
     const auto visionConfig = configManager != nullptr
@@ -164,12 +164,12 @@ void ConsoleRuntime::initModules()
         hikCameraCService_.get(),
         &scan_tracking::vision::HikCameraService::fatalError,
         [](scan_tracking::vision::VisionErrorCode code, const QString& message) {
-            qCritical(appLog) << "[HikCamera] hik_camera_c fatal error:" 
+            qCritical(appLog) << "[HikCamera] hik_camera_c 致命错误：" 
                               << static_cast<int>(code) << message;
         });
 
     hikCameraCService_->start(visionConfig.hikCameraC, visionConfig.hikCaptureTimeoutMs);
-    qInfo(appLog) << "HikCamera C service started (connection only, no capture).";
+    qInfo(appLog) << "HikCamera C 服务已启动（仅连接，不采集）。";
 
     // 海康相机 C 控制器（独立管理第三台相机 - 智能相机）
     // 使用 TCP 通信协议进行控制和图像获取
@@ -180,13 +180,13 @@ void ConsoleRuntime::initModules()
         hikCameraCController_.get(),
         &scan_tracking::vision::HikCameraCController::stateChanged,
         [](scan_tracking::vision::HikCameraCState state, const QString& description) {
-            qInfo(appLog) << "[HikCameraCController] state =" << static_cast<int>(state) << description;
+            qInfo(appLog) << "[HikCameraCController] 状态 =" << static_cast<int>(state) << description;
         });
     QObject::connect(
         hikCameraCController_.get(),
         &scan_tracking::vision::HikCameraCController::fatalError,
         [](scan_tracking::vision::VisionErrorCode code, const QString& message) {
-            qCritical(appLog) << "[HikCameraCController] fatal error:" 
+            qCritical(appLog) << "[HikCameraCController] 致命错误：" 
                               << static_cast<int>(code) << message;
         });
     QObject::connect(
@@ -208,12 +208,12 @@ void ConsoleRuntime::initModules()
                     typeStr = "Unknown";
                     break;
             }
-            qInfo(appLog) << "[HikCameraCController] Capture completed:" << typeStr
-                          << imageData.size() << "bytes";
+            qInfo(appLog) << "[HikCameraCController] 采集完成：" << typeStr
+                          << imageData.size() << "字节";
         });
 
     hikCameraCController_->start(visionConfig);
-    qInfo(appLog) << "HikCamera C controller started (TCP communication mode).";
+    qInfo(appLog) << "HikCamera C 控制器已启动（TCP 通信模式）。";
 
 
     // 统一视觉编排层负责把“1 份点云 + 2 份矩阵”收口为一个算法输入包。
@@ -226,7 +226,7 @@ void ConsoleRuntime::initModules()
         visionPipelineService_.get(),
         &scan_tracking::vision::VisionPipelineService::stateChanged,
         [](scan_tracking::vision::VisionPipelineState state, const QString& description) {
-            qInfo(appLog) << "[VisionPipeline] state =" << static_cast<int>(state) << description;
+            qInfo(appLog) << "[VisionPipeline] 状态 =" << static_cast<int>(state) << description;
         });
     QObject::connect(
         visionPipelineService_.get(),
@@ -236,7 +236,7 @@ void ConsoleRuntime::initModules()
         });
 
     visionPipelineService_->start(visionConfig);
-    qInfo(appLog) << "Vision integration framework started.";
+    qInfo(appLog) << "视觉集成框架已启动。";
 
     trackingService_ = std::make_unique<scan_tracking::tracking::TrackingService>();
 
@@ -257,26 +257,26 @@ void ConsoleRuntime::initModules()
     hmiTcpServer_->setTrackingService(trackingService_.get());
     hmiTcpServer_->setHikCameraServices(hikCameraAService_.get(), hikCameraBService_.get());
     if (!hmiTcpServer_->start()) {
-        qWarning(appLog) << "HMI TCP server failed to start on port 9900.";
+        qWarning(appLog) << "HMI TCP 服务器在端口 9900 启动失败。";
     } else {
-        qInfo(appLog) << "HMI TCP server started on port 9900.";
+        qInfo(appLog) << "HMI TCP 服务器已在端口 9900 启动。";
     }
 
     // 等状态机接好信号后再建 Modbus 链路，避免启动期漏掉 connected 事件。
     if (!modbusService_->connectDevice()) {
-        qWarning(appLog) << "Modbus connection initiation failed.";
+        qWarning(appLog) << "Modbus 连接初始化失败。";
     }
-    qInfo(appLog) << "All modules initialized.";
+    qInfo(appLog) << "所有模块已初始化。";
 }
 
 void ConsoleRuntime::printStartupStatus()
 {
     qInfo(appLog).noquote()
-        << "Starting"
+        << "正在启动"
         << QString::fromStdString(scan_tracking::common::ApplicationInfo::name())
-        << "version"
+        << "版本"
         << QString::fromStdString(scan_tracking::common::ApplicationInfo::version());
-    qInfo(appLog).noquote() << "Event loop active. Press Ctrl+C to exit.";
+    qInfo(appLog).noquote() << "事件循环已激活。按 Ctrl+C 退出。";
 }
 
 void ConsoleRuntime::printShutdownStatus()
@@ -312,7 +312,7 @@ void ConsoleRuntime::printShutdownStatus()
     if (modbusService_) {
         modbusService_->disconnectDevice();
     }
-    qInfo(appLog).noquote() << "Stopping Scan Tracking core framework.";
+    qInfo(appLog).noquote() << "正在停止扫描跟踪核心框架。";
 }
 
 }  // namespace scan_tracking::app

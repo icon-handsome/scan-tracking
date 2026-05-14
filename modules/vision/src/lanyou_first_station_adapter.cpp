@@ -77,17 +77,17 @@ FirstStationDetectionResult runFirstStationDetection(
     result.holePointCount = static_cast<int>(holeCloud->size());
 
     if (outerCloud->empty()) {
-        result.message = QStringLiteral("Missing outer surface cloud for FirstOut detection.");
+        result.message = QStringLiteral("FirstOut 检测缺少外表面点云。");
         return result;
     }
 
     if (innerCloud->empty()) {
-        result.message = QStringLiteral("Missing inner surface cloud for FirstInliner detection.");
+        result.message = QStringLiteral("FirstInliner 检测缺少内表面点云。");
         return result;
     }
 
     if (holeCloud->empty()) {
-        result.message = QStringLiteral("Missing inner hole cloud for FirstInliner detection.");
+        result.message = QStringLiteral("FirstInliner 检测缺少内孔点云。");
         return result;
     }
 

@@ -81,8 +81,8 @@ scan_tracking::flow_control::StateMachine::PoseSourceResult parsePoseSource(
     if (raw.isEmpty()) {
         result.success = true;
         result.message = treatMissingAsSimulated
-            ? QStringLiteral("No external pose source configured; using simulated fallback.")
-            : QStringLiteral("External pose source not configured.");
+            ? QStringLiteral("未配置外部位姿源；使用模拟回退。")
+            : QStringLiteral("未配置外部位姿源。");
         result.x = fallback[0];
         result.y = fallback[1];
         result.z = fallback[2];
@@ -95,7 +95,7 @@ scan_tracking::flow_control::StateMachine::PoseSourceResult parsePoseSource(
     const auto tokens = raw.split(QRegExp(QStringLiteral("[,;\\s]+")), QString::SkipEmptyParts);
     if (tokens.size() < 6) {
         result.success = false;
-        result.message = QStringLiteral("Pose source %1 requires 6 values: x,y,z,rx,ry,rz.").arg(QString::fromLatin1(envName));
+        result.message = QStringLiteral("位姿源 %1 需要 6 个值：x,y,z,rx,ry,rz。").arg(QString::fromLatin1(envName));
         result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
         return result;
     }
@@ -104,48 +104,48 @@ scan_tracking::flow_control::StateMachine::PoseSourceResult parsePoseSource(
     const float x = tokens.value(0).toFloat(&ok);
     if (!ok) {
         result.success = false;
-        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.message = QStringLiteral("位姿源 %1 包含非数字值。").arg(QString::fromLatin1(envName));
         result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
         return result;
     }
     const float y = tokens.value(1).toFloat(&ok);
     if (!ok) {
         result.success = false;
-        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.message = QStringLiteral("位姿源 %1 包含非数字值。").arg(QString::fromLatin1(envName));
         result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
         return result;
     }
     const float z = tokens.value(2).toFloat(&ok);
     if (!ok) {
         result.success = false;
-        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.message = QStringLiteral("位姿源 %1 包含非数字值。").arg(QString::fromLatin1(envName));
         result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
         return result;
     }
     const float rx = tokens.value(3).toFloat(&ok);
     if (!ok) {
         result.success = false;
-        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.message = QStringLiteral("位姿源 %1 包含非数字值。").arg(QString::fromLatin1(envName));
         result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
         return result;
     }
     const float ry = tokens.value(4).toFloat(&ok);
     if (!ok) {
         result.success = false;
-        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.message = QStringLiteral("位姿源 %1 包含非数字值。").arg(QString::fromLatin1(envName));
         result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
         return result;
     }
     const float rz = tokens.value(5).toFloat(&ok);
     if (!ok) {
         result.success = false;
-        result.message = QStringLiteral("Pose source %1 contains non-numeric values.").arg(QString::fromLatin1(envName));
+        result.message = QStringLiteral("位姿源 %1 包含非数字值。").arg(QString::fromLatin1(envName));
         result.sourceName = QStringLiteral("%1 (invalid)").arg(sourceName);
         return result;
     }
 
     result.success = true;
-    result.message = QStringLiteral("Loaded pose from external source %1.").arg(QString::fromLatin1(envName));
+    result.message = QStringLiteral("从外部源 %1 加载位姿。").arg(QString::fromLatin1(envName));
     result.x = x;
     result.y = y;
     result.z = z;
@@ -375,7 +375,7 @@ void StateMachine::onModbusDisconnected()
     m_timeoutTimer->stop();    // 停止超时定时器
     m_isPollingPlc = false;    // 重置 PLC 轮询标志
     // 进入故障状态，报警代码 900，不中止当前任务（因为没有活跃任务），不通知 PLC
-    enterFaultState(900, QStringLiteral("Modbus disconnected"), true, false);
+    enterFaultState(900, QStringLiteral("Modbus 已断开连接"), true, false);
 }
 
 /**
@@ -387,7 +387,7 @@ void StateMachine::onModbusDisconnected()
  */
 void StateMachine::onModbusError(const QString& errorString)
 {
-    qWarning(LOG_FLOW).noquote() << "Modbus error propagated to flow control:" << errorString;
+    qWarning(LOG_FLOW).noquote() << "Modbus 错误传播到流程控制：" << errorString;
     recordModbusFailure(901, errorString);  // 记录 Modbus 失败，报警代码 901
 }
 
@@ -722,7 +722,7 @@ void StateMachine::executeActiveTask()
             << "Rejecting unsupported trigger"
             << protocol::triggerName(*m_activeTask.definition)
             << "trigOffset=" << m_activeTask.definition->trigOffset;
-        setAlarm(2, 624, QStringLiteral("Unsupported trigger received"));
+        setAlarm(2, 624, QStringLiteral("收到不支持的触发"));
         completeActiveTask(9, protocol::AckState::Failed, false);
         return;
     }
@@ -817,8 +817,8 @@ void StateMachine::executeScanSegmentTask()
             5,                    // Res 码：5 = 设备未就绪
             3,                    // 报警级别：3 = 严重错误
             720,                  // 报警代码：720 = 视觉编排服务不可用
-            QStringLiteral("Vision pipeline service unavailable"),
-            QStringLiteral("Vision pipeline service unavailable"));
+            QStringLiteral("视觉流水线服务不可用"),
+            QStringLiteral("视觉流水线服务不可用"));
         return;
     }
 
@@ -836,8 +836,8 @@ void StateMachine::executeScanSegmentTask()
             5,                    // Res 码：5 = 设备未就绪
             2,                    // 报警级别：2 = 警告
             721,                  // 报警代码：721 = 视觉编排忙或未就绪
-            QStringLiteral("Vision pipeline busy or not ready for capture"),
-            QStringLiteral("Vision pipeline busy or not ready for capture"));
+            QStringLiteral("视觉流水线忙或未就绪"),
+            QStringLiteral("视觉流水线忙或未就绪"));
         return;
     }
 
@@ -855,8 +855,8 @@ void StateMachine::executeScanSegmentTask()
             5,                    // Res 码：5 = 设备未就绪
             2,                    // 报警级别：2 = 警告
             721,                  // 报警代码：721 = 视觉编排忙或未就绪
-            QStringLiteral("Vision pipeline rejected capture request"),
-            QStringLiteral("Vision pipeline busy or not ready for capture"));
+            QStringLiteral("视觉流水线拒绝采集请求"),
+            QStringLiteral("视觉流水线忙或未就绪"));
         return;
     }
 
@@ -885,8 +885,8 @@ void StateMachine::onVisionBundleCaptureFinished(scan_tracking::vision::MultiCam
             resultCode,
             3,
             722,
-            QStringLiteral("MechEye capture failed in vision bundle"),
-            QStringLiteral("MechEye capture failed in vision bundle"));
+            QStringLiteral("视觉组合中 MechEye 采集失败"),
+            QStringLiteral("视觉组合中 MechEye 采集失败"));
         return;
     }
 
@@ -895,8 +895,8 @@ void StateMachine::onVisionBundleCaptureFinished(scan_tracking::vision::MultiCam
             5,
             2,
             723,
-            QStringLiteral("Hik mono capture failed in vision bundle"),
-            QStringLiteral("Hik mono capture failed in vision bundle"));
+            QStringLiteral("视觉组合中海康单目采集失败"),
+            QStringLiteral("视觉组合中海康单目采集失败"));
         return;
     }
 
@@ -933,7 +933,7 @@ void StateMachine::executePoseCheckTask()
         qWarning(LOG_FLOW).noquote() << "Tracking service unavailable for pose check.";
         writeFloatPlaceholder(protocol::registers::kPoseDeviationMm, 0.0f);
         completeActiveTask(7, protocol::AckState::Failed, false);
-        emit poseCheckFinished(false, 7, 0.0, identityRt, QStringLiteral("Tracking service unavailable"));
+        emit poseCheckFinished(false, 7, 0.0, identityRt, QStringLiteral("跟踪服务不可用"));
         return;
     }
 
@@ -1243,7 +1243,7 @@ void StateMachine::onProcessTimeout()
     }
 
     qWarning(LOG_FLOW).noquote() << "Task timed out:" << protocol::triggerName(*m_activeTask.definition);
-    setAlarm(2, 610, QStringLiteral("Task timeout"));  // 设置警告级别报警，代码 610
+    setAlarm(2, 610, QStringLiteral("任务超时"));  // 设置警告级别报警，代码 610
     m_activeTask.captureRequestId = 0;  // 清除采集请求 ID
 
     // P0修复：超时时清理已缓存的点云数据，防止内存泄漏
@@ -1299,7 +1299,7 @@ void StateMachine::onCaptureFinished(mech_eye::CaptureResult result)
     // 检查采集是否成功、点云数据是否有效，以及法向量是否齐全
     if (!result.success() || !result.pointCloud.isValid() || !result.pointCloud.hasNormals()) {
         const QString failureMessage =
-            result.errorMessage.isEmpty() ? QStringLiteral("Capture failed") : result.errorMessage;
+            result.errorMessage.isEmpty() ? QStringLiteral("采集失败") : result.errorMessage;
         finishScanSegmentFailure(
             mapCaptureErrorToResCode(result.errorCode),  // 映射错误码到 Res 码
             2,                                           // 报警级别：2 = 警告
@@ -1817,7 +1817,7 @@ void StateMachine::recordModbusFailure(quint16 alarmCode, const QString& message
 {
     ++m_consecutiveModbusFailures;
     qWarning(LOG_FLOW).noquote()
-        << "Recorded Modbus failure"
+        << "记录 Modbus 失败"
         << m_consecutiveModbusFailures << "/" << kMaxConsecutiveModbusFailures
         << "alarmCode=" << alarmCode
         << "reason=" << message;

@@ -86,7 +86,7 @@ void HikCameraCController::start(const scan_tracking::common::VisionConfig& conf
     m_started = true;
     setState(HikCameraCState::Initializing, QStringLiteral("海康相机 C 控制器正在初始化"));
 
-    qInfo(hikCControllerLog) << "HikCameraCController started with camera:"
+    qInfo(hikCControllerLog) << "HikCameraCController 已启动，相机："
                              << m_config.hikCameraC.logicalName
                              << "IP:" << m_config.hikCameraC.ipAddress
                              << "Key:" << m_config.hikCameraC.cameraKey;
@@ -112,7 +112,7 @@ void HikCameraCController::stop()
     // 停止测试定时器
     if (m_testCaptureTimer && m_testCaptureTimer->isActive()) {
         m_testCaptureTimer->stop();
-        qInfo(hikCControllerLog) << "Test capture timer stopped";
+        qInfo(hikCControllerLog) << "测试采集定时器已停止";
     }
 
     m_started = false;
@@ -167,10 +167,10 @@ void HikCameraCController::initializeTcpServer()
             emit fatalError(VisionErrorCode::DeviceOpenFailed, 
                           QStringLiteral("TCP server start failed. Port %1 may be in use by another process.").arg(listenPort));
         } else {
-            qInfo(hikCControllerLog) << "TCP server started successfully on retry";
+        qInfo(hikCControllerLog) << "重试后 TCP 服务器启动成功";
         }
     } else {
-        qInfo(hikCControllerLog) << "TCP server started successfully on" << listenIp << ":" << listenPort;
+        qInfo(hikCControllerLog) << "TCP 服务器启动成功，地址" << listenIp << ":" << listenPort;
     }
 }
 // 清理 TCP 服务器资源
@@ -180,7 +180,7 @@ void HikCameraCController::cleanupTcpServer()
         m_tcpServer->stop();
         m_tcpServer->deleteLater();
         m_tcpServer = nullptr;
-        qInfo(hikCControllerLog) << "TCP server cleaned up";
+        qInfo(hikCControllerLog) << "TCP 服务器已清理";
     }
 }
 
@@ -211,7 +211,7 @@ void HikCameraCController::initializeFtpMonitor()
         emit fatalError(VisionErrorCode::InvalidConfig, 
                       QStringLiteral("FTP monitor start failed for directory: %1").arg(m_ftpDirectory));
     } else {
-        qInfo(hikCControllerLog) << "FTP monitor started successfully for directory:" << m_ftpDirectory;
+        qInfo(hikCControllerLog) << "FTP 监控器启动成功，监控目录：" << m_ftpDirectory;
     }
 }
 
@@ -221,7 +221,7 @@ void HikCameraCController::cleanupFtpMonitor()
         m_ftpMonitor->stop();
         m_ftpMonitor->deleteLater();
         m_ftpMonitor = nullptr;
-        qInfo(hikCControllerLog) << "FTP monitor cleaned up";
+        qInfo(hikCControllerLog) << "FTP 监控器已清理";
     }
 }
 
@@ -264,9 +264,9 @@ bool HikCameraCController::requestCapture(CaptureType type)
     m_currentCaptureType = type;
     m_captureCounter++;
     
-    qInfo(hikCControllerLog) << "Requesting capture #" << m_captureCounter 
-                             << "from camera" << m_smartCameraIp
-                             << "type:" << getCaptureTypeString(type);
+    qInfo(hikCControllerLog) << "请求采集 #" << m_captureCounter 
+                             << "从相机" << m_smartCameraIp
+                             << "类型：" << getCaptureTypeString(type);
     
     return m_tcpServer->sendStartCaptureToCamera(m_smartCameraIp);
 }
@@ -282,7 +282,7 @@ void HikCameraCController::enableTestMode(bool enable, int intervalMs)
         
         m_testCaptureTimer->setInterval(intervalMs);
         m_testCaptureTimer->start();
-        qInfo(hikCControllerLog) << "Test mode enabled, capture interval:" << intervalMs << "ms";
+        qInfo(hikCControllerLog) << "测试模式已启用，采集间隔：" << intervalMs << "ms";
     } else {
         if (m_testCaptureTimer && m_testCaptureTimer->isActive()) {
             m_testCaptureTimer->stop();
@@ -368,7 +368,7 @@ void HikCameraCController::onCameraCStateChanged(
 
     // 当相机 SDK 连接成功后，记录状态（但主要依赖 TCP 连接）
     if (stateText == QStringLiteral("ready") && description.contains(QStringLiteral("已连接"))) {
-        qInfo(hikCControllerLog) << "Camera SDK connection ready (TCP communication will be used)";
+        qInfo(hikCControllerLog) << "相机 SDK 连接就绪（将使用 TCP 通信）";
     }
 }
 
@@ -386,13 +386,13 @@ void HikCameraCController::onCameraError(
 
 void HikCameraCController::onTcpServerStarted(QString listenIp, quint16 port)
 {
-    qInfo(hikCControllerLog) << "TCP server started on" << listenIp << ":" << port;
-    qInfo(hikCControllerLog) << "Waiting for smart camera" << m_smartCameraIp << "to connect...";
+    qInfo(hikCControllerLog) << "TCP 服务器已启动，地址" << listenIp << ":" << port;
+    qInfo(hikCControllerLog) << "等待智能相机" << m_smartCameraIp << "连接...";
 }
 
 void HikCameraCController::onTcpServerStopped()
 {
-    qInfo(hikCControllerLog) << "TCP server stopped";
+    qInfo(hikCControllerLog) << "TCP 服务器已停止";
 }
 
 void HikCameraCController::onTcpCameraConnected(QString cameraIp, quint16 cameraPort)
@@ -404,7 +404,7 @@ void HikCameraCController::onTcpCameraConnected(QString cameraIp, quint16 camera
         
         // 连接成功后，启动自动拍照测试（每10秒一次）
         enableTestMode(true, 10000);
-        qInfo(hikCControllerLog) << "Auto capture enabled: every 10 seconds";
+        qInfo(hikCControllerLog) << "自动采集已启用：每 10 秒一次";
     } else {
         qWarning(hikCControllerLog) << "Unexpected camera IP connected:" << cameraIp 
                                     << "(expected:" << m_smartCameraIp << ")";
@@ -421,7 +421,7 @@ void HikCameraCController::onTcpCameraDisconnected(QString cameraIp)
         // 停止测试定时器
         if (m_testCaptureTimer && m_testCaptureTimer->isActive()) {
             m_testCaptureTimer->stop();
-            qInfo(hikCControllerLog) << "Test capture timer stopped due to disconnection";
+            qInfo(hikCControllerLog) << "因断开连接，测试采集定时器已停止";
         }
     }
 }
@@ -479,7 +479,7 @@ void HikCameraCController::onTestCaptureTimer()
     CaptureType currentType = types[typeIndex];
     typeIndex = (typeIndex + 1) % 3;
     
-    qInfo(hikCControllerLog) << "Test capture triggered, type:" << getCaptureTypeString(currentType);
+    qInfo(hikCControllerLog) << "测试采集已触发，类型：" << getCaptureTypeString(currentType);
     requestCapture(currentType);
 }
 
@@ -489,12 +489,12 @@ void HikCameraCController::onTestCaptureTimer()
 
 void HikCameraCController::onFtpMonitorStarted(QString directory)
 {
-    qInfo(hikCControllerLog) << "FTP monitor started, watching directory:" << directory;
+    qInfo(hikCControllerLog) << "FTP 监控器已启动，监控目录：" << directory;
 }
 
 void HikCameraCController::onFtpMonitorStopped()
 {
-    qInfo(hikCControllerLog) << "FTP monitor stopped";
+    qInfo(hikCControllerLog) << "FTP 监控器已停止";
 }
 
 void HikCameraCController::onFtpNewImageDetected(ImageFileInfo imageInfo)

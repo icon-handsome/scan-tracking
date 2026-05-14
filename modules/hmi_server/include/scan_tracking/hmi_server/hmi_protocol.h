@@ -29,7 +29,7 @@ namespace msg_type {
 
 // --- 连接管理 ---
 inline constexpr const char* kHmiHello       = "hmi.hello";
-inline constexpr const char* kCoreHello      = "core.hello";
+inline constexpr const char* kCoreHello      = "core.hello";        
 inline constexpr const char* kHeartbeatPing  = "heartbeat.ping";
 inline constexpr const char* kHeartbeatPong  = "heartbeat.pong";
 

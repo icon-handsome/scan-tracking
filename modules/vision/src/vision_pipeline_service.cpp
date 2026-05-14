@@ -77,7 +77,7 @@ void VisionPipelineService::start(const scan_tracking::common::VisionConfig& con
     m_started = true;
     setState(
         VisionPipelineState::Ready,
-        QStringLiteral("Vision pipeline started and waiting for capture requests."));
+        QStringLiteral("视觉流水线已启动，等待采集请求。"));
 }
 
 void VisionPipelineService::stop()
@@ -89,21 +89,21 @@ void VisionPipelineService::stop()
     m_pending = PendingCaptureContext{};
     m_processing = false;
     m_started = false;
-    setState(VisionPipelineState::Stopped, QStringLiteral("Vision pipeline stopped."));
+    setState(VisionPipelineState::Stopped, QStringLiteral("视觉流水线已停止。"));
 }
 
 quint64 VisionPipelineService::requestCaptureBundle(int segmentIndex, quint32 taskId)
 {
     if (!m_started) {
-        emit fatalError(VisionErrorCode::NotStarted, QStringLiteral("Vision pipeline is not started."));
+        emit fatalError(VisionErrorCode::NotStarted, QStringLiteral("视觉流水线未启动。"));
         return 0;
     }
     if (m_pending.active || m_processing) {
-        emit fatalError(VisionErrorCode::Busy, QStringLiteral("A vision capture request is already in progress."));
+        emit fatalError(VisionErrorCode::Busy, QStringLiteral("视觉采集请求正在进行中。"));
         return 0;
     }
     if (m_mechEyeService == nullptr || m_hikCameraAService == nullptr || m_hikCameraBService == nullptr) {
-        emit fatalError(VisionErrorCode::InvalidConfig, QStringLiteral("Vision services are incomplete."));
+        emit fatalError(VisionErrorCode::InvalidConfig, QStringLiteral("视觉服务不完整。"));
         return 0;
     }
 
@@ -126,7 +126,7 @@ quint64 VisionPipelineService::requestCaptureBundle(int segmentIndex, quint32 ta
         scan_tracking::mech_eye::CaptureMode::Capture3DOnly,
         request.mechEyeTimeoutMs);
     if (pending.mechRequestId == 0) {
-        emit fatalError(VisionErrorCode::CaptureRejected, QStringLiteral("Failed to start MechEye capture."));
+        emit fatalError(VisionErrorCode::CaptureRejected, QStringLiteral("启动 MechEye 采集失败。"));
         return 0;
     }
 
@@ -139,14 +139,14 @@ quint64 VisionPipelineService::requestCaptureBundle(int segmentIndex, quint32 ta
     if (pending.hikARequestId == 0 || pending.hikBRequestId == 0) {
         emit fatalError(
             VisionErrorCode::CaptureRejected,
-            QStringLiteral("Failed to start Hik capture for one or both cameras."));
+            QStringLiteral("启动一台或两台海康相机采集失败。"));
         return 0;
     }
 
     m_pending = pending;
     setState(
         VisionPipelineState::Capturing,
-        QStringLiteral("Capture bundle requested: requestId=%1").arg(request.requestId));
+        QStringLiteral("组合采集请求已发送：requestId=%1").arg(request.requestId));
     return request.requestId;
 }
 
@@ -199,7 +199,7 @@ void VisionPipelineService::finishBundleIfReady()
         m_processing = false;
         setState(
             VisionPipelineState::Error,
-            QStringLiteral("One or more capture steps failed: %1").arg(bundle.summary()));
+            QStringLiteral("一个或多个采集步骤失败：%1").arg(bundle.summary()));
         emit bundleCaptureFinished(bundle);
         return;
     }
@@ -207,7 +207,7 @@ void VisionPipelineService::finishBundleIfReady()
     m_processing = true;
     setState(
         VisionPipelineState::Capturing,
-        QStringLiteral("All images captured, processing vision results."));
+        QStringLiteral("所有图像已采集，正在处理视觉结果。"));
 
     const auto lbConfig = m_lbPoseConfig;
     QPointer<VisionPipelineService> self(this);
@@ -233,8 +233,8 @@ void VisionPipelineService::finishBundleIfReady()
                 const bool ok = completedBundle.success();
                 self->setState(
                     ok ? VisionPipelineState::Ready : VisionPipelineState::Error,
-                    ok ? QStringLiteral("Vision bundle completed successfully.")
-                       : QStringLiteral("Vision bundle completed with errors."));
+                    ok ? QStringLiteral("视觉组合采集成功完成。")
+                       : QStringLiteral("视觉组合采集完成但有错误。"));
                 emit self->bundleCaptureFinished(completedBundle);
             },
             Qt::QueuedConnection);
