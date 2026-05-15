@@ -23,8 +23,7 @@ void HikCameraCController::registerMetaTypes()
     }
     qRegisterMetaType<scan_tracking::vision::HikCameraCState>("scan_tracking::vision::HikCameraCState");
     qRegisterMetaType<scan_tracking::vision::CaptureType>("scan_tracking::vision::CaptureType");
-    qRegisterMetaType<scan_tracking::vision::ImageFileInfo>("scan_tracking::vision::ImageFileInfo");
-    registered = true;
+    qRegisterMetaType<scan_tracking::vision::ImageFileInfo>("scan_tracking::vision::ImageFileInfo");    registered = true;
 }
 
 HikCameraCController::HikCameraCController(
@@ -42,9 +41,10 @@ HikCameraCController::~HikCameraCController()
 {
     cleanupFtpMonitor();
     cleanupTcpServer();
-    
+
     if (m_testCaptureTimer) {
         m_testCaptureTimer->stop();
+        m_testCaptureTimer->setParent(nullptr);
         delete m_testCaptureTimer;
         m_testCaptureTimer = nullptr;
     }
@@ -58,8 +58,16 @@ void HikCameraCController::start(const scan_tracking::common::VisionConfig& conf
     }
 
     m_config = config;
-    m_smartCameraIp = config.hikCameraC.ipAddress;  // 192.168.8.100
-    m_ftpDirectory = QStringLiteral("D:\\HikCameraFTP");  // FTP 上传目录
+    m_smartCameraIp = config.hikCameraC.ipAddress;
+    m_tcpListenIp = config.hikCameraCTcpListenIp.isEmpty()
+                        ? QStringLiteral("192.168.8.13")
+                        : config.hikCameraCTcpListenIp;
+    m_tcpListenPort = config.hikCameraCTcpListenPort > 0
+                          ? config.hikCameraCTcpListenPort
+                          : 8999;
+    m_ftpDirectory = config.hikCameraCFtpDirectory.isEmpty()
+                         ? QStringLiteral("D:/HikCameraFTP")
+                         : config.hikCameraCFtpDirectory;
 
     if (m_hikCameraCService == nullptr) {
         setState(HikCameraCState::Error, QStringLiteral("海康相机 C 服务未初始化"));
@@ -149,9 +157,9 @@ void HikCameraCController::initializeTcpServer()
     connect(m_tcpServer, &HikSmartCameraTcpServer::error,
             this, &HikCameraCController::onTcpError);
 
-    // 启动 TCP 服务器：监听 192.168.8.13:8999
-    QString listenIp = QStringLiteral("192.168.8.13");
-    quint16 listenPort = 8999;
+    // 启动 TCP 服务器，监听地址和端口来自配置
+    const QString listenIp = m_tcpListenIp;
+    const quint16 listenPort = m_tcpListenPort;
 
     // 尝试启动服务器，如果失败则等待一段时间后重试
     if (!m_tcpServer->start(listenIp, listenPort)) {
@@ -178,7 +186,9 @@ void HikCameraCController::cleanupTcpServer()
 {
     if (m_tcpServer != nullptr) {
         m_tcpServer->stop();
-        m_tcpServer->deleteLater();
+        // 切断父子关系后同步删除，避免 QObject 树析构时二次释放
+        m_tcpServer->setParent(nullptr);
+        delete m_tcpServer;
         m_tcpServer = nullptr;
         qInfo(hikCControllerLog) << "TCP 服务器已清理";
     }
@@ -219,7 +229,8 @@ void HikCameraCController::cleanupFtpMonitor()
 {
     if (m_ftpMonitor != nullptr) {
         m_ftpMonitor->stop();
-        m_ftpMonitor->deleteLater();
+        m_ftpMonitor->setParent(nullptr);
+        delete m_ftpMonitor;
         m_ftpMonitor = nullptr;
         qInfo(hikCControllerLog) << "FTP 监控器已清理";
     }
@@ -401,7 +412,7 @@ void HikCameraCController::onTcpCameraConnected(QString cameraIp, quint16 camera
     
     if (cameraIp == m_smartCameraIp) {
         setState(HikCameraCState::Ready, QStringLiteral("智能相机已通过 TCP 连接并就绪"));
-        
+
         // 连接成功后，启动自动拍照测试（每10秒一次）
         enableTestMode(true, 10000);
         qInfo(hikCControllerLog) << "自动采集已启用：每 10 秒一次";

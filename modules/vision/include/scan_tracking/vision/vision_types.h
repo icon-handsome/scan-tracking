@@ -94,6 +94,47 @@ struct HikPoseCaptureResult {
     }
 };
 
+// 海康相机可读写的关键参数快照
+struct HikCameraParams {
+    // ---- 曝光 ----
+    float exposureTimeUs = 0.0f;      // 曝光时间（微秒），对应 GenICam 节点 "ExposureTime"
+    float exposureTimeMinUs = 0.0f;
+    float exposureTimeMaxUs = 0.0f;
+    bool  autoExposureEnabled = false; // ExposureAuto != Off
+
+    // ---- 增益 ----
+    float gainDb = 0.0f;              // 模拟增益（dB），对应 "Gain"
+    float gainMinDb = 0.0f;
+    float gainMaxDb = 0.0f;
+    bool  autoGainEnabled = false;    // GainAuto != Off
+
+    // ---- 帧率 ----
+    float frameRateFps = 0.0f;        // 当前帧率，对应 "AcquisitionFrameRate"
+    bool  frameRateEnabled = false;   // AcquisitionFrameRateEnable
+
+    // ---- 触发 ----
+    quint32 triggerMode = 0;          // 0=Off(连续), 1=On(触发)，对应 "TriggerMode"
+
+    // ---- 图像尺寸 ----
+    qint64 width = 0;                 // 对应 "Width"
+    qint64 height = 0;                // 对应 "Height"
+
+    // ---- 像素格式 ----
+    quint32 pixelFormat = 0;          // 枚举值，对应 "PixelFormat"
+    QString pixelFormatStr;           // 枚举符号名，如 "Mono8"
+
+    // ---- 读取状态 ----
+    bool valid = false;               // true 表示本次读取成功
+    QString errorMessage;             // 读取失败时的错误描述
+};
+
+// 海康智能相机拍照类型
+enum class CaptureType {
+    SurfaceDefect = 0,      // 表面普通缺陷识别
+    WeldDefect = 1,         // 焊缝缺陷识别
+    NumberRecognition = 2,  // 编号识别
+};
+
 struct LbPoseResult {
     bool invoked = false;
     bool success = false;
@@ -158,3 +199,4 @@ Q_DECLARE_METATYPE(scan_tracking::vision::HikPoseCaptureResult)
 Q_DECLARE_METATYPE(scan_tracking::vision::LbPoseResult)
 Q_DECLARE_METATYPE(scan_tracking::vision::MultiCameraCaptureRequest)
 Q_DECLARE_METATYPE(scan_tracking::vision::MultiCameraCaptureBundle)
+Q_DECLARE_METATYPE(scan_tracking::vision::CaptureType)

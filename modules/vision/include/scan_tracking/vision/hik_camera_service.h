@@ -26,15 +26,19 @@ public:
         int defaultCaptureTimeoutMs);
     void stop();
 
-    bool isStarted() const { return m_started; }
+    bool isStarted() const;
     bool isConnected() const;
-    QString roleName() const { return m_roleName; }
-    const scan_tracking::common::VisionCameraEndpointConfig& endpointConfig() const
-    {
-        return m_endpointConfig;
-    }
+    QString roleName() const;
+    const scan_tracking::common::VisionCameraEndpointConfig& endpointConfig() const;
 
     quint64 requestPoseCapture(const QString& preferredCameraKey = {}, int timeoutMs = 0);
+
+    // 读取相机当前参数快照（需已连接，线程安全）
+    HikCameraParams readParams(QString* errorMessage = nullptr);
+
+    // 修改相机参数（需已连接，线程安全）
+    // 只修改 params 中 valid==true 的字段；调用前请确保相机未在采图
+    bool writeParams(const HikCameraParams& params, QString* errorMessage = nullptr);
 
 signals:
     void poseCaptureFinished(scan_tracking::vision::HikPoseCaptureResult result);

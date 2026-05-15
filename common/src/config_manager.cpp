@@ -112,6 +112,10 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("hikCameraCKey", "192.168.8.100");
     settings.setValue("hikCameraCIp", "192.168.8.100");
     settings.setValue("hikCameraCSerial", "");
+    settings.setValue("hikCameraCAccessMode", "monitor");
+    settings.setValue("hikCameraCTcpListenIp", "192.168.8.13");
+    settings.setValue("hikCameraCTcpListenPort", 8999);
+    settings.setValue("hikCameraCFtpDirectory", "D:/HikCameraFTP");
     settings.endGroup();
 
     settings.beginGroup("LbPose");
@@ -193,6 +197,10 @@ void ConfigManager::load(const QString& filePath)
     m_visionConfig.hikCameraC.cameraKey = settings.value("hikCameraCKey", "192.168.8.100").toString();
     m_visionConfig.hikCameraC.ipAddress = settings.value("hikCameraCIp", "192.168.8.100").toString();
     m_visionConfig.hikCameraC.serialNumber = settings.value("hikCameraCSerial", "").toString();
+    m_visionConfig.hikCameraC.accessMode = settings.value("hikCameraCAccessMode", "monitor").toString();
+    m_visionConfig.hikCameraCTcpListenIp = settings.value("hikCameraCTcpListenIp", "192.168.8.13").toString();
+    m_visionConfig.hikCameraCTcpListenPort = static_cast<quint16>(settings.value("hikCameraCTcpListenPort", 8999).toUInt());
+    m_visionConfig.hikCameraCFtpDirectory = settings.value("hikCameraCFtpDirectory", "D:/HikCameraFTP").toString();
     settings.endGroup();
 
     settings.beginGroup("LbPose");

@@ -26,12 +26,7 @@ enum class HikCameraCState {
     Stopped = 4,
 };
 
-// 拍照类型枚举
-enum class CaptureType {
-    SurfaceDefect = 0,      // 表面普通缺陷识别
-    WeldDefect = 1,         // 焊缝缺陷识别
-    NumberRecognition = 2,  // 编号识别
-};
+// 拍照类型枚举已在 vision_types.h 中定义（CaptureType）
 
 class HikCameraCController : public QObject {
     Q_OBJECT
@@ -108,8 +103,10 @@ private:
     scan_tracking::common::VisionConfig m_config;
     bool m_started = false;
     HikCameraCState m_state = HikCameraCState::Idle;
-    QString m_smartCameraIp;  // 智能相机 IP (192.168.8.100)
-    QString m_ftpDirectory;   // FTP 上传目录 (D:\HikCameraFTP)
+    QString m_smartCameraIp;      // 智能相机 IP，来自配置 hikCameraCIp
+    QString m_tcpListenIp;        // TCP 服务端监听 IP，来自配置 hikCameraCTcpListenIp
+    quint16 m_tcpListenPort = 0;  // TCP 服务端监听端口，来自配置 hikCameraCTcpListenPort
+    QString m_ftpDirectory;       // FTP 落图目录，来自配置 hikCameraCFtpDirectory
     CaptureType m_currentCaptureType = CaptureType::SurfaceDefect;
     int m_captureCounter = 0;
 };

@@ -2,6 +2,7 @@
 
 #include <QSettings>
 #include <QString>
+#include <QtCore/QtGlobal>
 
 namespace scan_tracking {
 namespace common {
@@ -34,6 +35,8 @@ struct VisionCameraEndpointConfig {
     QString cameraKey;
     QString ipAddress;
     QString serialNumber;
+    // "exclusive"（默认，独占控制）或 "monitor"（只读监控，允许与 SCMVS 共存）
+    QString accessMode = QStringLiteral("exclusive");
 };
 
 struct VisionConfig {
@@ -45,6 +48,11 @@ struct VisionConfig {
     VisionCameraEndpointConfig hikCameraA;
     VisionCameraEndpointConfig hikCameraB;
     VisionCameraEndpointConfig hikCameraC;
+    // 智能相机 C 的 TCP 服务端参数（IPC 作为服务端，相机主动连入）
+    QString hikCameraCTcpListenIp;
+    quint16 hikCameraCTcpListenPort;
+    // 智能相机 C 的 FTP 落图目录（FileZilla Server 存图根目录）
+    QString hikCameraCFtpDirectory;
 };
 
 struct FlowControlConfig {

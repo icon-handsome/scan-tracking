@@ -4,8 +4,6 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QLoggingCategory>
 
-#include "scan_tracking/vision/hik_camera_c_controller.h"
-
 Q_LOGGING_CATEGORY(hikFtpMonitorLog, "vision.hik_ftp_monitor")
 
 namespace scan_tracking {
@@ -64,8 +62,19 @@ bool HikSmartCameraFtpMonitor::start(const QString& ftpDirectory)
     // 启动定时检查
     m_fileCheckTimer->start();
 
-    // 扫描现有文件
-    scanDirectory();
+    // 把启动前已存在的文件全部标记为已处理，只监控后续新增文件
+    // 避免历史文件触发大量 imageReady 信号，也防止启动时的信号风暴
+    {
+        QDir dir(m_ftpDirectory);
+        const QFileInfoList existingFiles = dir.entryInfoList(
+            QDir::Files | QDir::NoDotAndDotDot, QDir::Time);
+        for (const QFileInfo& fi : existingFiles) {
+            if (isImageFile(fi.fileName())) {
+                m_processedFiles.insert(fi.absoluteFilePath());
+            }
+        }
+        qInfo(hikFtpMonitorLog) << "启动时跳过已有图片文件：" << m_processedFiles.size() << "个";
+    }
 
     qInfo(hikFtpMonitorLog) << "FTP 监控器已启动，监控目录：" << m_ftpDirectory;
     emit monitorStarted(m_ftpDirectory);

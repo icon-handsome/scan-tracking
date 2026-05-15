@@ -10,11 +10,10 @@
 #include <QtCore/QTimer>
 #include <QtCore/QDateTime>
 
+#include "scan_tracking/vision/vision_types.h"
+
 namespace scan_tracking {
 namespace vision {
-
-// 前向声明
-enum class CaptureType;
 
 // 图像文件信息
 struct ImageFileInfo {

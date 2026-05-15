@@ -127,7 +127,17 @@ void HikCameraService::start(
 void HikCameraService::stop()
 {
     m_started = false;
-    
+
+    // 等待连接线程结束（最多等待3秒）
+    int connectWait = 0;
+    while (m_connectInFlight.load() && connectWait < 300) {
+        QThread::msleep(10);
+        ++connectWait;
+    }
+    if (m_connectInFlight.load()) {
+        qWarning() << "[" << m_roleName << "] Connect thread did not finish within 3 seconds";
+    }
+
     // 先停止所有正在进行的操作
     if (m_impl != nullptr && m_impl->handle != nullptr) {
         // 停止采集 - 这应该会中断 GetImageBuffer/GetOneFrameTimeout
@@ -165,6 +175,11 @@ void HikCameraService::stop()
     emit stateChanged(m_roleName, QStringLiteral("stopped"), QStringLiteral("海康相机服务已停止。"));
 }
 
+bool HikCameraService::isStarted() const
+{
+    return m_started;
+}
+
 bool HikCameraService::isConnected() const
 {
     if (m_impl == nullptr) {
@@ -172,6 +187,16 @@ bool HikCameraService::isConnected() const
     }
     QMutexLocker locker(&m_impl->mutex);
     return m_impl->connected;
+}
+
+QString HikCameraService::roleName() const
+{
+    return m_roleName;
+}
+
+const scan_tracking::common::VisionCameraEndpointConfig& HikCameraService::endpointConfig() const
+{
+    return m_endpointConfig;
 }
 
 QString HikCameraService::resolveCameraKey(const QString& preferredCameraKey) const
@@ -410,18 +435,20 @@ quint64 HikCameraService::requestPoseCapture(const QString& preferredCameraKey, 
             seedResult.errorCode = VisionErrorCode::DeviceOpenFailed;
             seedResult.errorMessage = errorMessage;
             seedResult.elapsedMs = timer.elapsed();
-        } else if (!captureMonoFrame(effectiveTimeoutMs, seedResult.cameraKey, &errorMessage)) {
-            seedResult.errorCode = VisionErrorCode::CaptureRejected;
-            seedResult.errorMessage = errorMessage.isEmpty()
-                ? QStringLiteral("海康 Mono8 采图失败。")
-                : errorMessage;
-            seedResult.elapsedMs = timer.elapsed();
         } else {
-            seedResult.errorCode = VisionErrorCode::Success;
-            seedResult.errorMessage = QStringLiteral("海康 Mono8 黑白采图完成。");
-            seedResult.frame.frameId = seedResult.requestId;
-            seedResult.frame.sourceCameraKey = seedResult.cameraKey;
-            seedResult.elapsedMs = timer.elapsed();
+            if (!captureMonoFrame(effectiveTimeoutMs, seedResult.cameraKey, &errorMessage)) {
+                seedResult.errorCode = VisionErrorCode::CaptureRejected;
+                seedResult.errorMessage = errorMessage.isEmpty()
+                    ? QStringLiteral("海康 Mono8 采图失败。")
+                    : errorMessage;
+                seedResult.elapsedMs = timer.elapsed();
+            } else {
+                seedResult.errorCode = VisionErrorCode::Success;
+                seedResult.errorMessage = QStringLiteral("海康 Mono8 黑白采图完成。");
+                seedResult.frame.frameId = seedResult.requestId;
+                seedResult.frame.sourceCameraKey = seedResult.cameraKey;
+                seedResult.elapsedMs = timer.elapsed();
+            }
         }
 
         QMetaObject::invokeMethod(
@@ -530,7 +557,12 @@ bool HikCameraService::openMatchedDevice(const QString& preferredCameraKey, QStr
         return false;
     }
 
-    if (!MV_CC_IsDeviceAccessible(matchedDevice, MV_ACCESS_Exclusive)) {
+    // 根据配置决定访问模式：monitor 允许与 SCMVS 共存（只读），exclusive 独占控制
+    const bool isMonitor = m_endpointConfig.accessMode.compare(
+        QStringLiteral("monitor"), Qt::CaseInsensitive) == 0;
+    const unsigned int accessMode = isMonitor ? MV_ACCESS_Monitor : MV_ACCESS_Exclusive;
+
+    if (!isMonitor && !MV_CC_IsDeviceAccessible(matchedDevice, MV_ACCESS_Exclusive)) {
         if (errorMessage) {
             *errorMessage = QStringLiteral("目标海康相机当前不可独占访问：%1").arg(preferredCameraKey);
         }
@@ -547,15 +579,20 @@ bool HikCameraService::openMatchedDevice(const QString& preferredCameraKey, QStr
         return false;
     }
 
-    const int openResult = MV_CC_OpenDevice(handle, MV_ACCESS_Exclusive, 0);
+    const int openResult = MV_CC_OpenDevice(handle, accessMode, 0);
     if (openResult != MV_OK) {
         MV_CC_DestroyHandle(handle);
         if (errorMessage) {
-            *errorMessage = QStringLiteral("打开海康相机失败，错误码=0x%1")
+            *errorMessage = QStringLiteral("打开海康相机失败（模式=%1），错误码=0x%2")
+                .arg(isMonitor ? QStringLiteral("monitor") : QStringLiteral("exclusive"))
                 .arg(static_cast<quint32>(openResult), 8, 16, QLatin1Char('0'));
         }
         return false;
     }
+    qInfo() << QStringLiteral("[%1] 相机已以 %2 模式打开")
+                   .arg(m_roleName)
+                   .arg(isMonitor ? QStringLiteral("monitor（只读，与SCMVS共存）")
+                                  : QStringLiteral("exclusive（独占控制）"));
 
     if (matchedDevice->nTLayerType == MV_GIGE_DEVICE) {
         const int packetSize = MV_CC_GetOptimalPacketSize(handle);
@@ -564,88 +601,89 @@ bool HikCameraService::openMatchedDevice(const QString& preferredCameraKey, QStr
         }
     }
 
-    // 配置相机参数
-    int ret = 0;
-    
-    // 检查是否为读码相机（ID Reader）
-    MVCC_STRINGVALUE deviceType;
-    memset(&deviceType, 0, sizeof(MVCC_STRINGVALUE));
-    if (MV_CC_GetStringValue(handle, "DeviceType", &deviceType) == MV_OK) {
-        QString devType = QString::fromLocal8Bit(deviceType.chCurValue);
-        qInfo() << "设备类型:" << devType;
-        if (devType.contains("ID", Qt::CaseInsensitive) || devType.contains("Reader", Qt::CaseInsensitive)) {
-            qInfo() << "检测到读码相机，使用读码模式";
+    // 配置相机参数（监控模式下只读，跳过所有写操作）
+    if (isMonitor) {
+        qInfo() << QStringLiteral("[%1] 监控模式：跳过参数写入，仅读取").arg(m_roleName);
+    } else {
+        int ret = 0;
+
+        // 检查是否为读码相机（ID Reader）
+        MVCC_STRINGVALUE deviceType;
+        memset(&deviceType, 0, sizeof(MVCC_STRINGVALUE));
+        if (MV_CC_GetStringValue(handle, "DeviceType", &deviceType) == MV_OK) {
+            QString devType = QString::fromLocal8Bit(deviceType.chCurValue);
+            qInfo() << "设备类型:" << devType;
+            if (devType.contains("ID", Qt::CaseInsensitive) || devType.contains("Reader", Qt::CaseInsensitive)) {
+                qInfo() << "检测到读码相机，使用读码模式";
+            }
         }
-    }
-    
-    // 1. 设置触发模式为关闭（连续采集）
-    ret = MV_CC_SetEnumValue(handle, "TriggerMode", 0);
-    if (ret != MV_OK) {
-        qWarning() << "设置 TriggerMode 失败，错误码=0x" << QString::number(ret, 16);
-    } else {
-        qInfo() << "设置 TriggerMode=0 (连续采集) 成功";
-    }
-    
-    // 2. 尝试设置像素格式为 Mono8（读码相机可能不支持）
-    ret = MV_CC_SetEnumValue(handle, "PixelFormat", 0x01080001);
-    if (ret != MV_OK) {
-        qWarning() << "设置 PixelFormat 失败（读码相机可能不支持），错误码=0x" << QString::number(ret, 16);
-    } else {
-        qInfo() << "设置 PixelFormat=Mono8 成功";
-    }
-    
-    // 3. 设置曝光时间（微秒）
-    ret = MV_CC_SetFloatValue(handle, "ExposureTime", 50000.0f);
-    if (ret != MV_OK) {
-        qWarning() << "设置 ExposureTime 失败，错误码=0x" << QString::number(ret, 16);
-    } else {
-        qInfo() << "设置 ExposureTime=50000us 成功";
-    }
-    
-    // 4. 设置增益
-    ret = MV_CC_SetFloatValue(handle, "Gain", 0.0f);
-    if (ret != MV_OK) {
-        qWarning() << "设置 Gain 失败，错误码=0x" << QString::number(ret, 16);
-    } else {
-        qInfo() << "设置 Gain=0dB 成功";
-    }
-    
-    // 5. 读取并验证当前参数
-    MVCC_ENUMVALUE triggerModeValue;
-    if (MV_CC_GetEnumValue(handle, "TriggerMode", &triggerModeValue) == MV_OK) {
-        qInfo() << "当前 TriggerMode =" << triggerModeValue.nCurValue;
-    }
-    
-    MVCC_FLOATVALUE exposureValue;
-    if (MV_CC_GetFloatValue(handle, "ExposureTime", &exposureValue) == MV_OK) {
-        qInfo() << "当前 ExposureTime =" << exposureValue.fCurValue << "us";
-    }
-    
-    // 6. 检查相机是否支持 AcquisitionMode
-    MVCC_ENUMVALUE acqMode;
-    if (MV_CC_GetEnumValue(handle, "AcquisitionMode", &acqMode) == MV_OK) {
-        qInfo() << "当前 AcquisitionMode =" << acqMode.nCurValue;
-        // 设置为连续采集模式
-        MV_CC_SetEnumValue(handle, "AcquisitionMode", 2);  // 2=Continuous
-        qInfo() << "设置 AcquisitionMode=2 (Continuous)";
-    }
-    
-    // 7. 对于读码相机，尝试启用图像输出
-    ret = MV_CC_SetBoolValue(handle, "ImageOutputEnable", true);
-    if (ret == MV_OK) {
-        qInfo() << "启用图像输出成功（读码相机）";
-    }
-    
-    // 8. 启动采集（提前启动，让相机开始准备图像）
-    ret = MV_CC_StartGrabbing(handle);
-    if (ret != MV_OK) {
-        qWarning() << "提前启动采集失败，错误码=0x" << QString::number(ret, 16);
-    } else {
-        qInfo() << "提前启动采集成功，相机开始准备图像";
-        
-        // 等待一小段时间让相机稳定
-        QThread::msleep(100);
-        qInfo() << "等待相机稳定完成";
+
+        // 1. 设置触发模式为关闭（连续采集）
+        ret = MV_CC_SetEnumValue(handle, "TriggerMode", 0);
+        if (ret != MV_OK) {
+            qWarning() << "设置 TriggerMode 失败，错误码=0x" << QString::number(ret, 16);
+        } else {
+            qInfo() << "设置 TriggerMode=0 (连续采集) 成功";
+        }
+
+        // 2. 尝试设置像素格式为 Mono8（读码相机可能不支持）
+        ret = MV_CC_SetEnumValue(handle, "PixelFormat", 0x01080001);
+        if (ret != MV_OK) {
+            qWarning() << "设置 PixelFormat 失败（读码相机可能不支持），错误码=0x" << QString::number(ret, 16);
+        } else {
+            qInfo() << "设置 PixelFormat=Mono8 成功";
+        }
+
+        // 3. 设置曝光时间（微秒）
+        ret = MV_CC_SetFloatValue(handle, "ExposureTime", 50000.0f);
+        if (ret != MV_OK) {
+            qWarning() << "设置 ExposureTime 失败，错误码=0x" << QString::number(ret, 16);
+        } else {
+            qInfo() << "设置 ExposureTime=50000us 成功";
+        }
+
+        // 4. 设置增益
+        ret = MV_CC_SetFloatValue(handle, "Gain", 0.0f);
+        if (ret != MV_OK) {
+            qWarning() << "设置 Gain 失败，错误码=0x" << QString::number(ret, 16);
+        } else {
+            qInfo() << "设置 Gain=0dB 成功";
+        }
+
+        // 5. 读取并验证当前参数
+        MVCC_ENUMVALUE triggerModeValue;
+        if (MV_CC_GetEnumValue(handle, "TriggerMode", &triggerModeValue) == MV_OK) {
+            qInfo() << "当前 TriggerMode =" << triggerModeValue.nCurValue;
+        }
+
+        MVCC_FLOATVALUE exposureValue;
+        if (MV_CC_GetFloatValue(handle, "ExposureTime", &exposureValue) == MV_OK) {
+            qInfo() << "当前 ExposureTime =" << exposureValue.fCurValue << "us";
+        }
+
+        // 6. 检查相机是否支持 AcquisitionMode
+        MVCC_ENUMVALUE acqMode;
+        if (MV_CC_GetEnumValue(handle, "AcquisitionMode", &acqMode) == MV_OK) {
+            qInfo() << "当前 AcquisitionMode =" << acqMode.nCurValue;
+            MV_CC_SetEnumValue(handle, "AcquisitionMode", 2);  // 2=Continuous
+            qInfo() << "设置 AcquisitionMode=2 (Continuous)";
+        }
+
+        // 7. 对于读码相机，尝试启用图像输出
+        ret = MV_CC_SetBoolValue(handle, "ImageOutputEnable", true);
+        if (ret == MV_OK) {
+            qInfo() << "启用图像输出成功（读码相机）";
+        }
+
+        // 8. 启动采集
+        ret = MV_CC_StartGrabbing(handle);
+        if (ret != MV_OK) {
+            qWarning() << "提前启动采集失败，错误码=0x" << QString::number(ret, 16);
+        } else {
+            qInfo() << "提前启动采集成功，相机开始准备图像";
+            QThread::msleep(100);
+            qInfo() << "等待相机稳定完成";
+        }
     }
 
     {
@@ -663,6 +701,229 @@ bool HikCameraService::openMatchedDevice(const QString& preferredCameraKey, QStr
         errorMessage->clear();
     }
     return true;
+}
+
+// ============================================================================
+// 相机参数读取
+// ============================================================================
+
+HikCameraParams HikCameraService::readParams(QString* errorMessage)
+{
+    HikCameraParams p;
+
+    void* handle = nullptr;
+    {
+        QMutexLocker locker(&m_impl->mutex);
+        if (!m_impl->connected || m_impl->handle == nullptr) {
+            p.errorMessage = QStringLiteral("相机未连接，无法读取参数");
+            if (errorMessage) *errorMessage = p.errorMessage;
+            return p;
+        }
+        handle = m_impl->handle;
+    }
+
+    // ---- 辅助宏：读取失败时记录警告但继续 ----
+    auto warnOnFail = [&](int ret, const char* nodeName) {
+        if (ret != MV_OK) {
+            qWarning() << QStringLiteral("[%1] 读取节点 %2 失败，错误码=0x%3")
+                              .arg(m_roleName)
+                              .arg(QString::fromLatin1(nodeName))
+                              .arg(static_cast<quint32>(ret), 8, 16, QLatin1Char('0'));
+        }
+        return ret == MV_OK;
+    };
+
+    int ret = MV_OK;
+    MVCC_FLOATVALUE fVal{};
+    MVCC_ENUMVALUE eVal{};
+    MVCC_INTVALUE_EX iVal{};
+
+    // ---- 曝光时间 ----
+    std::memset(&fVal, 0, sizeof(fVal));
+    ret = MV_CC_GetFloatValue(handle, "ExposureTime", &fVal);
+    if (warnOnFail(ret, "ExposureTime")) {
+        p.exposureTimeUs    = fVal.fCurValue;
+        p.exposureTimeMinUs = fVal.fMin;
+        p.exposureTimeMaxUs = fVal.fMax;
+    }
+
+    // ---- 自动曝光 ----
+    std::memset(&eVal, 0, sizeof(eVal));
+    ret = MV_CC_GetEnumValue(handle, "ExposureAuto", &eVal);
+    if (warnOnFail(ret, "ExposureAuto")) {
+        p.autoExposureEnabled = (eVal.nCurValue != 0);  // 0=Off
+    }
+
+    // ---- 增益 ----
+    std::memset(&fVal, 0, sizeof(fVal));
+    ret = MV_CC_GetFloatValue(handle, "Gain", &fVal);
+    if (warnOnFail(ret, "Gain")) {
+        p.gainDb    = fVal.fCurValue;
+        p.gainMinDb = fVal.fMin;
+        p.gainMaxDb = fVal.fMax;
+    }
+
+    // ---- 自动增益 ----
+    std::memset(&eVal, 0, sizeof(eVal));
+    ret = MV_CC_GetEnumValue(handle, "GainAuto", &eVal);
+    if (warnOnFail(ret, "GainAuto")) {
+        p.autoGainEnabled = (eVal.nCurValue != 0);
+    }
+
+    // ---- 帧率使能 ----
+    std::memset(&eVal, 0, sizeof(eVal));
+    ret = MV_CC_GetEnumValue(handle, "AcquisitionFrameRateEnable", &eVal);
+    if (ret == MV_OK) {
+        p.frameRateEnabled = (eVal.nCurValue != 0);
+    } else {
+        // 部分相机用 Bool 节点，直接用 bool* 接收
+        bool bVal = false;
+        ret = MV_CC_GetBoolValue(handle, "AcquisitionFrameRateEnable", &bVal);
+        if (ret == MV_OK) p.frameRateEnabled = bVal;
+    }
+
+    // ---- 帧率 ----
+    std::memset(&fVal, 0, sizeof(fVal));
+    ret = MV_CC_GetFloatValue(handle, "AcquisitionFrameRate", &fVal);
+    if (warnOnFail(ret, "AcquisitionFrameRate")) {
+        p.frameRateFps = fVal.fCurValue;
+    }
+
+    // ---- 触发模式 ----
+    std::memset(&eVal, 0, sizeof(eVal));
+    ret = MV_CC_GetEnumValue(handle, "TriggerMode", &eVal);
+    if (warnOnFail(ret, "TriggerMode")) {
+        p.triggerMode = eVal.nCurValue;
+    }
+
+    // ---- 图像宽高 ----
+    std::memset(&iVal, 0, sizeof(iVal));
+    ret = MV_CC_GetIntValueEx(handle, "Width", &iVal);
+    if (warnOnFail(ret, "Width")) {
+        p.width = iVal.nCurValue;
+    }
+
+    std::memset(&iVal, 0, sizeof(iVal));
+    ret = MV_CC_GetIntValueEx(handle, "Height", &iVal);
+    if (warnOnFail(ret, "Height")) {
+        p.height = iVal.nCurValue;
+    }
+
+    // ---- 像素格式 ----
+    std::memset(&eVal, 0, sizeof(eVal));
+    ret = MV_CC_GetEnumValue(handle, "PixelFormat", &eVal);
+    if (warnOnFail(ret, "PixelFormat")) {
+        p.pixelFormat = eVal.nCurValue;
+        // 读取当前枚举值对应的符号名（如 "Mono8"）
+        MVCC_ENUMENTRY entry{};
+        entry.nValue = eVal.nCurValue;
+        if (MV_CC_GetEnumEntrySymbolic(handle, "PixelFormat", &entry) == MV_OK) {
+            p.pixelFormatStr = QString::fromLatin1(entry.chSymbolic);
+        } else {
+            p.pixelFormatStr = QStringLiteral("0x%1").arg(eVal.nCurValue, 8, 16, QLatin1Char('0'));
+        }
+    }
+
+    p.valid = true;
+    if (errorMessage) errorMessage->clear();
+    return p;
+}
+
+// ============================================================================
+// 相机参数修改
+// ============================================================================
+
+bool HikCameraService::writeParams(const HikCameraParams& params, QString* errorMessage)
+{
+    void* handle = nullptr;
+    {
+        QMutexLocker locker(&m_impl->mutex);
+        if (!m_impl->connected || m_impl->handle == nullptr) {
+            if (errorMessage) *errorMessage = QStringLiteral("相机未连接，无法修改参数");
+            return false;
+        }
+        handle = m_impl->handle;
+    }
+
+    // 监控模式下禁止写参数
+    const bool isMonitor = m_endpointConfig.accessMode.compare(
+        QStringLiteral("monitor"), Qt::CaseInsensitive) == 0;
+    if (isMonitor) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("[%1] 监控模式下不允许写入参数，请将 accessMode 改为 exclusive")
+                                .arg(m_roleName);
+        }
+        qWarning() << *errorMessage;
+        return false;
+    }
+
+    bool allOk = true;
+    int ret = MV_OK;
+
+    // ---- 辅助：写失败时记录错误 ----
+    auto checkWrite = [&](int r, const char* nodeName) {
+        if (r != MV_OK) {
+            const QString msg = QStringLiteral("[%1] 写入节点 %2 失败，错误码=0x%3")
+                                    .arg(m_roleName)
+                                    .arg(QString::fromLatin1(nodeName))
+                                    .arg(static_cast<quint32>(r), 8, 16, QLatin1Char('0'));
+            qWarning() << msg;
+            if (errorMessage && errorMessage->isEmpty()) *errorMessage = msg;
+            allOk = false;
+        }
+        return r == MV_OK;
+    };
+
+    // ---- 曝光时间（仅当值合理时写入）----
+    if (params.exposureTimeUs > 0.0f) {
+        ret = MV_CC_SetFloatValue(handle, "ExposureTime", params.exposureTimeUs);
+        checkWrite(ret, "ExposureTime");
+    }
+
+    // ---- 自动曝光 ----
+    // 0=Off, 1=Once, 2=Continuous
+    ret = MV_CC_SetEnumValue(handle, "ExposureAuto", params.autoExposureEnabled ? 2u : 0u);
+    checkWrite(ret, "ExposureAuto");
+
+    // ---- 增益（仅当值合理时写入）----
+    if (params.gainDb >= 0.0f) {
+        ret = MV_CC_SetFloatValue(handle, "Gain", params.gainDb);
+        checkWrite(ret, "Gain");
+    }
+
+    // ---- 自动增益 ----
+    ret = MV_CC_SetEnumValue(handle, "GainAuto", params.autoGainEnabled ? 2u : 0u);
+    checkWrite(ret, "GainAuto");
+
+    // ---- 帧率使能 ----
+    ret = MV_CC_SetBoolValue(handle, "AcquisitionFrameRateEnable", params.frameRateEnabled);
+    if (ret != MV_OK) {
+        // 部分相机用枚举节点
+        ret = MV_CC_SetEnumValue(handle, "AcquisitionFrameRateEnable", params.frameRateEnabled ? 1u : 0u);
+        checkWrite(ret, "AcquisitionFrameRateEnable");
+    }
+
+    // ---- 帧率（仅帧率使能时有意义）----
+    if (params.frameRateEnabled && params.frameRateFps > 0.0f) {
+        ret = MV_CC_SetFloatValue(handle, "AcquisitionFrameRate", params.frameRateFps);
+        checkWrite(ret, "AcquisitionFrameRate");
+    }
+
+    // ---- 触发模式 ----
+    ret = MV_CC_SetEnumValue(handle, "TriggerMode", params.triggerMode);
+    checkWrite(ret, "TriggerMode");
+
+    // ---- 像素格式（仅当非零时写入）----
+    if (params.pixelFormat != 0) {
+        ret = MV_CC_SetEnumValue(handle, "PixelFormat", params.pixelFormat);
+        checkWrite(ret, "PixelFormat");
+    }
+
+    if (allOk) {
+        qInfo() << QStringLiteral("[%1] 相机参数写入完成").arg(m_roleName);
+        if (errorMessage) errorMessage->clear();
+    }
+    return allOk;
 }
 
 void HikCameraService::closeDevice()
@@ -698,10 +959,55 @@ void HikCameraService::startAsyncConnect()
                     return;
                 }
                 if (ok) {
-                    emit stateChanged(m_roleName, QStringLiteral("ready"), QStringLiteral("海康相机已连接：%1 (%2)").arg(m_impl->serialNumber, m_impl->ipAddress));
+                    emit stateChanged(m_roleName, QStringLiteral("ready"),
+                        QStringLiteral("海康相机已连接：%1 (%2)")
+                            .arg(m_impl->serialNumber, m_impl->ipAddress));
+
+                    // 连接成功后立即读取并打印相机参数
+                    QString paramErr;
+                    const HikCameraParams p = readParams(&paramErr);
+                    if (p.valid) {
+                        qInfo().noquote()
+                            << QStringLiteral("[%1] 相机参数 | "
+                                              "曝光=%2 us (范围 %3~%4, 自动=%5) | "
+                                              "增益=%6 dB (范围 %7~%8, 自动=%9) | "
+                                              "帧率=%10 fps (使能=%11) | "
+                                              "触发=%12 | "
+                                              "分辨率=%13x%14 | "
+                                              "像素格式=%15")
+                                   .arg(m_roleName)
+                                   .arg(static_cast<double>(p.exposureTimeUs),    0, 'f', 1)
+                                   .arg(static_cast<double>(p.exposureTimeMinUs), 0, 'f', 0)
+                                   .arg(static_cast<double>(p.exposureTimeMaxUs), 0, 'f', 0)
+                                   .arg(p.autoExposureEnabled ? QStringLiteral("开") : QStringLiteral("关"))
+                                   .arg(static_cast<double>(p.gainDb),    0, 'f', 2)
+                                   .arg(static_cast<double>(p.gainMinDb), 0, 'f', 1)
+                                   .arg(static_cast<double>(p.gainMaxDb), 0, 'f', 1)
+                                   .arg(p.autoGainEnabled ? QStringLiteral("开") : QStringLiteral("关"))
+                                   .arg(static_cast<double>(p.frameRateFps), 0, 'f', 2)
+                                   .arg(p.frameRateEnabled ? QStringLiteral("开") : QStringLiteral("关"))
+                                   .arg(p.triggerMode == 0 ? QStringLiteral("连续") : QStringLiteral("触发"))
+                                   .arg(p.width)
+                                   .arg(p.height)
+                                   .arg(p.pixelFormatStr);
+                    } else {
+                        qWarning() << QStringLiteral("[%1] 读取相机参数失败：%2")
+                                          .arg(m_roleName, paramErr);
+                    }
                 } else {
-                    emit stateChanged(m_roleName, QStringLiteral("ready"), QStringLiteral("海康相机服务已启动，但尚未连接设备：%1").arg(errorMessage));
-                    emit fatalError(VisionErrorCode::DeviceNotFound, QStringLiteral("后台连接海康相机失败：%1").arg(cameraKey));
+                    // 监控模式连接失败是预期的（SCMVS 可能正在独占），不报致命错误
+                    const bool isMonitor = m_endpointConfig.accessMode.compare(
+                        QStringLiteral("monitor"), Qt::CaseInsensitive) == 0;
+                    emit stateChanged(m_roleName, QStringLiteral("ready"),
+                        QStringLiteral("海康相机服务已启动，但尚未连接设备：%1").arg(errorMessage));
+                    if (!isMonitor) {
+                        emit fatalError(VisionErrorCode::DeviceNotFound,
+                            QStringLiteral("后台连接海康相机失败：%1").arg(cameraKey));
+                    } else {
+                        qWarning() << QStringLiteral("[%1] 监控模式连接失败（SCMVS 可能正在独占），"
+                                                     "参数读取不可用，TCP/FTP 通信不受影响：%2")
+                                          .arg(m_roleName, errorMessage);
+                    }
                 }
             },
             Qt::QueuedConnection);
