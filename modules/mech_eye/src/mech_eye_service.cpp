@@ -187,6 +187,11 @@ void MechEyeService::onWorkerStateChanged(
     if (newState != CameraRuntimeState::Capturing) {
         m_busy = false;
     }
+
+    // 更新相机连接状态（后续用于设备在线状态字等场景）
+    m_cameraConnected = (newState == CameraRuntimeState::Ready ||
+                         newState == CameraRuntimeState::Capturing);
+
     emit stateChanged(newState, description);
 }
 

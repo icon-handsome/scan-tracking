@@ -514,7 +514,8 @@ bool MechEyeWorker::connectCamera(const QString& cameraKey, int timeoutMs, QStri
 
     m_connected = true;
     m_cameraInfo = makeSnapshot(*selectedIt, true);
-
+    // 设置 SDK 心跳间隔为 5 秒（默认 10 秒），用于检测相机网络断连
+    m_impl->camera.setHeartbeatInterval(5000);
     // 连接成功后打印相机基础参数
     printCameraParameters();
 
@@ -594,6 +595,10 @@ void MechEyeWorker::printCameraParameters()
     mmind::eye::CameraResolutions resolutions;
     m_impl->camera.getCameraResolutions(resolutions);
 
+    // 获取相机内参
+    mmind::eye::CameraIntrinsics intrinsics;
+    m_impl->camera.getCameraIntrinsics(intrinsics);
+
     // 2D 曝光模式和曝光时间
     std::string scan2DExposureMode;
     userSet.getEnumValue("Scan2DExposureMode", scan2DExposureMode);
@@ -605,20 +610,18 @@ void MechEyeWorker::printCameraParameters()
     double scan3DGain = 0.0;
     userSet.getFloatValue("Scan3DGain", scan3DGain);
 
-    // 点云处理 - 表面平滑
+    // 点云处理参数
     std::string surfaceSmoothing;
     userSet.getEnumValue("PointCloudSurfaceSmoothing", surfaceSmoothing);
 
-    // 点云处理 - 噪声去除
     std::string noiseRemoval;
     userSet.getEnumValue("PointCloudNoiseRemoval", noiseRemoval);
 
-    // 点云处理 - 离群点去除
     std::string outlierRemoval;
     userSet.getEnumValue("PointCloudOutlierRemoval", outlierRemoval);
 
     qInfo(LOG_MECHEYE_WORKER).noquote()
-        << "=== MechEye 相机参数 ===\n"
+        << "=== MechEye 相机信息 ===\n"
         << "  型号:" << m_cameraInfo.model << "\n"
         << "  序列号:" << m_cameraInfo.serialNumber << "\n"
         << "  IP:" << m_cameraInfo.ipAddress << "\n"
@@ -632,6 +635,18 @@ void MechEyeWorker::printCameraParameters()
         << "  表面平滑:" << QString::fromStdString(surfaceSmoothing) << "\n"
         << "  噪声去除:" << QString::fromStdString(noiseRemoval) << "\n"
         << "  离群点去除:" << QString::fromStdString(outlierRemoval);
+
+    // 打印深度相机内参（Nano Ultra 没有独立 2D 纹理相机，只打印深度内参）
+    const auto& depIntr = intrinsics.depth;
+    qInfo(LOG_MECHEYE_WORKER).noquote()
+        << "=== MechEye 深度相机内参 ===\n"
+        << "  fx=" << depIntr.cameraMatrix.fx << " fy=" << depIntr.cameraMatrix.fy << "\n"
+        << "  cx=" << depIntr.cameraMatrix.cx << " cy=" << depIntr.cameraMatrix.cy << "\n"
+        << "  畸变系数: k1=" << depIntr.cameraDistortion.k1
+        << " k2=" << depIntr.cameraDistortion.k2
+        << " p1=" << depIntr.cameraDistortion.p1
+        << " p2=" << depIntr.cameraDistortion.p2
+        << " k3=" << depIntr.cameraDistortion.k3;
 }
 
 }  // namespace mech_eye

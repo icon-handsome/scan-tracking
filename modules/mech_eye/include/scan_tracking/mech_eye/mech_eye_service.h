@@ -40,6 +40,11 @@ public:
     /* 获取当前相机运行状态 */
     CameraRuntimeState state() const { return m_currentState; }
 
+    /* 获取相机是否已连接（基于最近一次状态更新）
+     * 后续可用于设备在线状态字等场景，当前仅保存不使用。
+     */
+    bool isCameraConnected() const { return m_cameraConnected; }
+
     /* 主动刷新相机在线状态
      * 该调用会转发到 worker 线程，由 worker 重新探测或查询相机状态。
      */
@@ -109,6 +114,7 @@ private:
     bool m_busy = false;
     bool m_stopping = false;
     bool m_started = false;
+    bool m_cameraConnected = false;  // 相机连接状态（后续使用）
     CameraRuntimeState m_currentState = CameraRuntimeState::Idle;
 };
 
