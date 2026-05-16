@@ -392,42 +392,15 @@ void StateMachine::onModbusError(const QString& errorString)
 }
 
 /**
- * @brief 轮询 PLC 状态
+ * @brief 轮询 PLC 状态（Server 模式下为空操作）
  * 
- * 定期从 PLC 读取命令块寄存器，检测是否有新的触发请求。
- * 如果上一次读取尚未完成，则跳过本次轮询以避免请求堆积。
+ * 在 Server 模式下，PLC 主动写入命令区时会触发 onDataWritten → registersRead 信号，
+ * 不需要 IPC 主动轮询。保留此函数是为了兼容定时器连接，避免改动过大。
  */
 void StateMachine::pollPlcState()
 {
-    if (!m_modbus || !m_modbus->isConnected()) {
-        return;  // Modbus 未连接，直接返回
-    }
-
-    if (m_isPollingPlc) {
-        qWarning(LOG_FLOW).noquote()
-            << "Skipping PLC poll because previous read is still pending."
-            << "requestSeq=" << m_activePollRequestSequence
-            << "elapsedMs=" << (m_pollRequestTimer.isValid() ? m_pollRequestTimer.elapsed() : -1);
-        return;  // 上次读取仍在进行中，跳过本次轮询
-    }
-
-    m_isPollingPlc = true;  // 标记正在轮询
-    m_activePollRequestSequence = ++m_pollRequestSequence;
-    m_pollRequestTimer.restart();
-    if (m_activePollRequestSequence == 1 || (m_activePollRequestSequence % kPollLogEveryN) == 0) {
-        qDebug(LOG_FLOW).noquote()
-            << "Starting PLC poll request."
-            << "requestSeq=" << m_activePollRequestSequence
-            << "startAddress=" << protocol::registers::kCommandBlockStart
-            << "count=" << protocol::registers::kCommandBlockSize;
-    }
-    // 异步读取命令块寄存器（从 kCommandBlockStart 开始，共 kCommandBlockSize 个寄存器）
-    const bool readStarted = m_modbus->readRegisters(protocol::registers::kCommandBlockStart, protocol::registers::kCommandBlockSize);
-    if (!readStarted) {
-        qWarning(LOG_FLOW).noquote() << "Failed to start PLC polling read request";
-        m_isPollingPlc = false;  // 重置轮询标志，允许下次重试
-        m_activePollRequestSequence = 0;
-    }
+    // Server 模式：PLC 主动写入命令区，通过 registersRead 信号触发 handleRegistersRead
+    // 此函数保留为空操作，轮询定时器可用于其他周期性检查（如心跳超时检测）
 }
 
 /**
@@ -440,11 +413,6 @@ void StateMachine::pollPlcState()
  */
 void StateMachine::handleRegistersRead(int startAddress, const QVector<quint16>& values)
 {
-    // 如果是命令块的读取完成，重置轮询标志
-    if (startAddress == protocol::registers::kCommandBlockStart) {
-        m_isPollingPlc = false;
-    }
-
     // 验证是否是预期的命令块读取，且数据长度足够
     if (startAddress != protocol::registers::kCommandBlockStart ||
         values.size() < protocol::registers::kCommandBlockSize) {

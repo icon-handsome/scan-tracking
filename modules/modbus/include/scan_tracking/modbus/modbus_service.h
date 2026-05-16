@@ -4,24 +4,24 @@
 #include <QtCore/QTimer>
 #include <QtCore/QVector>
 #include <QtCore/QString>
-#include <QtSerialBus/QModbusTcpClient>
+#include <QtSerialBus/QModbusTcpServer>
 #include <QtCore/QMutex>
-
-class QModbusReply;
 
 namespace scan_tracking {
 namespace modbus {
 
 /**
- * @brief 工业级 Modbus 通信基础模块
+ * @brief Modbus TCP Server 模块（IPC 作为从站）
  *
- * 职责：
- * 1. 负责 IPC(Client) 与 PLC(Server) 的 Modbus TCP 连接管理
- * 2. 处理通信异常（如掉线、重试机制设防等）
- * 3. 提供读、写 Holding Registers 的核心异步与信号机制
+ * 架构：
+ * - IPC 作为 Modbus TCP Server（Slave），监听 502 端口
+ * - PLC 作为 Modbus TCP Client（Master），主动读写 IPC 的寄存器
+ * - PLC 每 100ms 用 FuncId=16 写入命令区（40001-40040）
+ * - PLC 每 100ms 用 FuncId=3 读取结果区（40101-40184）
  *
- * 与外部集成：
- * 采用异步回调（signal/slot）供流控中心或业务模块使用。
+ * 接口说明：
+ * - writeRegister/writeRegisters：IPC 侧主动更新结果区寄存器，PLC 下次读取时自动拿到新值
+ * - registersWrittenByPLC 信号：当 PLC 写入命令区时触发，替代原来的轮询+registersRead
  */
 class ModbusService : public QObject {
     Q_OBJECT
@@ -29,78 +29,59 @@ public:
     explicit ModbusService(QObject* parent = nullptr);
     ~ModbusService() override;
 
-    /**
-     * @brief 使用系统配置发起设备连接
-     * 会自动读取 ConfigManager 中加载好的 [Modbus] host 和 port。
-     */
+    /// 启动 Modbus TCP Server（替代原 connectDevice）
     bool connectDevice();
 
-    /**
-     * @brief 断开与设备的连接
-     */
+    /// 停止服务
     void disconnectDevice();
 
-    /**
-     * @brief 检查设备当前连接状态
-     */
+    /// Server 是否在监听
     bool isConnected() const;
 
-    /**
-     * @brief 异步读取保持寄存器 (Holding Registers)
-     * @param startAddress PLC侧 Modbus 地址偏移（不需要 +40001，直接传 0 ~ N）
-     * @param numberOfEntries 要读取的寄存器个数
-     */
+    /// 从本地寄存器映射中读取（同步，供状态机主动查询命令区使用）
     bool readRegisters(int startAddress, quint16 numberOfEntries);
 
-    /**
-     * @brief 异步写入单个寄存器
-     */
+    /// 写入本地寄存器映射（PLC 下次读取时获得新值）
     bool writeRegister(int startAddress, quint16 value);
-
-    /**
-     * @brief 异步写入多个寄存器
-     */
     bool writeRegisters(int startAddress, const QVector<quint16>& values);
 
 signals:
-    /// 当指定起始地址的一批寄存器数据更新时被发出
+    /// PLC 写入命令区后触发（等同于原 registersRead）
     void registersRead(int startAddress, QVector<quint16> values);
 
-    /// 当指定起始地址的寄存器读取失败时发出
+    /// 读取失败（Server 模式下基本不会触发，保留接口兼容）
     void registerReadFailed(int startAddress, const QString& errorString);
-    
-    /// P1修复：当指定起始地址的寄存器写入失败时发出
+
+    /// 写入失败（Server 模式下基本不会触发，保留接口兼容）
     void registerWriteFailed(int startAddress, const QString& errorString);
-    
-    /// 当通信或连接发生错误时发出
+
+    /// 错误信号
     void errorOccurred(const QString& errorString);
-    
-    /// 当成功连上 PLC
+
+    /// PLC 客户端连入
     void connected();
-    
-    /// 当网络意外或者主动断开
+
+    /// PLC 客户端断开
     void disconnected();
 
 private slots:
+    void onDataWritten(QModbusDataUnit::RegisterType table, int address, int size);
     void onStateChanged(QModbusDevice::State state);
     void onModbusError(QModbusDevice::Error error);
-    void reconnectIfNeeded();
 
 private:
-    void scheduleReconnect(const QString& reason);
-    void handleReadReply(QModbusReply* reply);
-        // P2改进：增加registerCount参数用于更详细的错误诊断
-        void handleWriteReply(QModbusReply* reply, int startAddress, int registerCount = 0);
-    
+    void initRegisterMap();
 
-    QModbusTcpClient* m_client = nullptr;
-    QTimer* m_reconnectTimer = nullptr;
+    QModbusTcpServer* m_server = nullptr;
     int m_unitId = 1;
-    bool m_reconnectEnabled = true;
+    quint16 m_port = 502;
+    bool m_listening = false;
     QMutex m_mutex;
-    int m_readRequestLogCounter = 0;
-    int m_readReplyLogCounter = 0;
-    int m_writeReplyLogCounter = 0;
+
+    // 命令区快照（用于变化检测）
+    QVector<quint16> m_lastCommandBlock;
+
+    int m_writeByPlcLogCounter = 0;
 };
 
 } // namespace modbus
