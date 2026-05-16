@@ -5,10 +5,14 @@
 #include <QtCore/QLoggingCategory>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
+#include <fstream>
 #include <limits>
 #include <vector>
-
+#include <qdir.h>
+#include <qcoreapplication.h>
+#include "scan_tracking/common/config_manager.h"
 #include "ErrorStatus.h"
 #include "area_scan_3d_camera/Camera.h"
 #include "area_scan_3d_camera/CameraProperties.h"
@@ -293,12 +297,66 @@ void MechEyeWorker::performCapture(const scan_tracking::mech_eye::CaptureRequest
 
         if (normalized.mode == CaptureMode::Capture3DOnly) {
             mmind::eye::Frame3D frame3D;
-            // 真实采集路径：直接让相机侧计算法向量，减少 IPC 侧额外计算开销。
-            status = m_impl->camera.capture3DWithNormal(
+
+            // ---- 采集前设置深度范围 ----
+            {
+                auto& userSet = m_impl->camera.currentUserSet();
+
+                // 从配置读取并设置深度范围
+                const auto& visionCfg = common::ConfigManager::instance()->visionConfig();
+                mmind::eye::Range<int> configuredRange(visionCfg.mechDepthRangeMin, visionCfg.mechDepthRangeMax);
+                auto setStatus = userSet.setRangeValue("DepthRange", configuredRange);
+                qInfo(LOG_MECHEYE_WORKER) << "[深度范围] 设置为 [" << configuredRange.min << "," << configuredRange.max << "] mm, status=" << setStatus.isOK();
+            }
+
+            // 先尝试 capture3D（不含相机侧法向量计算）
+            status = m_impl->camera.capture3D(
                 frame3D,
                 static_cast<unsigned int>(normalized.timeoutMs));
             if (status.isOK()) {
-                result.pointCloud = buildPointCloud3D(frame3D);
+                // 提取点云数据（含法向量，由 IPC 侧计算）
+                const auto cloudWithNormals = frame3D.getUntexturedPointCloudWithNormals();
+                result.pointCloud = ConvertPointCloudWithNormalsToPcl(cloudWithNormals, static_cast<quint64>(frame3D.frameId()));
+
+                const std::size_t totalPoints = cloudWithNormals.width() * cloudWithNormals.height();
+                const auto* pData = cloudWithNormals.data();
+
+                // 统计有效点
+                std::size_t validCount = 0;
+                if (pData && totalPoints > 0) {
+                    for (std::size_t i = 0; i < totalPoints; ++i) {
+                        if (std::isfinite(pData[i].point.x) && std::isfinite(pData[i].point.y) && std::isfinite(pData[i].point.z)) {
+                            ++validCount;
+                        }
+                    }
+                }
+
+                // 保存 PLY
+                const QString saveDir = QCoreApplication::applicationDirPath() + QStringLiteral("/Mech-Pictures");
+                QDir().mkpath(saveDir);
+                const QString ts = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
+                const QString plyPath = QStringLiteral("%1/cloud_%2_%3.ply").arg(saveDir).arg(normalized.requestId).arg(ts);
+
+                if (validCount > 0 && pData) {
+                    std::ofstream ofs(plyPath.toStdString(), std::ios::binary);
+                    if (ofs.is_open()) {
+                        ofs << "ply\nformat ascii 1.0\nelement vertex " << validCount
+                            << "\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nend_header\n";
+                        for (std::size_t i = 0; i < totalPoints; ++i) {
+                            const auto& pt = pData[i];
+                            if (std::isfinite(pt.point.x) && std::isfinite(pt.point.y) && std::isfinite(pt.point.z)) {
+                                ofs << pt.point.x << " " << pt.point.y << " " << pt.point.z << " "
+                                    << pt.normal.x << " " << pt.normal.y << " " << pt.normal.z << "\n";
+                            }
+                        }
+                        ofs.close();
+                        qInfo(LOG_MECHEYE_WORKER) << "PLY保存完成:" << plyPath << "有效点=" << validCount << "/" << totalPoints;
+                    } else {
+                        qWarning(LOG_MECHEYE_WORKER) << "无法打开PLY文件:" << plyPath;
+                    }
+                } else {
+                    qWarning(LOG_MECHEYE_WORKER) << "点云全NaN，无法保存PLY, 请检查DepthRange配置和目标物距离";
+                }
             }
         } else {
             mmind::eye::Frame2DAnd3D frame2DAnd3D;
@@ -307,6 +365,18 @@ void MechEyeWorker::performCapture(const scan_tracking::mech_eye::CaptureRequest
                 static_cast<unsigned int>(normalized.timeoutMs));
             if (status.isOK()) {
                 result.pointCloud = buildPointCloud2DAnd3D(frame2DAnd3D);
+                // 使用 SDK 内置方法保存纹理点云到文件
+                const QString saveDir = QCoreApplication::applicationDirPath() + QStringLiteral("/Mech-Pictures");
+                QDir().mkpath(saveDir);
+                const QString ts = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
+                const QString plyPath = QStringLiteral("%1/textured_%2_%3.ply").arg(saveDir).arg(normalized.requestId).arg(ts);
+                qInfo(LOG_MECHEYE_WORKER) << "正在保存纹理点云:" << plyPath;
+                const auto saveStatus = frame2DAnd3D.saveTexturedPointCloud(mmind::eye::FileFormat::PLY, plyPath.toStdString());
+                if (saveStatus.isOK()) {
+                    qInfo(LOG_MECHEYE_WORKER) << "纹理点云已保存（SDK）:" << plyPath;
+                } else {
+                    qWarning(LOG_MECHEYE_WORKER) << "纹理点云保存失败:" << QString::fromStdString(saveStatus.errorDescription);
+                }
             }
         }
 
@@ -610,6 +680,14 @@ void MechEyeWorker::printCameraParameters()
     double scan3DGain = 0.0;
     userSet.getFloatValue("Scan3DGain", scan3DGain);
 
+    // 3D 曝光时间
+    std::vector<double> scan3DExposureList;
+    userSet.getFloatArrayValue("Scan3DExposureSequence", scan3DExposureList);
+
+    // 深度范围（Range 类型）
+    mmind::eye::Range<int> depthRange;
+    userSet.getRangeValue("DepthRange", depthRange);
+
     // 点云处理参数
     std::string surfaceSmoothing;
     userSet.getEnumValue("PointCloudSurfaceSmoothing", surfaceSmoothing);
@@ -632,6 +710,8 @@ void MechEyeWorker::printCameraParameters()
         << "  2D 曝光模式:" << QString::fromStdString(scan2DExposureMode) << "\n"
         << "  2D 曝光时间:" << scan2DExposureTime << "ms\n"
         << "  3D 增益:" << scan3DGain << "\n"
+        << "  3D 曝光序列数量:" << scan3DExposureList.size() << "\n"
+        << "  深度范围:" << depthRange.min << " - " << depthRange.max << " mm\n"
         << "  表面平滑:" << QString::fromStdString(surfaceSmoothing) << "\n"
         << "  噪声去除:" << QString::fromStdString(noiseRemoval) << "\n"
         << "  离群点去除:" << QString::fromStdString(outlierRemoval);

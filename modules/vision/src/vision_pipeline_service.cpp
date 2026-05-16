@@ -130,18 +130,18 @@ quint64 VisionPipelineService::requestCaptureBundle(int segmentIndex, quint32 ta
         return 0;
     }
 
-    pending.hikARequestId = m_hikCameraAService->requestPoseCapture(
-        request.hikCameraAKey,
-        request.hikTimeoutMs);
-    pending.hikBRequestId = m_hikCameraBService->requestPoseCapture(
-        request.hikCameraBKey,
-        request.hikTimeoutMs);
-    if (pending.hikARequestId == 0 || pending.hikBRequestId == 0) {
-        emit fatalError(
-            VisionErrorCode::CaptureRejected,
-            QStringLiteral("启动一台或两台海康相机采集失败。"));
-        return 0;
-    }
+    // TODO: 海康 A/B 相机当前未接入，直接标记为完成（失败），不阻断流程。
+    // 当海康 A/B 正式上线后，恢复以下代码：
+    //   pending.hikARequestId = m_hikCameraAService->requestPoseCapture(...);
+    //   pending.hikBRequestId = m_hikCameraBService->requestPoseCapture(...);
+    pending.hikARequestId = 1;  // 占位，不发起实际采集
+    pending.hikBRequestId = 2;  // 占位，不发起实际采集
+    pending.hikADone = true;
+    pending.hikBDone = true;
+    pending.bundle.hikCameraAResult.errorCode = VisionErrorCode::DeviceNotFound;
+    pending.bundle.hikCameraAResult.errorMessage = QStringLiteral("海康A未接入（临时跳过）");
+    pending.bundle.hikCameraBResult.errorCode = VisionErrorCode::DeviceNotFound;
+    pending.bundle.hikCameraBResult.errorMessage = QStringLiteral("海康B未接入（临时跳过）");
 
     m_pending = pending;
     setState(
@@ -208,6 +208,19 @@ void VisionPipelineService::finishBundleIfReady()
     setState(
         VisionPipelineState::Capturing,
         QStringLiteral("所有图像已采集，正在处理视觉结果。"));
+
+    // TODO: 海康 A/B 未接入时跳过 LB 位姿检测，直接完成 bundle
+    // 当海康相机正式上线后，恢复 LB 位姿检测逻辑
+    if (!bundle.hikCameraAResult.success() || !bundle.hikCameraBResult.success()) {
+        m_processing = false;
+        auto completedBundle = bundle;
+        completedBundle.lbPoseResult.invoked = false;
+        completedBundle.lbPoseResult.success = false;
+        completedBundle.lbPoseResult.message = QStringLiteral("海康相机未就绪，跳过 LB 位姿检测");
+        setState(VisionPipelineState::Ready, QStringLiteral("视觉组合采集完成（跳过LB位姿）。"));
+        emit bundleCaptureFinished(completedBundle);
+        return;
+    }
 
     const auto lbConfig = m_lbPoseConfig;
     QPointer<VisionPipelineService> self(this);

@@ -42,6 +42,8 @@ struct VisionCameraEndpointConfig {
 struct VisionConfig {
     QString mechEyeCameraKey;
     int mechCaptureTimeoutMs;
+    int mechDepthRangeMin;
+    int mechDepthRangeMax;
     int hikConnectTimeoutMs;
     int hikCaptureTimeoutMs;
     QString hikSdkRoot;
