@@ -513,11 +513,44 @@ void StateMachine::handleRegistersRead(int startAddress, const QVector<quint16>&
             << rawRegisters.join(QStringLiteral(" "));
     }
 
-    // 打印变化字段：只在非首次读取且有字段变化时打印
+    // 打印变化字段：只在非首次读取且有字段变化时打印（带 PLC 地址和寄存器名）
     if (!previousCommandBlock.isEmpty()) {
-        QStringList changedFields;
-        const int compareCount = qMin(previousCommandBlock.size(), values.size());
+        static const char* const kRegisterNames[] = {
+            "PLC_Heartbeat",           // 0
+            "PLC_SystemState",         // 1
+            "Station_WorkMode",        // 2
+            "Flow_Enable",             // 3
+            "Safety_Status_Word",      // 4
+            "Cmd_StartAuto",           // 5
+            "Cmd_Pause",               // 6
+            "Cmd_Stop",                // 7
+            "Cmd_Reset",               // 8
+            "Cmd_ClearAlarms",         // 9
+            "TaskId_H",                // 10
+            "TaskId_L",                // 11
+            "ProductType",             // 12
+            "RecipeId",                // 13
+            "ScanSegmentIndex",        // 14
+            "ScanSegmentTotal",        // 15
+            "RequestTimeout_s",        // 16
+            "Reserved_17",             // 17
+            "Reserved_18",             // 18
+            "Trig_LoadGrasp",          // 19
+            "Trig_StationMaterialCheck", // 20
+            "Trig_PoseCheck",          // 21
+            "Trig_ScanSegment",        // 22
+            "Trig_Inspection",         // 23
+            "Trig_UnloadCalc",         // 24
+            "Trig_SelfCheck",          // 25
+            "Trig_CodeRead",           // 26
+            "Trig_ResultReset",        // 27
+            "Reserved_28",             // 28
+            "Reserved_29",             // 29
+        };
+        constexpr int kNameCount = sizeof(kRegisterNames) / sizeof(kRegisterNames[0]);
+        const int compareCount = qMin(previousCommandBlock.size(), qMin(values.size(), 30));
 
+        QStringList changedFields;
         for (int index = 0; index < compareCount; ++index) {
             const quint16 oldValue = previousCommandBlock.value(index);
             const quint16 newValue = values.value(index);
@@ -526,7 +559,10 @@ void StateMachine::handleRegistersRead(int startAddress, const QVector<quint16>&
                 continue;
             }
 
-            changedFields << QStringLiteral("%1:%2->%3")
+            const char* name = (index < kNameCount) ? kRegisterNames[index] : "?";
+            changedFields << QStringLiteral("  [%1] %2 (offset=%3): %4 -> %5")
+                .arg(index + 40001)
+                .arg(QString::fromLatin1(name))
                 .arg(index)
                 .arg(oldValue)
                 .arg(newValue);
@@ -534,8 +570,7 @@ void StateMachine::handleRegistersRead(int startAddress, const QVector<quint16>&
 
         if (!changedFields.isEmpty()) {
             qInfo(LOG_FLOW).noquote()
-                << "Command block changes:"
-                << changedFields.join(QStringLiteral(", "));
+                << "=== PLC 寄存器变化 ===" << "\n" << changedFields.join(QStringLiteral("\n"));
         }
     }
 
