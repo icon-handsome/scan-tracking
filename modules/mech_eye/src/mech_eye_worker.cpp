@@ -12,8 +12,10 @@
 #include "ErrorStatus.h"
 #include "area_scan_3d_camera/Camera.h"
 #include "area_scan_3d_camera/CameraProperties.h"
+#include "area_scan_3d_camera/CameraProperties.h"
 #include "area_scan_3d_camera/Frame2DAnd3D.h"
 #include "area_scan_3d_camera/Frame3D.h"
+#include "UserSet.h"
 
 Q_LOGGING_CATEGORY(LOG_MECHEYE_WORKER, "mech_eye.worker")
 
@@ -512,6 +514,10 @@ bool MechEyeWorker::connectCamera(const QString& cameraKey, int timeoutMs, QStri
 
     m_connected = true;
     m_cameraInfo = makeSnapshot(*selectedIt, true);
+
+    // 连接成功后打印相机基础参数
+    printCameraParameters();
+
     return true;
 }
 
@@ -570,6 +576,62 @@ PointCloudFrame MechEyeWorker::buildPointCloud2DAnd3D(const mmind::eye::Frame2DA
     return ConvertTexturedPointCloudWithNormalsToPcl(
         cloudWithNormals,
         static_cast<quint64>(frame.frame3D().frameId()));
+}
+
+void MechEyeWorker::printCameraParameters()
+{
+    if (!m_connected || !m_impl) {
+        return;
+    }
+
+    auto& userSet = m_impl->camera.currentUserSet();
+
+    // 获取当前用户设置名称
+    std::string userSetName;
+    userSet.getName(userSetName);
+
+    // 获取相机分辨率
+    mmind::eye::CameraResolutions resolutions;
+    m_impl->camera.getCameraResolutions(resolutions);
+
+    // 2D 曝光模式和曝光时间
+    std::string scan2DExposureMode;
+    userSet.getEnumValue("Scan2DExposureMode", scan2DExposureMode);
+
+    double scan2DExposureTime = 0.0;
+    userSet.getFloatValue("Scan2DExposureTime", scan2DExposureTime);
+
+    // 3D 增益
+    double scan3DGain = 0.0;
+    userSet.getFloatValue("Scan3DGain", scan3DGain);
+
+    // 点云处理 - 表面平滑
+    std::string surfaceSmoothing;
+    userSet.getEnumValue("PointCloudSurfaceSmoothing", surfaceSmoothing);
+
+    // 点云处理 - 噪声去除
+    std::string noiseRemoval;
+    userSet.getEnumValue("PointCloudNoiseRemoval", noiseRemoval);
+
+    // 点云处理 - 离群点去除
+    std::string outlierRemoval;
+    userSet.getEnumValue("PointCloudOutlierRemoval", outlierRemoval);
+
+    qInfo(LOG_MECHEYE_WORKER).noquote()
+        << "=== MechEye 相机参数 ===\n"
+        << "  型号:" << m_cameraInfo.model << "\n"
+        << "  序列号:" << m_cameraInfo.serialNumber << "\n"
+        << "  IP:" << m_cameraInfo.ipAddress << "\n"
+        << "  固件版本:" << m_cameraInfo.firmwareVersion << "\n"
+        << "  当前用户设置:" << QString::fromStdString(userSetName) << "\n"
+        << "  2D 分辨率:" << resolutions.texture.width << "x" << resolutions.texture.height << "\n"
+        << "  深度图分辨率:" << resolutions.depth.width << "x" << resolutions.depth.height << "\n"
+        << "  2D 曝光模式:" << QString::fromStdString(scan2DExposureMode) << "\n"
+        << "  2D 曝光时间:" << scan2DExposureTime << "ms\n"
+        << "  3D 增益:" << scan3DGain << "\n"
+        << "  表面平滑:" << QString::fromStdString(surfaceSmoothing) << "\n"
+        << "  噪声去除:" << QString::fromStdString(noiseRemoval) << "\n"
+        << "  离群点去除:" << QString::fromStdString(outlierRemoval);
 }
 
 }  // namespace mech_eye
