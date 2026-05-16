@@ -340,6 +340,9 @@ private:
     // 重置点云缓存
     void resetPointCloudCache();
 
+    // 保存点云到 Mech-Pictures 目录（PLY 格式）
+    void savePointCloudToFile(const scan_tracking::mech_eye::PointCloudFrame& cloud, int segmentIndex);
+
     // 将采集错误码映射为 RES 结果码
     // @param errorCode 采集错误码
     // @return RES 结果码

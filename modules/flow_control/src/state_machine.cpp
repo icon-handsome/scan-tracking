@@ -8,8 +8,15 @@
 #include <QtCore/QStringList>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QThread>
+#include <QtCore/QCoreApplication>
+#include <QtCore/QDateTime>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QTextStream>
 #include <cstring>
-
+#include <thread>
+#include <qdebug.h>
 namespace scan_tracking::flow_control {
 
 // 定义流程控制模块的日志分类
@@ -893,17 +900,25 @@ void StateMachine::onVisionBundleCaptureFinished(scan_tracking::vision::MultiCam
         return;
     }
 
+    // TODO: 海康 A/B 相机当前未接入，暂时绕过检查。
+    // 当海康 A/B 相机正式上线后，需要恢复以下检查：
+    //   if (!bundle.hikCameraAResult.success() || !bundle.hikCameraBResult.success()) {
+    //       finishScanSegmentFailure(5, 2, 723, ...);
+    //       return;
+    //   }
+    // 绕过原因：今天仅测试 MechEye 拍照+算法链路，海康相机物理未连接。
     if (!bundle.hikCameraAResult.success() || !bundle.hikCameraBResult.success()) {
-        finishScanSegmentFailure(
-            5,
-            2,
-            723,
-            QStringLiteral("视觉组合中海康单目采集失败"),
-            QStringLiteral("视觉组合中海康单目采集失败"));
-        return;
+        qWarning(LOG_FLOW).noquote()
+            << "[临时绕过] 海康 A/B 采集失败但不阻断流程"
+            << "hikA=" << bundle.hikCameraAResult.errorMessage
+            << "hikB=" << bundle.hikCameraBResult.errorMessage;
     }
 
     const auto& result = bundle.mechEyeResult;
+
+    // 保存点云到 Mech-Pictures 目录
+    savePointCloudToFile(result.pointCloud, m_activeTask.scanSegmentIndex);
+
     m_segmentCaptureResults.insert(m_activeTask.scanSegmentIndex, result);
     m_segmentCaptureBundles.insert(m_activeTask.scanSegmentIndex, bundle);
     writeScanSegmentResult(m_activeTask.scanSegmentIndex, 2, result.pointCloud.pointCount > 0 ? 1 : 0);
@@ -1773,6 +1788,97 @@ void StateMachine::writeInspectionResult(const InspectionSummary& summary)
         << "offsetXmm=" << summary.offsetXmm   // X 方向偏移（未在寄存器中写入，仅记录日志）
         << "offsetYmm=" << summary.offsetYmm   // Y 方向偏移
         << "offsetZmm=" << summary.offsetZmm;  // Z 方向偏移
+}
+
+/**
+ * @brief 保存点云到 Mech-Pictures 目录（PLY ASCII 格式，后台线程异步执行）
+ *
+ * 文件保存在 exe 同级目录的 Mech-Pictures/ 子目录下，
+ * 文件名格式：segment_<段号>_<时间戳>.ply
+ * 使用 detached thread 异步写入，不阻塞主线程和 Modbus 通信。
+ *
+ * @param cloud 点云帧数据（shared_ptr，线程安全）
+ * @param segmentIndex 扫描段索引
+ */
+void StateMachine::savePointCloudToFile(
+    const scan_tracking::mech_eye::PointCloudFrame& cloud,
+    int segmentIndex)
+{
+    if (!cloud.isValid()) {
+        qWarning(LOG_FLOW) << "savePointCloudToFile: 点云无效，跳过保存";
+        return;
+    }
+
+    // 在 exe 同级目录创建 Mech-Pictures 文件夹（轻量操作，主线程可执行）
+    const QString saveDir = QCoreApplication::applicationDirPath() + QStringLiteral("/Mech-Pictures");
+    QDir dir;
+    if (!dir.exists(saveDir)) {
+        dir.mkpath(saveDir);
+    }
+
+    // 生成文件名
+    const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
+    const QString fileName = QStringLiteral("%1/segment_%2_%3.ply")
+                                 .arg(saveDir)
+                                 .arg(segmentIndex, 2, 10, QChar('0'))
+                                 .arg(timestamp);
+
+    // 拷贝 shared_ptr 引用（引用计数+1，确保后台线程访问时数据仍有效）
+    const auto pointsXYZ = cloud.pointsXYZ;
+    const auto normalsXYZ = cloud.normalsXYZ;
+    const int pointCount = cloud.pointCount;
+    const bool hasNormals = cloud.hasNormals();
+
+    // 异步写入，不阻塞主线程
+    std::thread([fileName, pointsXYZ, normalsXYZ, pointCount, hasNormals]() {
+        QFile file(fileName);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            qWarning() << "[flow_control] savePointCloudToFile: 无法打开文件" << fileName;
+            return;
+        }
+
+        QTextStream out(&file);
+        const float* xyz = pointsXYZ->data();
+        const float* normals = hasNormals ? normalsXYZ->data() : nullptr;
+
+        // PLY ASCII header
+        out << "ply\n";
+        out << "format ascii 1.0\n";
+        out << "element vertex " << pointCount << "\n";
+        out << "property float x\n";
+        out << "property float y\n";
+        out << "property float z\n";
+        if (hasNormals) {
+            out << "property float nx\n";
+            out << "property float ny\n";
+            out << "property float nz\n";
+        }
+        out << "end_header\n";
+
+        // 写入点数据
+        int validCount = 0;
+        for (int i = 0; i < pointCount; ++i) {
+            const float x = xyz[i * 3];
+            const float y = xyz[i * 3 + 1];
+            const float z = xyz[i * 3 + 2];
+
+            // 跳过无效点（NaN 或全零）
+            if (x != x || y != y || z != z) continue;
+            if (x == 0.0f && y == 0.0f && z == 0.0f) continue;
+
+            out << x << " " << y << " " << z;
+            if (hasNormals && normals) {
+                out << " " << normals[i * 3] << " " << normals[i * 3 + 1] << " " << normals[i * 3 + 2];
+            }
+            out << "\n";
+            ++validCount;
+        }
+
+        file.close();
+        qInfo() << "[flow_control] 点云已保存:" << fileName
+                << "有效点数:" << validCount << "/" << pointCount
+                << "大小:" << QFileInfo(fileName).size() << "bytes";
+    }).detach();
 }
 
 /**
