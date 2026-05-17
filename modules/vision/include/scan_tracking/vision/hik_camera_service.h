@@ -51,7 +51,7 @@ private:
     static void registerMetaTypes();
     QString resolveCameraKey(const QString& preferredCameraKey) const;
     bool ensureConnected(const QString& preferredCameraKey, QString* errorMessage);
-    bool captureMonoFrame(int timeoutMs, const QString& cameraKey, QString* errorMessage);
+    bool captureMonoFrame(int timeoutMs, const QString& cameraKey, QString* errorMessage, HikMonoFrame* outFrame = nullptr);
     bool openMatchedDevice(const QString& preferredCameraKey, QString* errorMessage);
     void closeDevice();
     void startAsyncConnect();

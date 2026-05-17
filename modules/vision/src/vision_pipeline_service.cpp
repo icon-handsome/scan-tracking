@@ -4,7 +4,7 @@
 #include <QtCore/QPointer>
 
 #include <thread>
-
+#include <qdebug.h>
 #include "scan_tracking/common/config_manager.h"
 #include "scan_tracking/vision/hik_camera_service.h"
 #include "scan_tracking/vision/lb_pose_detection_adapter.h"
@@ -121,27 +121,31 @@ quint64 VisionPipelineService::requestCaptureBundle(int segmentIndex, quint32 ta
     pending.active = true;
     pending.bundle.request = request;
 
-    pending.mechRequestId = m_mechEyeService->requestCapture(
-        request.mechEyeCameraKey,
-        scan_tracking::mech_eye::CaptureMode::Capture3DOnly,
-        request.mechEyeTimeoutMs);
-    if (pending.mechRequestId == 0) {
-        emit fatalError(VisionErrorCode::CaptureRejected, QStringLiteral("启动 MechEye 采集失败。"));
+    // TODO: MechEye 暂时屏蔽（已验证通过），当前只测试海康 A/B
+    // pending.mechRequestId = m_mechEyeService->requestCapture(
+    //     request.mechEyeCameraKey,
+    //     scan_tracking::mech_eye::CaptureMode::Capture3DOnly,
+    //     request.mechEyeTimeoutMs);
+    pending.mechRequestId = 1;  // 占位
+    pending.mechDone = true;
+    pending.bundle.mechEyeResult.requestId = 1;
+    pending.bundle.mechEyeResult.errorCode = scan_tracking::mech_eye::CaptureErrorCode::Success;
+    pending.bundle.mechEyeResult.pointCloud.pointCount = 0;  // MechEye 未连接，点云为空
+
+    // 海康 A/B 正式采集
+    pending.hikARequestId = m_hikCameraAService->requestPoseCapture(
+        request.hikCameraAKey, request.hikTimeoutMs);
+    pending.hikBRequestId = m_hikCameraBService->requestPoseCapture(
+        request.hikCameraBKey, request.hikTimeoutMs);
+
+    if (pending.hikARequestId == 0) {
+        emit fatalError(VisionErrorCode::CaptureRejected, QStringLiteral("启动海康A采集失败。"));
         return 0;
     }
-
-    // TODO: 海康 A/B 相机当前未接入，直接标记为完成（失败），不阻断流程。
-    // 当海康 A/B 正式上线后，恢复以下代码：
-    //   pending.hikARequestId = m_hikCameraAService->requestPoseCapture(...);
-    //   pending.hikBRequestId = m_hikCameraBService->requestPoseCapture(...);
-    pending.hikARequestId = 1;  // 占位，不发起实际采集
-    pending.hikBRequestId = 2;  // 占位，不发起实际采集
-    pending.hikADone = true;
-    pending.hikBDone = true;
-    pending.bundle.hikCameraAResult.errorCode = VisionErrorCode::DeviceNotFound;
-    pending.bundle.hikCameraAResult.errorMessage = QStringLiteral("海康A未接入（临时跳过）");
-    pending.bundle.hikCameraBResult.errorCode = VisionErrorCode::DeviceNotFound;
-    pending.bundle.hikCameraBResult.errorMessage = QStringLiteral("海康B未接入（临时跳过）");
+    if (pending.hikBRequestId == 0) {
+        emit fatalError(VisionErrorCode::CaptureRejected, QStringLiteral("启动海康B采集失败。"));
+        return 0;
+    }
 
     m_pending = pending;
     setState(
@@ -167,10 +171,11 @@ void VisionPipelineService::onHikPoseCaptureFinished(scan_tracking::vision::HikP
         return;
     }
 
-    if (result.requestId == m_pending.hikARequestId) {
+    // 用 logicalName 区分来源（两个相机服务的 requestId 可能重复）
+    if (result.logicalName == m_config.hikCameraA.logicalName) {
         m_pending.bundle.hikCameraAResult = result;
         m_pending.hikADone = true;
-    } else if (result.requestId == m_pending.hikBRequestId) {
+    } else if (result.logicalName == m_config.hikCameraB.logicalName) {
         m_pending.bundle.hikCameraBResult = result;
         m_pending.hikBDone = true;
     } else {
@@ -226,10 +231,27 @@ void VisionPipelineService::finishBundleIfReady()
     QPointer<VisionPipelineService> self(this);
     std::thread([self, bundle, lbConfig]() mutable {
         auto completedBundle = bundle;
+        qInfo() << "[LB位姿] 开始检测, leftFrame=" << bundle.hikCameraAResult.frame.width << "x" << bundle.hikCameraAResult.frame.height
+                << "rightFrame=" << bundle.hikCameraBResult.frame.width << "x" << bundle.hikCameraBResult.frame.height;
+
         completedBundle.lbPoseResult = runLbPoseDetection(
             completedBundle.hikCameraAResult.frame,
             completedBundle.hikCameraBResult.frame,
             lbConfig);
+
+        const auto& lr = completedBundle.lbPoseResult;
+        qInfo() << "[LB位姿] 完成: success=" << lr.success << "message=" << lr.message
+                << "framePointCount=" << lr.framePointCount;
+        if (lr.poseMatrix.valid) {
+            qInfo() << "[LB位姿] Rt矩阵:";
+            for (int row = 0; row < 4; ++row) {
+                qInfo().noquote() << QString("  [%1, %2, %3, %4]")
+                    .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 0]), 12, 'f', 6)
+                    .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 1]), 12, 'f', 6)
+                    .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 2]), 12, 'f', 6)
+                    .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 3]), 12, 'f', 6);
+            }
+        }
 
         if (!self) {
             return;

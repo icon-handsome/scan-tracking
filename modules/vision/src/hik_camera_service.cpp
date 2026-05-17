@@ -208,7 +208,7 @@ QString HikCameraService::resolveCameraKey(const QString& preferredCameraKey) co
     return m_endpointConfig.logicalName.trimmed();
 }
 
-bool HikCameraService::captureMonoFrame(int timeoutMs, const QString& cameraKey, QString* errorMessage)
+bool HikCameraService::captureMonoFrame(int timeoutMs, const QString& cameraKey, QString* errorMessage, HikMonoFrame* outFrame)
 {
     // 先获取 handle 的副本，避免在长时间等待期间持有锁
     void* handle = nullptr;
@@ -316,6 +316,9 @@ bool HikCameraService::captureMonoFrame(int timeoutMs, const QString& cameraKey,
                 if (errorMessage) {
                     errorMessage->clear();
                 }
+                if (outFrame) {
+                    *outFrame = frame;
+                }
                 qInfo() << "[采图] 采图完成，帧ID=" << pFrameInfo.stFrameInfo.nFrameNum;
                 return true;
             }
@@ -401,6 +404,10 @@ bool HikCameraService::captureMonoFrame(int timeoutMs, const QString& cameraKey,
         m_impl->lastPixelFormat = QStringLiteral("Mono8");
     }
     
+    if (outFrame) {
+        *outFrame = frame;
+    }
+    
     if (errorMessage) {
         errorMessage->clear();
     }
@@ -436,7 +443,8 @@ quint64 HikCameraService::requestPoseCapture(const QString& preferredCameraKey, 
             seedResult.errorMessage = errorMessage;
             seedResult.elapsedMs = timer.elapsed();
         } else {
-            if (!captureMonoFrame(effectiveTimeoutMs, seedResult.cameraKey, &errorMessage)) {
+            HikMonoFrame capturedFrame;
+            if (!captureMonoFrame(effectiveTimeoutMs, seedResult.cameraKey, &errorMessage, &capturedFrame)) {
                 seedResult.errorCode = VisionErrorCode::CaptureRejected;
                 seedResult.errorMessage = errorMessage.isEmpty()
                     ? QStringLiteral("海康 Mono8 采图失败。")
@@ -445,9 +453,12 @@ quint64 HikCameraService::requestPoseCapture(const QString& preferredCameraKey, 
             } else {
                 seedResult.errorCode = VisionErrorCode::Success;
                 seedResult.errorMessage = QStringLiteral("海康 Mono8 黑白采图完成。");
+                seedResult.frame = capturedFrame;
                 seedResult.frame.frameId = seedResult.requestId;
                 seedResult.frame.sourceCameraKey = seedResult.cameraKey;
                 seedResult.elapsedMs = timer.elapsed();
+                qInfo() << "[" << m_roleName << "] 采图成功: frame=" << seedResult.frame.width << "x" << seedResult.frame.height
+                        << "pixels=" << (seedResult.frame.pixels ? seedResult.frame.pixels->size() : 0) << "bytes";
             }
         }
 
@@ -635,11 +646,11 @@ bool HikCameraService::openMatchedDevice(const QString& preferredCameraKey, QStr
         }
 
         // 3. 设置曝光时间（微秒）
-        ret = MV_CC_SetFloatValue(handle, "ExposureTime", 50000.0f);
+        ret = MV_CC_SetFloatValue(handle, "ExposureTime", 1307379.0f);
         if (ret != MV_OK) {
             qWarning() << "设置 ExposureTime 失败，错误码=0x" << QString::number(ret, 16);
         } else {
-            qInfo() << "设置 ExposureTime=50000us 成功";
+            qInfo() << "设置 ExposureTime=1307379us 成功";
         }
 
         // 4. 设置增益

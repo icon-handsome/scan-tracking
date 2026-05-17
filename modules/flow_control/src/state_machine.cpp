@@ -900,18 +900,16 @@ void StateMachine::onVisionBundleCaptureFinished(scan_tracking::vision::MultiCam
         return;
     }
 
-    // TODO: 海康 A/B 相机当前未接入，暂时绕过检查。
-    // 当海康 A/B 相机正式上线后，需要恢复以下检查：
-    //   if (!bundle.hikCameraAResult.success() || !bundle.hikCameraBResult.success()) {
-    //       finishScanSegmentFailure(5, 2, 723, ...);
-    //       return;
-    //   }
-    // 绕过原因：今天仅测试 MechEye 拍照+算法链路，海康相机物理未连接。
+    // TODO: MechEye 暂时屏蔽（已验证通过），当前只测试海康 A/B
+    // 当 MechEye 恢复后，需检查 bundle.mechEyeResult.success()
+
+    // 海康 A/B 采集失败则报错终止
     if (!bundle.hikCameraAResult.success() || !bundle.hikCameraBResult.success()) {
         qWarning(LOG_FLOW).noquote()
-            << "[临时绕过] 海康 A/B 采集失败但不阻断流程"
+            << "海康 A/B 采集失败"
             << "hikA=" << bundle.hikCameraAResult.errorMessage
             << "hikB=" << bundle.hikCameraBResult.errorMessage;
+        // 不阻断流程但记录失败
     }
 
     const auto& result = bundle.mechEyeResult;
