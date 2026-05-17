@@ -648,8 +648,11 @@ void StateMachine::processTrigger(const protocol::TriggerDefinition& trigger, co
         commandBlock.value(protocol::registers::kRequestTimeoutSeconds) > 0
         ? commandBlock.value(protocol::registers::kRequestTimeoutSeconds)
         : static_cast<quint16>(trigger.defaultTimeoutSeconds);
-    m_activeTask.scanSegmentIndex = resolveScanSegmentIndex(commandBlock); // 解析扫描分段索引
-    m_activeTask.scanSegmentTotal = commandBlock.value(protocol::registers::kScanSegmentTotal); // 总分段数
+    m_activeTask.scanSegmentIndex = resolveScanSegmentIndex(commandBlock); // 解析扫描分段索引（32位合并）
+    {
+        const auto* cfgMgr = scan_tracking::common::ConfigManager::instance();
+        m_activeTask.scanSegmentTotal = cfgMgr ? cfgMgr->trackingConfig().scanSegmentTotal : 1;
+    }
     m_activeTask.completionAnnounced = false;  // 重置完成宣告标志
     m_activeTask.captureRequestId = 0;         // 重置采集请求 ID
 
@@ -1997,7 +2000,11 @@ quint32 StateMachine::readTaskId(const QVector<quint16>& commandBlock) const
  */
 quint16 StateMachine::resolveScanSegmentIndex(const QVector<quint16>& commandBlock) const
 {
-    return commandBlock.value(protocol::registers::kScanSegmentIndex);
+    // 40015-40016 合并为 32 位整数（PLC 模拟量格式：高16位在前）
+    const quint16 high = commandBlock.value(protocol::registers::kScanSegmentIndex);
+    const quint16 low = commandBlock.value(protocol::registers::kScanSegmentIndexLow);
+    const quint32 combined = (static_cast<quint32>(high) << 16) | static_cast<quint32>(low);
+    return static_cast<quint16>(combined);  // 段索引不会超过 65535
 }
 
 /**
@@ -2011,8 +2018,12 @@ quint16 StateMachine::resolveScanSegmentIndex(const QVector<quint16>& commandBlo
  */
 bool StateMachine::validateScanSegmentRequest(const QVector<quint16>& commandBlock, QString* errorMessage)
 {
-    const int segmentIndex = resolveScanSegmentIndex(commandBlock);  // 获取分段索引
-    const int segmentTotal = commandBlock.value(protocol::registers::kScanSegmentTotal);  // 总分段数
+    const int segmentIndex = resolveScanSegmentIndex(commandBlock);  // 获取分段索引（32位合并）
+    // ScanSegmentTotal 从配置文件获取（PLC 不再下发此字段）
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    const int segmentTotal = configManager != nullptr
+        ? configManager->trackingConfig().scanSegmentTotal
+        : 0;
     // 计算允许的最大段号：不超过总段数和系统上限的最小值
     const int maxSegmentIndex = segmentTotal > 0 ? qMin(segmentTotal, kMaxScanSegmentIndex)
                                                  : kMaxScanSegmentIndex;

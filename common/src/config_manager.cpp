@@ -226,6 +226,7 @@ void ConfigManager::load(const QString& filePath)
     m_trackingConfig.firstStationOuterSegmentIndex = settings.value("firstStationOuterSegmentIndex", 1).toInt();
     m_trackingConfig.firstStationInnerSegmentIndex = settings.value("firstStationInnerSegmentIndex", 2).toInt();
     m_trackingConfig.firstStationHoleSegmentIndex = settings.value("firstStationHoleSegmentIndex", 3).toInt();
+    m_trackingConfig.scanSegmentTotal = settings.value("scanSegmentTotal", 3).toInt();
     settings.endGroup();
 
     QtMsgType minType = QtDebugMsg;

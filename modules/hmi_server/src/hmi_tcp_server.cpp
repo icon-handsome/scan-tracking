@@ -602,7 +602,7 @@ QJsonObject HmiTcpServer::buildPlcStatusPayload() const
     if (m_stateMachine) {
         namespace regs = flow_control::protocol::registers;
         const auto& cb = m_stateMachine->lastCommandBlock();
-        if (cb.size() > regs::kScanSegmentTotal) {
+        if (cb.size() > regs::kScanSegmentIndexLow) {
             payload[QLatin1String("plcHeartbeat")]    = cb.value(regs::kPlcHeartbeat);
             payload[QLatin1String("plcSystemState")]  = cb.value(regs::kPlcSystemState);
             payload[QLatin1String("workMode")]        = cb.value(regs::kStationWorkMode);
@@ -613,8 +613,13 @@ QJsonObject HmiTcpServer::buildPlcStatusPayload() const
                 static_cast<quint32>(cb.value(regs::kTaskIdLow)));
             payload[QLatin1String("productType")]     = cb.value(regs::kProductType);
             payload[QLatin1String("recipeId")]        = cb.value(regs::kRecipeId);
-            payload[QLatin1String("scanSegmentIndex")] = cb.value(regs::kScanSegmentIndex);
-            payload[QLatin1String("scanSegmentTotal")] = cb.value(regs::kScanSegmentTotal);
+            // ScanSegmentIndex 是 32 位（offset 14-15 合并）
+            const quint16 segHigh = cb.value(regs::kScanSegmentIndex);
+            const quint16 segLow = cb.value(regs::kScanSegmentIndexLow);
+            payload[QLatin1String("scanSegmentIndex")] = static_cast<int>((static_cast<quint32>(segHigh) << 16) | segLow);
+            // scanSegmentTotal 从配置获取，不再从 PLC 读取
+            const auto* cfgMgr = scan_tracking::common::ConfigManager::instance();
+            payload[QLatin1String("scanSegmentTotal")] = cfgMgr ? cfgMgr->trackingConfig().scanSegmentTotal : 0;
         }
     }
     return payload;

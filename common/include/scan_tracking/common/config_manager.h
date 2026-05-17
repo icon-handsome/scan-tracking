@@ -67,6 +67,7 @@ struct TrackingConfig {
     int firstStationOuterSegmentIndex;
     int firstStationInnerSegmentIndex;
     int firstStationHoleSegmentIndex;
+    int scanSegmentTotal;  // 扫描段总数（从 config.ini 获取，PLC不下发）
 };
 
 struct LbPoseConfig {

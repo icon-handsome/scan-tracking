@@ -129,8 +129,9 @@ constexpr int kTaskIdHigh = 10;          ///< 任务ID高16位：唯一标识当
 constexpr int kTaskIdLow = 11;           ///< 任务ID低16位：与高位组合成32位任务ID
 constexpr int kProductType = 12;         ///< 产品类型代码：区分不同规格的产品型号
 constexpr int kRecipeId = 13;            ///< 配方ID：选择对应的工艺参数配方
-constexpr int kScanSegmentIndex = 14;    ///< 当前扫描段索引：指示正在执行的扫描段落编号（从0开始）
-constexpr int kScanSegmentTotal = 15;    ///< 扫描段总数：该产品需要完成的扫描段落数量
+constexpr int kScanSegmentIndex = 14;    ///< 当前扫描段索引（32位整数，占2个寄存器：offset 14 高16位 + offset 15 低16位）
+                                         ///< PLC 使用模拟量格式，高位在前（Big-Endian word order）
+constexpr int kScanSegmentIndexLow = 15; ///< 扫描段索引低16位（与 kScanSegmentIndex 组成32位值）
 constexpr int kRequestTimeoutSeconds = 16;///< 请求超时时间：覆盖默认超时值的自定义超时设定（秒）
 
 // ==================== 结果区寄存器（IPC → PLC）====================
