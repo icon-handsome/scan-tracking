@@ -10,27 +10,13 @@
 
     "task.allowAutomaticTasks": "off",
 
-    "clangd.enable": true,
-    "clangd.path": "C:/Users/wyx/AppData/Local/Microsoft/WinGet/Packages/LLVM.clangd_Microsoft.Winget.Source_8wekyb3d8bbwe/clangd_22.1.0/bin/clangd.exe",
-    "clangd.checkUpdates": false,
-    "clangd.detectExtensionConflicts": false,
-    "clangd.semanticHighlighting": false,
-    "clangd.onConfigChanged": "ignore",
-    "clangd.arguments": [
-        "--background-index",
-        "--pch-storage=disk",
-        "-j=4",
-        "--clang-tidy=0",
-        "--header-insertion=never",
-        "--query-driver=C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.29.30133/bin/Hostx64/x64/cl.exe",
-        "--log=info"
-    ],
+    "clangd.enable": false,
 
-    "C_Cpp.intelliSenseEngine": "Disabled",
-    "C_Cpp.errorSquiggles": "Disabled",
-    "C_Cpp.intelliSenseEngineFallback": "Disabled",
-    "C_Cpp.autocomplete": "Disabled",
-    "C_Cpp.codeAnalysis.runAutomatically": false,
+    "C_Cpp.intelliSenseEngine": "Default",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/compile_commands.json",
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.autocomplete": "default",
+    "C_Cpp.codeAnalysis.runAutomatically": true,
     "C_Cpp.workspaceSymbols": "None",
     "C_Cpp.enhancedColorization": "Disabled",
     "C_Cpp.formatting": "Disabled",

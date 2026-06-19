@@ -1,97 +1,1402 @@
 {
   "version": "1.0",
   "description": "封头检测多路径扫描配置文件",
-  "lastModified": "2026-05-27",
+  "lastModified": "2026-06-18",
   "_deprecationNote": "推荐改用 config/scan_paths/station1_default.json；本文件保留用于向后兼容。",
-  "_fieldTestNote": "单路径联调：段1转盘扫→段2-6封头5点→段7转盘扫→段8-12封头5点；PLC Trig_ScanSegment 段号 1..12 后 Trig_Inspection",
-
+  "_fieldTestNote": "六路径联调：path1=7, path2=19, path3=1, path4=4, path5=8, path6=144；各路径段号均从1起，全部非转动点；扫满后 Trig_Inspection",
   "calibrationMatrix": {
     "_todo": "TODO(calibration): 当前 T0 为临时联调用单位矩阵；正式投产前须替换为现场标定的 Mech-Eye → 机械臂/世界 4×4。",
     "calibrationStatus": "PLACEHOLDER_IDENTITY_FOR_TEMP_TEST",
     "T0": [
-      [1.0, 0.0, 0.0, 0.0],
-      [0.0, 1.0, 0.0, 0.0],
-      [0.0, 0.0, 1.0, 0.0],
-      [0.0, 0.0, 0.0, 1.0]
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
     ],
     "description": "Mech-Eye 相机到机械臂基座的标定变换矩阵 (4x4)，行主序",
     "unit": "mm for translation, no unit for rotation"
   },
-
   "scanPaths": [
     {
       "pathId": 1,
-      "pathName": "单路径-转盘+封头×2",
+      "pathName": "路径1-7点",
       "inspectionType": "bevel",
-      "description": "段1/7转盘(3D+2D+LBN)；段2-6、8-12封头各5点(仅3D)",
+      "description": "7个扫描点，仅3D，无转盘",
       "enabled": true,
-      "totalPoints": 12,
+      "totalPoints": 7,
       "points": [
-        { "pointIndex": 1, "pointName": "转盘-第1次", "needRotation": true, "rotationAngle": 0, "description": "机械臂在转盘上扫，需2D+LBN" },
-        { "pointIndex": 2, "pointName": "封头-1-1", "needRotation": false, "rotationAngle": 0, "description": "封头第1轮点1" },
-        { "pointIndex": 3, "pointName": "封头-1-2", "needRotation": false, "rotationAngle": 0, "description": "封头第1轮点2" },
-        { "pointIndex": 4, "pointName": "封头-1-3", "needRotation": false, "rotationAngle": 0, "description": "封头第1轮点3" },
-        { "pointIndex": 5, "pointName": "封头-1-4", "needRotation": false, "rotationAngle": 0, "description": "封头第1轮点4" },
-        { "pointIndex": 6, "pointName": "封头-1-5", "needRotation": false, "rotationAngle": 0, "description": "封头第1轮点5" },
-        { "pointIndex": 7, "pointName": "转盘-第2次", "needRotation": true, "rotationAngle": 0, "description": "机械臂回转盘再扫，需2D+LBN" },
-        { "pointIndex": 8, "pointName": "封头-2-1", "needRotation": false, "rotationAngle": 0, "description": "封头第2轮点1" },
-        { "pointIndex": 9, "pointName": "封头-2-2", "needRotation": false, "rotationAngle": 0, "description": "封头第2轮点2" },
-        { "pointIndex": 10, "pointName": "封头-2-3", "needRotation": false, "rotationAngle": 0, "description": "封头第2轮点3" },
-        { "pointIndex": 11, "pointName": "封头-2-4", "needRotation": false, "rotationAngle": 0, "description": "封头第2轮点4" },
-        { "pointIndex": 12, "pointName": "封头-2-5", "needRotation": false, "rotationAngle": 0, "description": "封头第2轮点5" }
+        {
+          "pointIndex": 1,
+          "pointName": "路径1-点1",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 2,
+          "pointName": "路径1-点2",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 3,
+          "pointName": "路径1-点3",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 4,
+          "pointName": "路径1-点4",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 5,
+          "pointName": "路径1-点5",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 6,
+          "pointName": "路径1-点6",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 7,
+          "pointName": "路径1-点7",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        }
       ]
     },
     {
       "pathId": 2,
-      "pathName": "路径2-内圈扫描",
-      "inspectionType": "hole",
-      "holeConfigPath": "hole/config/path2.json",
-      "description": "本轮单路径联调未启用",
-      "enabled": false,
-      "totalPoints": 6,
+      "pathName": "路径2-19点",
+      "inspectionType": "bevel",
+      "description": "19个扫描点，仅3D，无转盘",
+      "enabled": true,
+      "totalPoints": 19,
       "points": [
-        { "pointIndex": 1, "pointName": "内圈点1", "needRotation": false, "rotationAngle": 0, "description": "仅3D" },
-        { "pointIndex": 2, "pointName": "内圈点2", "needRotation": false, "rotationAngle": 0, "description": "仅3D" },
-        { "pointIndex": 3, "pointName": "内圈点3", "needRotation": false, "rotationAngle": 0, "description": "仅3D" },
-        { "pointIndex": 4, "pointName": "内圈点4", "needRotation": false, "rotationAngle": 0, "description": "仅3D" },
-        { "pointIndex": 5, "pointName": "内圈点5", "needRotation": false, "rotationAngle": 0, "description": "仅3D" },
-        { "pointIndex": 6, "pointName": "内圈点6", "needRotation": false, "rotationAngle": 0, "description": "仅3D" }
+        {
+          "pointIndex": 1,
+          "pointName": "路径2-点1",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 2,
+          "pointName": "路径2-点2",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 3,
+          "pointName": "路径2-点3",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 4,
+          "pointName": "路径2-点4",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 5,
+          "pointName": "路径2-点5",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 6,
+          "pointName": "路径2-点6",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 7,
+          "pointName": "路径2-点7",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 8,
+          "pointName": "路径2-点8",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 9,
+          "pointName": "路径2-点9",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 10,
+          "pointName": "路径2-点10",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 11,
+          "pointName": "路径2-点11",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 12,
+          "pointName": "路径2-点12",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 13,
+          "pointName": "路径2-点13",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 14,
+          "pointName": "路径2-点14",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 15,
+          "pointName": "路径2-点15",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 16,
+          "pointName": "路径2-点16",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 17,
+          "pointName": "路径2-点17",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 18,
+          "pointName": "路径2-点18",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 19,
+          "pointName": "路径2-点19",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        }
       ]
     },
     {
       "pathId": 3,
-      "pathName": "路径3-焊缝检测",
-      "inspectionType": "thickness",
-      "thicknessConfigPath": "thickness/config/path3.json",
-      "innerScanSegmentIndex": 1,
-      "outerScanSegmentIndex": 2,
-      "description": "厚度测量：段1=内表面，段2=外表面",
-      "enabled": false,
-      "totalPoints": 6,
+      "pathName": "路径3-1点",
+      "inspectionType": "bevel",
+      "description": "1个扫描点，仅3D，无转盘",
+      "enabled": true,
+      "totalPoints": 1,
       "points": [
-        { "pointIndex": 1, "pointName": "焊缝点1", "needRotation": false, "rotationAngle": 0, "description": "仅3D" },
-        { "pointIndex": 2, "pointName": "焊缝点2", "needRotation": false, "rotationAngle": 0, "description": "仅3D" },
-        { "pointIndex": 3, "pointName": "焊缝点3", "needRotation": false, "rotationAngle": 0, "description": "仅3D" },
-        { "pointIndex": 4, "pointName": "焊缝点4", "needRotation": false, "rotationAngle": 0, "description": "仅3D" },
-        { "pointIndex": 5, "pointName": "焊缝点5", "needRotation": false, "rotationAngle": 0, "description": "仅3D" },
-        { "pointIndex": 6, "pointName": "焊缝点6", "needRotation": false, "rotationAngle": 0, "description": "仅3D" }
+        {
+          "pointIndex": 1,
+          "pointName": "路径3-点1",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        }
+      ]
+    },
+    {
+      "pathId": 4,
+      "pathName": "路径4-4点",
+      "inspectionType": "bevel",
+      "description": "4个扫描点，仅3D，无转盘",
+      "enabled": true,
+      "totalPoints": 4,
+      "points": [
+        {
+          "pointIndex": 1,
+          "pointName": "路径4-点1",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 2,
+          "pointName": "路径4-点2",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 3,
+          "pointName": "路径4-点3",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 4,
+          "pointName": "路径4-点4",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        }
+      ]
+    },
+    {
+      "pathId": 5,
+      "pathName": "路径5-8点",
+      "inspectionType": "bevel",
+      "description": "8个扫描点，仅3D，无转盘",
+      "enabled": true,
+      "totalPoints": 8,
+      "points": [
+        {
+          "pointIndex": 1,
+          "pointName": "路径5-点1",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 2,
+          "pointName": "路径5-点2",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 3,
+          "pointName": "路径5-点3",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 4,
+          "pointName": "路径5-点4",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 5,
+          "pointName": "路径5-点5",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 6,
+          "pointName": "路径5-点6",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 7,
+          "pointName": "路径5-点7",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 8,
+          "pointName": "路径5-点8",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        }
+      ]
+    },
+    {
+      "pathId": 6,
+      "pathName": "路径6-144点",
+      "inspectionType": "bevel",
+      "description": "144个扫描点，仅3D，无转盘",
+      "enabled": true,
+      "totalPoints": 144,
+      "points": [
+        {
+          "pointIndex": 1,
+          "pointName": "路径6-点1",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 2,
+          "pointName": "路径6-点2",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 3,
+          "pointName": "路径6-点3",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 4,
+          "pointName": "路径6-点4",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 5,
+          "pointName": "路径6-点5",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 6,
+          "pointName": "路径6-点6",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 7,
+          "pointName": "路径6-点7",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 8,
+          "pointName": "路径6-点8",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 9,
+          "pointName": "路径6-点9",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 10,
+          "pointName": "路径6-点10",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 11,
+          "pointName": "路径6-点11",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 12,
+          "pointName": "路径6-点12",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 13,
+          "pointName": "路径6-点13",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 14,
+          "pointName": "路径6-点14",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 15,
+          "pointName": "路径6-点15",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 16,
+          "pointName": "路径6-点16",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 17,
+          "pointName": "路径6-点17",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 18,
+          "pointName": "路径6-点18",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 19,
+          "pointName": "路径6-点19",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 20,
+          "pointName": "路径6-点20",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 21,
+          "pointName": "路径6-点21",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 22,
+          "pointName": "路径6-点22",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 23,
+          "pointName": "路径6-点23",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 24,
+          "pointName": "路径6-点24",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 25,
+          "pointName": "路径6-点25",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 26,
+          "pointName": "路径6-点26",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 27,
+          "pointName": "路径6-点27",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 28,
+          "pointName": "路径6-点28",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 29,
+          "pointName": "路径6-点29",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 30,
+          "pointName": "路径6-点30",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 31,
+          "pointName": "路径6-点31",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 32,
+          "pointName": "路径6-点32",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 33,
+          "pointName": "路径6-点33",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 34,
+          "pointName": "路径6-点34",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 35,
+          "pointName": "路径6-点35",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 36,
+          "pointName": "路径6-点36",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 37,
+          "pointName": "路径6-点37",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 38,
+          "pointName": "路径6-点38",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 39,
+          "pointName": "路径6-点39",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 40,
+          "pointName": "路径6-点40",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 41,
+          "pointName": "路径6-点41",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 42,
+          "pointName": "路径6-点42",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 43,
+          "pointName": "路径6-点43",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 44,
+          "pointName": "路径6-点44",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 45,
+          "pointName": "路径6-点45",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 46,
+          "pointName": "路径6-点46",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 47,
+          "pointName": "路径6-点47",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 48,
+          "pointName": "路径6-点48",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 49,
+          "pointName": "路径6-点49",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 50,
+          "pointName": "路径6-点50",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 51,
+          "pointName": "路径6-点51",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 52,
+          "pointName": "路径6-点52",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 53,
+          "pointName": "路径6-点53",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 54,
+          "pointName": "路径6-点54",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 55,
+          "pointName": "路径6-点55",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 56,
+          "pointName": "路径6-点56",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 57,
+          "pointName": "路径6-点57",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 58,
+          "pointName": "路径6-点58",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 59,
+          "pointName": "路径6-点59",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 60,
+          "pointName": "路径6-点60",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 61,
+          "pointName": "路径6-点61",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 62,
+          "pointName": "路径6-点62",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 63,
+          "pointName": "路径6-点63",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 64,
+          "pointName": "路径6-点64",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 65,
+          "pointName": "路径6-点65",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 66,
+          "pointName": "路径6-点66",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 67,
+          "pointName": "路径6-点67",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 68,
+          "pointName": "路径6-点68",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 69,
+          "pointName": "路径6-点69",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 70,
+          "pointName": "路径6-点70",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 71,
+          "pointName": "路径6-点71",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 72,
+          "pointName": "路径6-点72",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 73,
+          "pointName": "路径6-点73",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 74,
+          "pointName": "路径6-点74",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 75,
+          "pointName": "路径6-点75",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 76,
+          "pointName": "路径6-点76",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 77,
+          "pointName": "路径6-点77",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 78,
+          "pointName": "路径6-点78",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 79,
+          "pointName": "路径6-点79",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 80,
+          "pointName": "路径6-点80",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 81,
+          "pointName": "路径6-点81",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 82,
+          "pointName": "路径6-点82",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 83,
+          "pointName": "路径6-点83",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 84,
+          "pointName": "路径6-点84",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 85,
+          "pointName": "路径6-点85",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 86,
+          "pointName": "路径6-点86",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 87,
+          "pointName": "路径6-点87",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 88,
+          "pointName": "路径6-点88",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 89,
+          "pointName": "路径6-点89",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 90,
+          "pointName": "路径6-点90",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 91,
+          "pointName": "路径6-点91",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 92,
+          "pointName": "路径6-点92",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 93,
+          "pointName": "路径6-点93",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 94,
+          "pointName": "路径6-点94",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 95,
+          "pointName": "路径6-点95",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 96,
+          "pointName": "路径6-点96",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 97,
+          "pointName": "路径6-点97",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 98,
+          "pointName": "路径6-点98",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 99,
+          "pointName": "路径6-点99",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 100,
+          "pointName": "路径6-点100",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 101,
+          "pointName": "路径6-点101",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 102,
+          "pointName": "路径6-点102",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 103,
+          "pointName": "路径6-点103",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 104,
+          "pointName": "路径6-点104",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 105,
+          "pointName": "路径6-点105",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 106,
+          "pointName": "路径6-点106",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 107,
+          "pointName": "路径6-点107",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 108,
+          "pointName": "路径6-点108",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 109,
+          "pointName": "路径6-点109",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 110,
+          "pointName": "路径6-点110",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 111,
+          "pointName": "路径6-点111",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 112,
+          "pointName": "路径6-点112",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 113,
+          "pointName": "路径6-点113",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 114,
+          "pointName": "路径6-点114",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 115,
+          "pointName": "路径6-点115",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 116,
+          "pointName": "路径6-点116",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 117,
+          "pointName": "路径6-点117",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 118,
+          "pointName": "路径6-点118",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 119,
+          "pointName": "路径6-点119",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 120,
+          "pointName": "路径6-点120",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 121,
+          "pointName": "路径6-点121",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 122,
+          "pointName": "路径6-点122",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 123,
+          "pointName": "路径6-点123",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 124,
+          "pointName": "路径6-点124",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 125,
+          "pointName": "路径6-点125",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 126,
+          "pointName": "路径6-点126",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 127,
+          "pointName": "路径6-点127",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 128,
+          "pointName": "路径6-点128",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 129,
+          "pointName": "路径6-点129",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 130,
+          "pointName": "路径6-点130",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 131,
+          "pointName": "路径6-点131",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 132,
+          "pointName": "路径6-点132",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 133,
+          "pointName": "路径6-点133",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 134,
+          "pointName": "路径6-点134",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 135,
+          "pointName": "路径6-点135",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 136,
+          "pointName": "路径6-点136",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 137,
+          "pointName": "路径6-点137",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 138,
+          "pointName": "路径6-点138",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 139,
+          "pointName": "路径6-点139",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 140,
+          "pointName": "路径6-点140",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 141,
+          "pointName": "路径6-点141",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 142,
+          "pointName": "路径6-点142",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 143,
+          "pointName": "路径6-点143",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 144,
+          "pointName": "路径6-点144",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        }
       ]
     }
   ],
-
   "executionConfig": {
     "executeAllPaths": false,
-    "description": "单路径联调：仅 pathId=1，PLC 段号 1..12",
-    "selectedPathIds": [1],
+    "description": "六路径联调：path1=7段, path2=19段, path3=1段, path4=4段, path5=8段, path6=144段",
+    "selectedPathIds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
     "pathExecutionOrder": "sequential",
     "allowPathSkipOnError": false
   },
-
   "turntableConfig": {
-    "enabled": true,
-    "description": "段1、段7为转盘位，IPC 采集 3D+2D 并走 LBN（无标记时 config.ini useIdentityRtWithoutMarkers）"
+    "enabled": false,
+    "description": "无转盘转动位，各段均为 3D 扫描"
   },
-
   "captureConfig": {
     "mechEye": {
       "capture3DTimeoutMs": 5000,
@@ -105,13 +1410,23 @@
       "gain": 0.0
     }
   },
-
   "algorithmConfig": {
-    "lbn": { "enabled": true, "timeoutMs": 2000, "confidenceThreshold": 0.8 },
-    "lb": { "enabled": true, "timeoutMs": 1500, "minFeaturePoints": 50 },
-    "bevel": { "enabled": true, "timeoutMs": 10000, "qualityThreshold": 0.7 }
+    "lbn": {
+      "enabled": true,
+      "timeoutMs": 2000,
+      "confidenceThreshold": 0.8
+    },
+    "lb": {
+      "enabled": true,
+      "timeoutMs": 1500,
+      "minFeaturePoints": 50
+    },
+    "bevel": {
+      "enabled": true,
+      "timeoutMs": 10000,
+      "qualityThreshold": 0.7
+    }
   },
-
   "dataManagement": {
     "savePointClouds": true,
     "saveRawImages": true,

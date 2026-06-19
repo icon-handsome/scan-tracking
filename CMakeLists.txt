@@ -1,6 +1,6 @@
 ﻿cmake_minimum_required(VERSION 3.21)
 
-project(ScanTracking
+project(ScanTrackingStation1
     VERSION 0.1.0
     DESCRIPTION "Scanning and tracking QtCore console application"
     LANGUAGES CXX

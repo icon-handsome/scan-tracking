@@ -891,20 +891,22 @@ void HmiTcpServer::handleCmdReportPersonZoneAlarm(const QJsonObject& message)
     m_personZoneAlarm = alarm;
     m_personZoneAlarmCacheValid = true;
 
+    // 安全信号：不按状态去重 PLC 转发——每次上报都写 PLC。状态机层
+    // reportPersonZoneAlarm 对重复值幂等（仅刷新 IPC_SafetyAction_Word 同一 bit，
+    // 不重复进故障态），可在首次写入失败或 PLC 自行清位后补写，避免漏报。
+    // stateChanged 仅用于日志标注与响应文案，不阻断转发。
     bool plcWritten = true;
-    if (stateChanged) {
-        if (m_stateMachine) {
-            plcWritten = m_stateMachine->reportPersonZoneAlarm(alarm);
-        } else {
-            qWarning(LOG_HMI_SERVER).noquote()
-                << QStringLiteral("[TCPIP] 人员区域上报：状态机不可用，无法写 PLC");
-            sendResponse(
-                requestType.isEmpty() ? QLatin1String(msg_type::kCmdReportPersonZoneAlarm) : requestType,
-                msgId,
-                false,
-                QStringLiteral("状态机不可用"));
-            return;
-        }
+    if (m_stateMachine) {
+        plcWritten = m_stateMachine->reportPersonZoneAlarm(alarm);
+    } else {
+        qWarning(LOG_HMI_SERVER).noquote()
+            << QStringLiteral("[TCPIP] 人员区域上报：状态机不可用，无法写 PLC");
+        sendResponse(
+            requestType.isEmpty() ? QLatin1String(msg_type::kCmdReportPersonZoneAlarm) : requestType,
+            msgId,
+            false,
+            QStringLiteral("状态机不可用"));
+        return;
     }
 
     QString responseMessage;
@@ -912,11 +914,13 @@ void HmiTcpServer::handleCmdReportPersonZoneAlarm(const QJsonObject& message)
         responseMessage = alarm
             ? QStringLiteral("人员区域报警已上报 PLC")
             : QStringLiteral("人员区域报警已解除");
-        if (!plcWritten) {
-            responseMessage += QStringLiteral("（PLC 未连接或写入失败）");
-        }
     } else {
-        responseMessage = QStringLiteral("人员区域状态已接收（与上次相同）");
+        responseMessage = alarm
+            ? QStringLiteral("人员区域报警已刷新上报 PLC")
+            : QStringLiteral("人员区域无报警状态已刷新");
+    }
+    if (!plcWritten) {
+        responseMessage += QStringLiteral("（PLC 未连接或写入失败）");
     }
 
     sendResponse(

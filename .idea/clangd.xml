@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ClangdSettings">
+    <option name="enabled" value="false" />
+    <option name="formatViaClangd" value="false" />
+    <option name="showErrorsViaClangd" value="false" />
+    <option name="useClangTidyViaClangd" value="false" />
+  </component>
+</project>

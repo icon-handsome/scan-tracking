@@ -113,7 +113,7 @@ void ConsoleRuntime::initModules()
     }
     qInfo(appLog) << QStringLiteral("启动阶段 =") << startupStage
                   << QStringLiteral(" (0=Modbus, 1=+MechEye, 2=+Hik, 3=+VisionPipeline, 4=+Tracking, 5=+StateMachine)");
-
+    qInfo(appLog) << QStringLiteral("第一工位程序启动... ...");
     modbusService_ = std::make_unique<scan_tracking::modbus::ModbusService>(&application_);
     qInfo(appLog) << "Modbus 服务已创建。";
 

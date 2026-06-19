@@ -611,7 +611,7 @@ private:
     /// 综合检测结果推送（与 TrackingService::InspectionResultNotifier 共用同一回调）
     std::function<void(const tracking::InspectionResult&)> m_inspectionResultPublisher;
 
-    static constexpr int kMaxPointCloudCacheSize = 24;    // 多路径缓存上限（3 路径 × 6 段 = 18，留余量）
+    static constexpr int kMaxPointCloudCacheSize = 200;   // 多路径缓存上限（6 路径共 183 段，留余量）
     static constexpr int kMaxReasonableRefinementJobs = 32;  // 并发 refinement 上限（超出视为逻辑错误）
     static constexpr int kShutdownRefinementJoinTimeoutMs = 3000;
 

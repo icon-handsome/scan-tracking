@@ -61,8 +61,8 @@ constexpr quint16 kDeviceOnlineWord0 =
     (1u << 5) |
     (1u << 6);
 
-/// 最大扫描分段索引（从1开始计数）
-constexpr int kMaxScanSegmentIndex = 16;
+/// 最大扫描分段索引（从1开始计数；须 ≥ scan_paths 中单路径最大 totalPoints）
+constexpr int kMaxScanSegmentIndex = 200;
 
 /// 默认扫描分段采集超时时间（毫秒）
 constexpr int kDefaultScanSegmentCaptureTimeoutMs = 30000;

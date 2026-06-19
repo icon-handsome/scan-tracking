@@ -138,7 +138,7 @@
       "problemMatcher": []
     },
     {
-      "label": "Refresh compile_commands (clangd)",
+      "label": "Refresh compile_commands (CMake)",
       "type": "shell",
       "command": "cmd",
       "args": [
