@@ -1,10 +1,7 @@
 #include "BevelMeasurement.h"
 
-#include <Eigen/Dense>
 #include <Eigen/Geometry>
-#include <opencv2/imgcodecs.hpp>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/ml.hpp>
+#include <Eigen/Eigenvalues>
 #include <pcl/common/transforms.h>
 #include <pcl/filters/crop_box.h>
 #include <pcl/filters/statistical_outlier_removal.h>
@@ -62,8 +59,6 @@ std::string normalizeConfigText(std::string text)
     replaceAll(text, "\xE2\x88\x92", "-"); // minus sign
     replaceAll(text, "\xE2\x80\x93", "-"); // en dash
     replaceAll(text, "\xE2\x80\x94", "-"); // em dash
-    replaceAll(text, "???", "-"); // mojibake minus sign
-    replaceAll(text, "??", "-"); // mojibake minus sign
     return text;
 }
 
@@ -171,18 +166,6 @@ std::string findKnownConfigValue(const std::string& line, const std::vector<std:
     return stripInlineComment(line.substr(valueStart));
 }
 
-std::string replaceType(std::string pattern, int type)
-{
-    const std::string key = "{type}";
-    const std::string value = std::to_string(type);
-    size_t pos = 0;
-    while ((pos = pattern.find(key, pos)) != std::string::npos) {
-        pattern.replace(pos, key.size(), value);
-        pos += value.size();
-    }
-    return pattern;
-}
-
 std::string joinPath(const std::string& dir, const std::string& name)
 {
     if (dir.empty()) {
@@ -269,102 +252,18 @@ CloudT::Ptr downsampleForIcp(const CloudT::ConstPtr& cloud, const BevelConfig& c
     return sampled;
 }
 
-cv::Mat projectSectionImage(const CloudT::ConstPtr& cloud, const BevelConfig& cfg)
+TemplateFeature parseTemplateFeatureLine(const std::string& line)
 {
-    cv::Mat img = cv::Mat::zeros(cfg.imageHeight, cfg.imageWidth, CV_8UC1);
-
-    Eigen::Vector3f normal = cfg.planeNormal;
-    if (normal.norm() < 1e-6f) 
+    std::stringstream ss(line);
+    TemplateFeature f;
+    ss >> f.name >> f.point.x() >> f.point.y() >> f.point.z();
+    if (!ss) 
 	{
-        throw std::runtime_error("plane.normal must not be zero");
+        throw std::runtime_error("Invalid feature line: " + line);
     }
-    normal.normalize();
-
-    Eigen::Vector3f u = (std::abs(normal.x()) < 0.9f ? Eigen::Vector3f::UnitX() : Eigen::Vector3f::UnitY()).cross(normal);
-    u.normalize();
-    const Eigen::Vector3f v = normal.cross(u);
-
-    std::vector<Eigen::Vector2f> projected;
-    projected.reserve(cloud->size());
-    for (const PointT& p : cloud->points) {
-        const Eigen::Vector3f q(p.x, p.y, p.z);
-        const Eigen::Vector3f d = q - cfg.planeCenter;
-        if (std::abs(d.dot(normal)) <= static_cast<float>(cfg.planeThickness * 0.5)) {
-            projected.emplace_back(d.dot(u), d.dot(v));
-        }
-    }
-
-    if (projected.empty()) {
-        return img;
-    }
-
-    double scale = cfg.projectionScale;
-    if (scale <= 0.0) {
-        float maxSpan = 0.0f;
-        for (const Eigen::Vector2f& p : projected) {
-            maxSpan = std::max(maxSpan, std::max(std::abs(p.x()), std::abs(p.y())));
-        }
-        scale = maxSpan > 1e-6f ? (std::min(cfg.imageWidth, cfg.imageHeight) * 0.45 / maxSpan) : 1.0;
-    }
-
-    for (const Eigen::Vector2f& p : projected) {
-        const int col = static_cast<int>(cfg.imageWidth * 0.5 + p.x() * scale);
-        const int row = static_cast<int>(cfg.imageHeight * 0.5 - p.y() * scale);
-        if (col >= 0 && col < cfg.imageWidth && row >= 0 && row < cfg.imageHeight) {
-            img.at<unsigned char>(row, col) = 255;
-        }
-    }
-
-    return img;
+    return f;
 }
 
-cv::Mat normalizeSectionImageByPCA(const cv::Mat& image)
-{
-    CV_Assert(image.type() == CV_8UC1);
-
-    std::vector<cv::Point> points;
-    cv::findNonZero(image, points);
-    if (points.size() < 3) {
-        return image.clone();
-    }
-
-    cv::Mat data(static_cast<int>(points.size()), 2, CV_64F);
-    for (int i = 0; i < static_cast<int>(points.size()); ++i) {
-        data.at<double>(i, 0) = static_cast<double>(points[i].x);
-        data.at<double>(i, 1) = static_cast<double>(points[i].y);
-    }
-
-    cv::PCA pca(data, cv::Mat(), cv::PCA::DATA_AS_ROW);
-    const cv::Point2d center(pca.mean.at<double>(0, 0), pca.mean.at<double>(0, 1));
-    cv::Point2d mainAxis(pca.eigenvectors.at<double>(0, 0), pca.eigenvectors.at<double>(0, 1));
-
-    // Image y-axis points downward. atan2 is still valid for consistent image-space normalization.
-    double currentAngleDeg = std::atan2(mainAxis.y, mainAxis.x) * 180.0 / CV_PI;
-    double rotateDeg = 45.0 - currentAngleDeg;
-
-    cv::Mat rot = cv::getRotationMatrix2D(center, rotateDeg, 1.0);
-    rot.at<double>(0, 2) += image.cols * 0.5 - center.x;
-    rot.at<double>(1, 2) += image.rows * 0.5 - center.y;
-
-    cv::Mat normalized;
-    cv::warpAffine(image, normalized, rot, image.size(), cv::INTER_NEAREST, cv::BORDER_CONSTANT, cv::Scalar(0));
-    cv::threshold(normalized, normalized, 1, 255, cv::THRESH_BINARY);
-    return normalized;
-}
-
-int classifyBevelType(const cv::Mat& image, const std::string& svmPath, cv::Mat* normalizedOut)
-{
-    cv::Ptr<cv::ml::SVM> svm = cv::ml::StatModel::load<cv::ml::SVM>(svmPath);
-    if (svm.empty()) {
-        throw std::runtime_error("Failed to load SVM model: " + svmPath);
-    }
-
-    cv::Mat normalizedImage = normalizeSectionImageByPCA(image);
-
-    cv::Mat sample = normalizedImage.reshape(1, 1);
-    sample.convertTo(sample, CV_32FC1);
-    return static_cast<int>(svm->predict(sample));
-}
 std::vector<TemplateFeature> loadTemplateFeatures(const std::string& path)
 {
     std::ifstream in(path);
@@ -377,23 +276,44 @@ std::vector<TemplateFeature> loadTemplateFeatures(const std::string& path)
     std::string line;
     while (std::getline(in, line))
 	{
-        line = trim(line);
-        if (line.empty() || line[0] == '#') 
+        line = stripInlineComment(line);
+        if (line.empty() || line[0] == '[') 
 		{
             continue;
         }
-        std::stringstream ss(line);
-        TemplateFeature f;
-        ss >> f.name >> f.point.x() >> f.point.y() >> f.point.z();
-        if (!ss) 
-		{
-            throw std::runtime_error("Invalid feature line: " + line);
-        }
-        features.push_back(f);
+        features.push_back(parseTemplateFeatureLine(line));
     }
     return features;
 }
 
+std::vector<TemplateFeature> loadTemplateFeaturesFromConfigText(const std::string& text, const std::string& method)
+{
+    const std::string targetSection = method == "direct_points" ? "features.direct_points" : "features.plane_fit";
+    std::vector<TemplateFeature> features;
+    bool inTargetSection = false;
+
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line))
+	{
+        line = stripInlineComment(line);
+        if (line.empty())
+		{
+            continue;
+        }
+        if (line.front() == '[' && line.back() == ']')
+		{
+            const std::string section = trim(line.substr(1, line.size() - 2));
+            inTargetSection = section == targetSection;
+            continue;
+        }
+        if (inTargetSection)
+		{
+            features.push_back(parseTemplateFeatureLine(line));
+        }
+    }
+    return features;
+}
 Eigen::Vector3f projectPointToPlane(const Eigen::Vector3f& point, const Eigen::Vector3f& planePoint, const Eigen::Vector3f& planeNormal)
 {
     return point - planeNormal * ((point - planePoint).dot(planeNormal));
@@ -451,15 +371,11 @@ BevelMeasurementResult buildMeasurementResult(double angleDeg,
     out.ok = true;
     out.angleDeg = angleDeg;
     out.length = length;
-    const bool angleOk = out.angleDeg >= cfg.standardAngleMinDeg && out.angleDeg <= cfg.standardAngleMaxDeg;
-    const bool lengthOk = out.length >= cfg.standardLengthMin && out.length <= cfg.standardLengthMax;
-    out.qualityCode = (angleOk && lengthOk) ? 0 : 10000;
     out.icpFitness = icpFitness;
     out.scanToTemplate = scanToTemplate;
     out.message = "OK";
     return out;
 }
-
 BevelMeasurementResult computeDirectPointMeasurement(const std::map<std::string, Eigen::Vector3f>& actual,
                                                      const BevelConfig& cfg,
                                                      double icpFitness,
@@ -674,18 +590,6 @@ void validateConfig(const BevelConfig& cfg)
     if (cfg.uniformDownsample && cfg.uniformLeafSize <= 0.0) {
         throw std::runtime_error("Invalid uniform leaf size: preprocess.uniform.leaf_size must be > 0");
     }
-    if (cfg.imageWidth <= 0 || cfg.imageHeight <= 0) {
-        throw std::runtime_error("Invalid image size: section.image_width and section.image_height must be positive");
-    }
-    if (cfg.planeNormal.norm() < 1e-6f) {
-        throw std::runtime_error("Invalid section.normal: normal vector must not be zero");
-    }
-    if (cfg.standardAngleMinDeg > cfg.standardAngleMaxDeg) {
-        throw std::runtime_error("Invalid angle standard: standard.angle_min_deg must be <= standard.angle_max_deg");
-    }
-    if (cfg.standardLengthMin > cfg.standardLengthMax) {
-        throw std::runtime_error("Invalid length standard: standard.length_min must be <= standard.length_max");
-    }
     if (cfg.icpTrimOverlapRatio < 0.0 || cfg.icpTrimOverlapRatio > 1.0) {
         throw std::runtime_error("Invalid ICP trim ratio: icp.trim.overlap_ratio must be in [0, 1]");
     }
@@ -694,10 +598,26 @@ void validateConfig(const BevelConfig& cfg)
     }
 }
 
+std::string firstConfigValueLine(const std::string& text)
+{
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        line = stripInlineComment(line);
+        if (!line.empty()) {
+            return line;
+        }
+    }
+    return std::string();
+}
 BevelConfig loadConfig(const std::string& configPath)
 {
     BevelConfig cfg;
     const std::string text = readWholeFile(configPath);
+    cfg.templatePath = firstConfigValueLine(text);
+    if (cfg.templatePath.empty()) {
+        throw std::runtime_error("Config first line must be template cloud path");
+    }
 
     if (hasConfigKey(text, "preprocess.uniform.enable")) cfg.uniformDownsample = parseBool(requireConfigValue(text, "preprocess.uniform.enable"));
     if (hasConfigKey(text, "preprocess.uniform.leaf_size")) cfg.uniformLeafSize = parseDoubleValue(requireConfigValue(text, "preprocess.uniform.leaf_size"), "preprocess.uniform.leaf_size", 0);
@@ -713,18 +633,7 @@ BevelConfig loadConfig(const std::string& configPath)
     if (hasConfigKey(text, "preprocess.outlier.mean_k")) cfg.sorMeanK = parseIntValue(requireConfigValue(text, "preprocess.outlier.mean_k"), "preprocess.outlier.mean_k", 0);
     if (hasConfigKey(text, "preprocess.outlier.stddev_mul")) cfg.sorStddevMulThresh = parseDoubleValue(requireConfigValue(text, "preprocess.outlier.stddev_mul"), "preprocess.outlier.stddev_mul", 0);
 
-    if (hasConfigKey(text, "section.image_width")) cfg.imageWidth = parseIntValue(requireConfigValue(text, "section.image_width"), "section.image_width", 0);
-    if (hasConfigKey(text, "section.image_height")) cfg.imageHeight = parseIntValue(requireConfigValue(text, "section.image_height"), "section.image_height", 0);
-    if (hasConfigKey(text, "section.center")) cfg.planeCenter = parseVec3(requireConfigValue(text, "section.center"), "section.center", 0);
-    if (hasConfigKey(text, "section.normal")) cfg.planeNormal = parseVec3(requireConfigValue(text, "section.normal"), "section.normal", 0);
-    if (hasConfigKey(text, "section.thickness")) cfg.planeThickness = parseDoubleValue(requireConfigValue(text, "section.thickness"), "section.thickness", 0);
-    if (hasConfigKey(text, "section.scale")) cfg.projectionScale = parseDoubleValue(requireConfigValue(text, "section.scale"), "section.scale", 0);
-    if (hasConfigKey(text, "section.save_image")) cfg.saveProjectionImage = parseBool(requireConfigValue(text, "section.save_image"));
-    if (hasConfigKey(text, "section.image_path")) cfg.projectionImagePath = requireConfigValue(text, "section.image_path");
-    if (hasConfigKey(text, "section.save_normalized_image")) cfg.saveNormalizedProjectionImage = parseBool(requireConfigValue(text, "section.save_normalized_image"));
-    if (hasConfigKey(text, "section.normalized_image_path")) cfg.normalizedProjectionImagePath = requireConfigValue(text, "section.normalized_image_path");
 
-    if (hasConfigKey(text, "svm.model_path")) cfg.svmModelPath = requireConfigValue(text, "svm.model_path");
 
     if (hasConfigKey(text, "icp.max_iterations")) cfg.icpMaxIterations = parseIntValue(requireConfigValue(text, "icp.max_iterations"), "icp.max_iterations", 0);
     if (hasConfigKey(text, "icp.max_correspondence_distance")) cfg.icpMaxCorrespondenceDistance = parseDoubleValue(requireConfigValue(text, "icp.max_correspondence_distance"), "icp.max_correspondence_distance", 0);
@@ -736,15 +645,9 @@ BevelConfig loadConfig(const std::string& configPath)
     if (hasConfigKey(text, "icp.save_aligned_cloud")) cfg.saveAlignedCloud = parseBool(requireConfigValue(text, "icp.save_aligned_cloud"));
     if (hasConfigKey(text, "icp.aligned_cloud_path")) cfg.alignedCloudPath = requireConfigValue(text, "icp.aligned_cloud_path");
 
-    if (hasConfigKey(text, "template.path_pattern")) cfg.templatePathPattern = requireConfigValue(text, "template.path_pattern");
+    if (hasConfigKey(text, "template.path")) cfg.templatePath = requireConfigValue(text, "template.path");
     if (hasConfigKey(text, "measurement.method")) cfg.measurementMethod = firstScalarToken(requireConfigValue(text, "measurement.method"));
-    if (hasConfigKey(text, "template.plane_fit_feature_path_pattern")) cfg.planeFitFeaturePathPattern = requireConfigValue(text, "template.plane_fit_feature_path_pattern");
-    if (hasConfigKey(text, "template.direct_feature_path_pattern")) cfg.directFeaturePathPattern = requireConfigValue(text, "template.direct_feature_path_pattern");
 
-    if (hasConfigKey(text, "standard.angle_min_deg")) cfg.standardAngleMinDeg = parseDoubleValue(requireConfigValue(text, "standard.angle_min_deg"), "standard.angle_min_deg", 0);
-    if (hasConfigKey(text, "standard.angle_max_deg")) cfg.standardAngleMaxDeg = parseDoubleValue(requireConfigValue(text, "standard.angle_max_deg"), "standard.angle_max_deg", 0);
-    if (hasConfigKey(text, "standard.length_min")) cfg.standardLengthMin = parseDoubleValue(requireConfigValue(text, "standard.length_min"), "standard.length_min", 0);
-    if (hasConfigKey(text, "standard.length_max")) cfg.standardLengthMax = parseDoubleValue(requireConfigValue(text, "standard.length_max"), "standard.length_max", 0);
 
     if (cfg.measurementMethod != "plane_fit" && cfg.measurementMethod != "direct_points") {
         throw std::runtime_error("Invalid measurement method: measurement.method must be plane_fit or direct_points");
@@ -754,36 +657,20 @@ BevelConfig loadConfig(const std::string& configPath)
 }
 BevelMeasurementResult solveBevelFromRawCloud(const CloudT::ConstPtr& rawCloud, const std::string& configPath)
 {
-    return solveBevelFromRawCloud(rawCloud, configPath, std::string(), BevelSolveOptions{});
+    return solveBevelFromRawCloud(rawCloud, configPath, std::string());
 }
 
 BevelMeasurementResult solveBevelFromRawCloud(const CloudT::ConstPtr& rawCloud,
                                               const std::string& configPath,
                                               const std::string& templateDir)
 {
-    return solveBevelFromRawCloud(rawCloud, configPath, templateDir, BevelSolveOptions{});
-}
-
-BevelMeasurementResult solveBevelFromRawCloud(const CloudT::ConstPtr& rawCloud,
-                                              const std::string& configPath,
-                                              const std::string& templateDir,
-                                              const BevelSolveOptions& options)
-{
     BevelMeasurementResult result;
     try 
 	{
         BevelConfig cfg = loadConfig(configPath);
-        if (options.overrideStandard) {
-            cfg.standardAngleMinDeg = options.standardAngleMinDeg;
-            cfg.standardAngleMaxDeg = options.standardAngleMaxDeg;
-            cfg.standardLengthMin = options.standardLengthMin;
-            cfg.standardLengthMax = options.standardLengthMax;
-        }
         if (!templateDir.empty()) 
 		{
-            cfg.templatePathPattern = joinPath(templateDir, "type_{type}_template.pcd");
-            cfg.planeFitFeaturePathPattern = joinPath(templateDir, "type_{type}_features_plane_fit.txt");
-            cfg.directFeaturePathPattern = joinPath(templateDir, "type_{type}_features_direct.txt");
+            cfg.templatePath = joinPath(templateDir, cfg.templatePath);
         }
         CloudT::Ptr measureScan = preprocess(rawCloud, cfg);
         if (measureScan->empty())
@@ -795,53 +682,20 @@ BevelMeasurementResult solveBevelFromRawCloud(const CloudT::ConstPtr& rawCloud,
         {
             throw std::runtime_error("Downsampled cloud is empty");
         }
-		 
-        int bevelType = 0;
-        if (options.forcedBevelType >= 0) {
-            bevelType = options.forcedBevelType;
-        } else if (0)
-		{
-			const cv::Mat image = projectSectionImage(scan, cfg);
-			if (cfg.saveProjectionImage)
-			{
-				cv::imwrite(cfg.projectionImagePath, image);
-			}
 
-			cv::Mat normalizedImage;
-			bevelType = classifyBevelType(image, cfg.svmModelPath, &normalizedImage);
-			if (cfg.saveNormalizedProjectionImage && !normalizedImage.empty())
-			{
-				cv::imwrite(cfg.normalizedProjectionImagePath, normalizedImage);
-			}
-		}
-		
         CloudT::Ptr templ(new CloudT);
-        const std::string templatePath = replaceType(cfg.templatePathPattern, bevelType);
+        const std::string templatePath = cfg.templatePath;
         if (!loadCloudAuto(templatePath, templ))
 		{
             throw std::runtime_error("Failed to load template cloud: " + templatePath);
         }
 
-        std::string featurePattern;
-        if (cfg.measurementMethod == "plane_fit") 
+        std::vector<TemplateFeature> features = loadTemplateFeaturesFromConfigText(readWholeFile(configPath), cfg.measurementMethod);
+        if (features.empty())
 		{
-            featurePattern = cfg.planeFitFeaturePathPattern;
-        } else if (cfg.measurementMethod == "direct_points") 
-		{
-            featurePattern = cfg.directFeaturePathPattern;
+            throw std::runtime_error("No inline feature points found for measurement.method: " + cfg.measurementMethod);
         }
-        const std::vector<TemplateFeature> features = loadTemplateFeatures(replaceType(featurePattern, bevelType));
-
 		result = solveGeometry(scan, measureScan, templ, features, cfg);
-
-		// ??????????????30????????????
-		if (bevelType == 1)   // 30?????????1mm,???????????????
-		{
-			float len_side = result.length;
-			result.length = abs(17.0 - len_side * cos(result.angleDeg));
-		}
-
-        result.bevelType = bevelType;
     } 
 	catch (const std::exception& e) 
 	{
@@ -850,7 +704,6 @@ BevelMeasurementResult solveBevelFromRawCloud(const CloudT::ConstPtr& rawCloud,
     }
     return result;
 }
-
 bool loadTextPointCloud(const std::string& path, CloudT::Ptr cloud)
 {
     std::ifstream in(path);

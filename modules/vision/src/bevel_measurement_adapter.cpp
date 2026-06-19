@@ -76,32 +76,55 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr toPclPointCloud(
 
 QString resolveBevelConfigPath()
 {
+    // 1. 基础 config.txt 解析（env / config.ini / exe 旁 bevel/）
+    QString baseConfig;
+
     const QString envRoot = localPathFromEnv("SCAN_TRACKING_BEVEL_CONFIG_DIR");
     if (!envRoot.isEmpty()) {
         const QFileInfo envConfig(QDir(envRoot).filePath(QStringLiteral("config.txt")));
         if (envConfig.exists()) {
-            return envConfig.absoluteFilePath();
+            baseConfig = envConfig.absoluteFilePath();
         }
     }
 
+    if (baseConfig.isEmpty()) {
+        const auto* configManager = scan_tracking::common::ConfigManager::instance();
+        if (configManager != nullptr) {
+            const QString configured = configManager->bevelConfig().configPath.trimmed();
+            if (!configured.isEmpty()) {
+                QFileInfo configuredInfo(configured);
+                if (configuredInfo.isAbsolute() && configuredInfo.exists()) {
+                    baseConfig = configuredInfo.absoluteFilePath();
+                } else {
+                    const QFileInfo relativeToExe(
+                        QDir(QCoreApplication::applicationDirPath()).filePath(configured));
+                    if (relativeToExe.exists()) {
+                        baseConfig = relativeToExe.absoluteFilePath();
+                    }
+                }
+            }
+        }
+    }
+
+    if (baseConfig.isEmpty()) {
+        const QFileInfo defaultConfig(defaultBevelRootDirectory() + QStringLiteral("/config.txt"));
+        baseConfig = defaultConfig.absoluteFilePath();
+    }
+
+    // 2. V1.2 单模板单 config：按当前配方坡口类型选 config_type{N}.txt。
+    //    type0 → config_type0.txt（随程序部署）；type1 → config_type1.txt，
+    //    未部署则由 runBevelMeasurement 的存在性检查给出明确错误（type1 待标定）。
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
-    if (configManager != nullptr) {
-        const QString configured = configManager->bevelConfig().configPath.trimmed();
-        if (!configured.isEmpty()) {
-            QFileInfo configuredInfo(configured);
-            if (configuredInfo.isAbsolute() && configuredInfo.exists()) {
-                return configuredInfo.absoluteFilePath();
-            }
-            const QFileInfo relativeToExe(
-                QDir(QCoreApplication::applicationDirPath()).filePath(configured));
-            if (relativeToExe.exists()) {
-                return relativeToExe.absoluteFilePath();
-            }
+    if (configManager != nullptr && configManager->hasActiveBevelRecipe()) {
+        const int bevelType = configManager->bevelRecipe().bevelType;
+        if (bevelType >= 0) {
+            const QFileInfo baseInfo(baseConfig);
+            return baseInfo.dir().filePath(
+                QStringLiteral("config_type%1.txt").arg(bevelType));
         }
     }
 
-    const QFileInfo defaultConfig(defaultBevelRootDirectory() + QStringLiteral("/config.txt"));
-    return defaultConfig.absoluteFilePath();
+    return baseConfig;
 }
 
 QString resolveBevelTemplateDir()
@@ -182,38 +205,47 @@ BevelInspectionResult runBevelMeasurement(
 
         const std::string configPathUtf8 = configPath.toLocal8Bit().toStdString();
         const std::string templateDirUtf8 = templateDir.toLocal8Bit().toStdString();
+        // V1.2：算法不再接受 BevelSolveOptions，公差/合格判定上移至 IPC 侧。
         const BevelSolveOptions solveOptions =
             buildBevelSolveOptions(recipe, angleTolDeg, lengthTolMm);
-        ::bevel::BevelSolveOptions algorithmOptions;
-        algorithmOptions.forcedBevelType = solveOptions.forcedBevelType;
-        algorithmOptions.overrideStandard = solveOptions.overrideStandard;
-        algorithmOptions.standardAngleMinDeg = solveOptions.standardAngleMinDeg;
-        algorithmOptions.standardAngleMaxDeg = solveOptions.standardAngleMaxDeg;
-        algorithmOptions.standardLengthMin = solveOptions.standardLengthMin;
-        algorithmOptions.standardLengthMax = solveOptions.standardLengthMax;
 
         const ::bevel::BevelMeasurementResult algorithmResult =
             templateDir.isEmpty()
                 ? ::bevel::solveBevelFromRawCloud(
-                      pclCloud, configPathUtf8, std::string(), algorithmOptions)
+                      pclCloud, configPathUtf8, std::string())
                 : ::bevel::solveBevelFromRawCloud(
-                      pclCloud, configPathUtf8, templateDirUtf8, algorithmOptions);
+                      pclCloud, configPathUtf8, templateDirUtf8);
 
         result.ok = algorithmResult.ok;
-        result.bevelType = algorithmResult.bevelType;
+        result.bevelType = recipe.bevelType;  // V1.2 不再返回类型，取自配方
         result.angleDeg = static_cast<float>(algorithmResult.angleDeg);
         result.lengthMm = static_cast<float>(algorithmResult.length);
         result.icpFitness = static_cast<float>(algorithmResult.icpFitness);
-        result.qualityCode = algorithmResult.qualityCode;
+
+        // qualityCode 由 IPC 按公差判定：0=合格，1=角度超差，2=长度超差，3=均超差。
+        // 算法失败（ok=false）时保留 10000 哨兵，由上层 ok 判定短路。
+        if (!result.ok) {
+            result.qualityCode = 10000;
+        } else {
+            const bool angleOk =
+                result.angleDeg >= static_cast<float>(solveOptions.standardAngleMinDeg) &&
+                result.angleDeg <= static_cast<float>(solveOptions.standardAngleMaxDeg);
+            const bool lengthOk =
+                result.lengthMm >= static_cast<float>(solveOptions.standardLengthMin) &&
+                result.lengthMm <= static_cast<float>(solveOptions.standardLengthMax);
+            result.qualityCode = (angleOk ? 0 : 1) | (lengthOk ? 0 : 2);
+        }
+
         result.message = algorithmResult.message.empty()
             ? QString()
             : QString::fromLocal8Bit(algorithmResult.message.c_str());
 
         if (result.ok && result.message.isEmpty()) {
             result.message = QStringLiteral(
-                "坡口测量完成：angle=%1 deg, length=%2 mm, qualityCode=%3")
+                "坡口测量完成：angle=%1 deg, length=%2 mm, bevelType=%3, qualityCode=%4")
                                  .arg(result.angleDeg, 0, 'f', 3)
                                  .arg(result.lengthMm, 0, 'f', 3)
+                                 .arg(result.bevelType)
                                  .arg(result.qualityCode);
         }
     } catch (const std::exception& ex) {

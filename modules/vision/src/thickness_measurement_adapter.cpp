@@ -1,5 +1,6 @@
 #include "scan_tracking/vision/thickness_measurement_adapter.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <exception>
@@ -112,13 +113,32 @@ QString resolvePathRelativeToConfigFile(const QString& configFilePath, const QSt
 
 ThicknessConfig prepareThicknessConfig(const QString& configFilePath, ThicknessConfig config)
 {
-    config.pointCloud.templateCloudPath =
+    config.pointCloud.innerTemplateCloudPath =
         resolvePathRelativeToConfigFile(
             configFilePath,
-            QString::fromStdString(config.pointCloud.templateCloudPath))
+            QString::fromStdString(config.pointCloud.innerTemplateCloudPath))
+            .toLocal8Bit()
+            .toStdString();
+    config.pointCloud.outerTemplateCloudPath =
+        resolvePathRelativeToConfigFile(
+            configFilePath,
+            QString::fromStdString(config.pointCloud.outerTemplateCloudPath))
             .toLocal8Bit()
             .toStdString();
     return config;
+}
+
+bool loadTemplateCloud(const std::string& path, pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
+{
+    if (path.empty()) {
+        return false;
+    }
+
+    const QString qPath = QString::fromStdString(path);
+    if (qPath.endsWith(QStringLiteral(".ply"), Qt::CaseInsensitive)) {
+        return pcl::io::loadPLYFile<pcl::PointXYZ>(path, *cloud) >= 0 && !cloud->empty();
+    }
+    return pcl::io::loadPCDFile<pcl::PointXYZ>(path, *cloud) >= 0 && !cloud->empty();
 }
 
 }  // namespace
@@ -191,41 +211,43 @@ ThicknessInspectionResult runThicknessMeasurement(
         }
         measureConfig = prepareThicknessConfig(configPath, measureConfig);
 
-        if (measureConfig.pointCloud.templateCloudPath.empty()) {
-            result.message = QStringLiteral("厚度测量配置缺少 template_cloud_path。");
-            return result;
-        }
-        if (!QFileInfo::exists(
-                QString::fromStdString(measureConfig.pointCloud.templateCloudPath))) {
-            result.message = QStringLiteral("厚度模板点云不存在：%1")
-                                 .arg(QString::fromStdString(measureConfig.pointCloud.templateCloudPath));
+        if (measureConfig.pointCloud.innerTemplateCloudPath.empty()
+            || measureConfig.pointCloud.outerTemplateCloudPath.empty()) {
+            result.message = QStringLiteral(
+                "厚度测量配置缺少 inner_template_cloud_path / outer_template_cloud_path。");
             return result;
         }
 
-        pcl::PointCloud<pcl::PointXYZ>::Ptr templateCloud(new pcl::PointCloud<pcl::PointXYZ>);
-        const QString templatePath =
-            QString::fromStdString(measureConfig.pointCloud.templateCloudPath);
-        if (templatePath.endsWith(QStringLiteral(".ply"), Qt::CaseInsensitive)) {
-            if (pcl::io::loadPLYFile<pcl::PointXYZ>(
-                    measureConfig.pointCloud.templateCloudPath, *templateCloud) < 0
-                || templateCloud->empty()) {
-                result.message = QStringLiteral("厚度模板 PLY 加载失败：%1").arg(templatePath);
-                return result;
-            }
-        } else {
-            if (pcl::io::loadPCDFile<pcl::PointXYZ>(
-                    measureConfig.pointCloud.templateCloudPath, *templateCloud) < 0
-                || templateCloud->empty()) {
-                result.message = QStringLiteral("厚度模板 PCD 加载失败：%1").arg(templatePath);
-                return result;
-            }
+        const QString innerTemplatePath =
+            QString::fromStdString(measureConfig.pointCloud.innerTemplateCloudPath);
+        const QString outerTemplatePath =
+            QString::fromStdString(measureConfig.pointCloud.outerTemplateCloudPath);
+        if (!QFileInfo::exists(innerTemplatePath)) {
+            result.message = QStringLiteral("内表面模板点云不存在：%1").arg(innerTemplatePath);
+            return result;
+        }
+        if (!QFileInfo::exists(outerTemplatePath)) {
+            result.message = QStringLiteral("外表面模板点云不存在：%1").arg(outerTemplatePath);
+            return result;
+        }
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr innerTemplateCloud(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr outerTemplateCloud(new pcl::PointCloud<pcl::PointXYZ>);
+        if (!loadTemplateCloud(measureConfig.pointCloud.innerTemplateCloudPath, innerTemplateCloud)) {
+            result.message = QStringLiteral("内表面模板点云加载失败：%1").arg(innerTemplatePath);
+            return result;
+        }
+        if (!loadTemplateCloud(measureConfig.pointCloud.outerTemplateCloudPath, outerTemplateCloud)) {
+            result.message = QStringLiteral("外表面模板点云加载失败：%1").arg(outerTemplatePath);
+            return result;
         }
 
         ThicknessResult algoResult;
         std::string algoError;
         if (!MeasureThicknessFromClouds(
                 measureConfig,
-                templateCloud,
+                innerTemplateCloud,
+                outerTemplateCloud,
                 innerPcl,
                 outerPcl,
                 &algoResult,
@@ -238,24 +260,33 @@ ThicknessInspectionResult runThicknessMeasurement(
         }
 
         result.thicknessMm = algoResult.thickness;
-        result.icpFitnessScore = algoResult.icpFitnessScore;
+        result.innerIcpFitnessScore = algoResult.innerIcpFitnessScore;
+        result.outerIcpFitnessScore = algoResult.outerIcpFitnessScore;
+        result.icpFitnessScore = std::max(result.innerIcpFitnessScore, result.outerIcpFitnessScore);
+        result.thicknessMethod = QString::fromStdString(algoResult.thicknessMethod);
 
         const bool thicknessOk =
             std::isfinite(result.thicknessMm) && result.thicknessMm > 0.0;
-        const bool icpOk =
-            std::isfinite(result.icpFitnessScore) && result.icpFitnessScore <= icpFitnessMax;
+        const bool innerIcpOk =
+            std::isfinite(result.innerIcpFitnessScore) && result.innerIcpFitnessScore <= icpFitnessMax;
+        const bool outerIcpOk =
+            std::isfinite(result.outerIcpFitnessScore) && result.outerIcpFitnessScore <= icpFitnessMax;
 
-        result.ok = thicknessOk && icpOk;
+        result.ok = thicknessOk && innerIcpOk && outerIcpOk;
         if (result.ok) {
             result.message = QStringLiteral(
-                "厚度测量通过：thickness=%1 mm, icpFitness=%2。")
+                "厚度测量通过：thickness=%1 mm, method=%2, innerIcp=%3, outerIcp=%4。")
                                      .arg(result.thicknessMm, 0, 'f', 3)
-                                     .arg(result.icpFitnessScore, 0, 'f', 6);
+                                     .arg(result.thicknessMethod)
+                                     .arg(result.innerIcpFitnessScore, 0, 'f', 6)
+                                     .arg(result.outerIcpFitnessScore, 0, 'f', 6);
         } else {
             result.message = QStringLiteral(
-                "厚度测量未通过：thickness=%1 mm, icpFitness=%2 (max %3)。")
+                "厚度测量未通过：thickness=%1 mm, method=%2, innerIcp=%3, outerIcp=%4 (max %5)。")
                                      .arg(result.thicknessMm, 0, 'f', 3)
-                                     .arg(result.icpFitnessScore, 0, 'f', 6)
+                                     .arg(result.thicknessMethod)
+                                     .arg(result.innerIcpFitnessScore, 0, 'f', 6)
+                                     .arg(result.outerIcpFitnessScore, 0, 'f', 6)
                                      .arg(icpFitnessMax, 0, 'f', 3);
         }
     } catch (const std::exception& ex) {

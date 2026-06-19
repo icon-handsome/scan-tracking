@@ -1,9 +1,0 @@
-# Required feature names:
-# angle_a angle_b angle_c define the bevel angle at angle_b.
-# length_a length_b define the measured bevel length.
-# Replace these coordinates with the feature points built in your type 0 template.
-angle_a -3.524813 1.735023 237.372330
-angle_b -5.334963 2.168335 233.711960
-angle_c -8.914026 0.846581 231.441452
-length_a -2.908381 1.126938 239.269089
-length_b -5.334963 2.168335 233.711960

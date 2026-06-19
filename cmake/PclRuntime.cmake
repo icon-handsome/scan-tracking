@@ -148,6 +148,10 @@ function(scan_tracking_deploy_bevel_runtime target_name)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${_bevel_source_root}/config.txt"
             "$<TARGET_FILE_DIR:${target_name}>/bevel/config.txt"
+        # V1.2 按坡口类型选 config：config_type{N}.txt（缺省回退 config.txt）
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_bevel_source_root}/config_type0.txt"
+            "$<TARGET_FILE_DIR:${target_name}>/bevel/config_type0.txt"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${_bevel_source_root}/data"
             "$<TARGET_FILE_DIR:${target_name}>/bevel/data"

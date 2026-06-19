@@ -1,6 +1,7 @@
 {
   "point_cloud": {
-    "template_cloud_path": "../input/Feng_Tou_template_sample.pcd"
+    "inner_template_cloud_path": "../input/Feng_Tou_template_sample.pcd",
+    "outer_template_cloud_path": "../input/Feng_Tou_template_sample.pcd"
   },
   "preprocess": {
     "enable_outlier_removal": true,
@@ -8,6 +9,10 @@
     "stddev_mul_thresh": 5.0,
     "enable_voxel_downsample": true,
     "leaf_size": 1.0
+  },
+  "measurement": {
+    "_comment": "thickness_method: tangent_plane_projection or nearest_between_surfaces",
+    "thickness_method": "nearest_between_surfaces"
   },
   "icp": {
     "max_iterations": 100,
@@ -22,14 +27,14 @@
       "z": 1875.7435
     },
     "axis_direction": {
-      "x": 0.0195, 
+      "x": 0.0195,
       "y": -0.5138,
       "z": -0.8577
     }
   },
   "template_feature_points": [
     {
-      "x": -573.36621094, 
+      "x": -573.36621094,
       "y": -143.84236145,
       "z": 1969.37170410
     },

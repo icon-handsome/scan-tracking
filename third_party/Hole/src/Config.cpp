@@ -1,4 +1,4 @@
-// 配置解析，同步自「柱面和开孔测量 V1.1」（支持 crop_boxes，兼容 crop_min/max）。
+// 配置解析，标定参数同步自「柱面和开孔测量 V1.2」（支持 crop_boxes，兼容 crop_min/max）。
 #include "HeadMeasure/Config.h"
 
 #include <Eigen/Dense>

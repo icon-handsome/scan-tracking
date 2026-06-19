@@ -1,163 +1,73 @@
+# Template Path
+data/templates/type_0_template.pcd
+
 # Bevel measurement config
-# Lines starting with # are comments and will be ignored.
-# Keep every config item on its own line.
+# The first non-comment line above is the template cloud path.
 # Units must match scan cloud and template cloud, normally mm.
 
-
-# -------------------------
 # 1. Preprocess: uniform voxel downsample
-# -------------------------
-# Enable uniform voxel downsample: true or false.
 preprocess.uniform.enable = true
+preprocess.uniform.leaf_size = 0.5
+preprocess.uniform.save_cloud = true
+preprocess.uniform.cloud_path = data/downsampled_cloud.pcd
 
-# Voxel leaf size. Smaller value keeps more detail and reduces holes.
-preprocess.uniform.leaf_size = 1.5
-
-
-# -------------------------
 # 2. Preprocess: pose correction
-# -------------------------
-# Enable pose correction from camera coordinate to measurement coordinate.
 preprocess.pose.enable = true
-
-# Translation: tx ty tz.
 preprocess.pose.translation = 0 0 0
-
-# Rotation angle: rx ry rz, unit is degree. Internal order is Rz * Ry * Rx.
 preprocess.pose.rotation_deg = 0 0 0
 
-
-# -------------------------
 # 3. Preprocess: crop box
-# -------------------------
-# Enable crop box to keep bevel area and remove background points.
 preprocess.crop.enable = true
+preprocess.crop.min = -204.3808 -98.1065 435.4672
+preprocess.crop.max = 84.9252 47.8115 520.2348
 
-# Crop min point: x_min y_min z_min.
-preprocess.crop.min = -78 -182 43
-
-# Crop max point: x_max y_max z_max.
-preprocess.crop.max = 71 217 443
-
-
-# -------------------------
 # 4. Preprocess: isolated point filter
-# -------------------------
-# Enable statistical outlier removal.
 preprocess.outlier.enable = true
-
-# Neighbor count used by statistical filter.
 preprocess.outlier.mean_k = 10
+preprocess.outlier.stddev_mul = 3.0
 
-# Stddev multiplier. Smaller value means stricter filtering. 璇ュ�煎ぇ涓�鐐规护闄ゅ己搴﹀皬涓�鐐?preprocess.outlier.stddev_mul = 3.0
-
-
-# -------------------------
-# 5. Section projection image for SVM
-# -------------------------
-# SVM input image width. The current model uses 512.
-section.image_width = 512
-
-# SVM input image height. The current model uses 512.
-section.image_height = 512
-
-# Section plane center: cx cy cz.
-section.center = -53.839333 6.381310 364.598816
-
-# Section plane normal: nx ny nz. It will be normalized by program.
-section.normal = 0.919991 0.381857 0.088330
-
-# Slice thickness. Point is used when distance to plane is within half thickness.
-section.thickness = 3.0
-
-# Projection scale. 0 means auto scale.
-section.scale = 0
-
-# Save projected image for debug.
-section.save_image = true
-
-# Projected image output path.
-section.image_path = data/debug/projection.png
-
-# Save PCA normalized image used by SVM.
-section.save_normalized_image = true
-
-# PCA normalized image output path.
-section.normalized_image_path = data/debug/projection_pca.png
-
-
-# -------------------------
-# 6. SVM model
-# -------------------------
-# OpenCV SVM weight file path.
-# Tip: Chinese path can fail in some narrow-character APIs.
-# If loading fails, copy svm_weight.xml to data/svm_weight.xml and use that relative path.
-svm.model_path = data/svm_weight.xml
-
-
-# -------------------------
-# 7. Template cloud and feature points
-# -------------------------
-# {type} will be replaced by SVM result, for example type_0.pcd.
-# If main.cpp passes templateDir, templateDir has higher priority.
-template.path_pattern = data/templates/type_{type}_template.pcd
-
-# Measurement method: plane_fit or direct_points.两种解算坡口角度和钝边长度方法
+# 5. Measurement method
+# Use plane_fit or direct_points.
 measurement.method = plane_fit
 
-# Plane-fit method feature path. Needs plane1_p1..plane1_p6, plane2_p1..plane2_p6, project_normal, project_point, length_a, length_b.
-template.plane_fit_feature_path_pattern = data/templates/type_{type}_features_plane_fit.txt
+# 6. Plane-fit feature points in template coordinates
+[features.plane_fit]
+plane1_p1 -65.9281539917 -37.7812271118 438.704589844
+plane1_p2 -64.3859634399 -37.2015838623 438.660247803
+plane1_p3 -62.2620162964 -36.6183547974 438.571533203
+plane1_p4 -66.48021698 -35.3629226685 437.28527832
+plane1_p5 -63.6165771484 -34.4097137451 437.329620361
+plane1_p6 -60.9622764587 -33.6579284668 437.507049561
+plane2_p1 -70.0089874268 -32.0612983704 436.6199646
+plane2_p2 -67.1296234131 -30.9087257385 436.53125
+plane2_p3 -64.2514190674 -29.7566204071 436.4425354
+plane2_p4 -71.0723648071 -28.6660423279 437.28527832
+plane2_p5 -68.038520813 -27.3377513885 437.462677002
+plane2_p6 -64.5602722168 -25.9846515656 437.240905762
+project_normal 0.98575151 0.13451004 0.10100010
+project_point -67.67352295 -27.40843964 442.84786987
+length_a -65.855820 -38.619221 439.502960
+length_b -66.365585 -33.009830 436.531250
 
-# Direct point method feature path. Needs angle_a, angle_b, angle_c, length_a, length_b.
-template.direct_feature_path_pattern = data/templates/type_{type}_features_direct.txt
+# 7. Direct-point feature points in template coordinates
+# Required feature names:
+# angle_a angle_b angle_c define the bevel angle at angle_b.
+# length_a length_b define the measured bevel length.
+# Replace these coordinates with the feature points built in your type 0 template.
+[features.direct_points]
+angle_a -65.855820 -38.619221 439.502960
+angle_b -66.365585 -33.009830 436.531250
+angle_c -67.218292 -26.168007 437.107849
+length_a -65.855820 -38.619221 439.502960
+length_b -66.365585 -33.009830 436.531250
 
-
-# -------------------------
 # 8. ICP params
-# -------------------------
-# Max ICP iterations.
 icp.max_iterations = 300
-
-# Max correspondence distance between scan point and template point.
 icp.max_correspondence_distance = 200.0
-
-# Transformation convergence threshold.
 icp.transformation_epsilon = 1e-8
-
-# 鐩搁偦涓ゆ鍖归厤璇樊鐨勫樊寮侲uclidean fitness convergence threshold.
 icp.euclidean_fitness_epsilon = 1e-3
-
-# Enable trimmed ICP correspondence rejection.
-# It sorts correspondences by nearest-point distance and keeps only the best ratio.
 icp.trim.enable = true
-
-# Keep the nearest N percent correspondences. 0.7 means keeping best 70 percent.
 icp.trim.overlap_ratio = 0.98
-
-# Minimum correspondence count kept by trimmed ICP.
 icp.trim.min_correspondences = 50
-
-# Save scan cloud after ICP transform. It is saved even if ICP does not converge.
 icp.save_aligned_cloud = true
-
-# Output path of aligned scan cloud.
-icp.aligned_cloud_path = data/debug/aligned_scan.pcd
-
-
-# -------------------------
-# 9. Quality standard
-# -------------------------
-# If angle and length are both qualified, quality_code outputs 0.
-# If angle or length is unqualified, quality_code outputs 10000.
-
-# Min bevel angle, degree.
-standard.angle_min_deg = 43.0
-
-# Max bevel angle, degree.
-standard.angle_max_deg = 47.0
-
-# Min bevel length, same unit as cloud.
-standard.length_min = 5.0
-
-# Max bevel length, same unit as cloud.
-standard.length_max = 7.0
+icp.aligned_cloud_path = data/aligned_scan.pcd

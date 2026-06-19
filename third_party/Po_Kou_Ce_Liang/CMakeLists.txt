@@ -2,11 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(PoKouCeLiang LANGUAGES CXX)
 
-set(PO_KOU_OPENCV_ROOT
-    "${SCAN_TRACKING_OPENCV_BUILD_ROOT}"
-    CACHE PATH
-    "Path to the bundled OpenCV build used by Po_Kou_Ce_Liang"
-)
+# V1.2 起算法仅依赖 PCL + Eigen，不再使用 OpenCV（投影/SVM 已移除）。
 
 find_package(PCL 1.12 REQUIRED COMPONENTS
     common
@@ -16,11 +12,6 @@ find_package(PCL 1.12 REQUIRED COMPONENTS
     search
     registration
     sample_consensus
-)
-
-find_package(OpenCV REQUIRED
-    PATHS "${SCAN_TRACKING_OPENCV_LIB_DIR}"
-    NO_DEFAULT_PATH
 )
 
 add_library(po_kou_ce_liang STATIC
@@ -33,12 +24,10 @@ target_include_directories(po_kou_ce_liang
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
         ${PCL_INCLUDE_DIRS}
-        "${PO_KOU_OPENCV_ROOT}/include"
 )
 
 target_link_libraries(po_kou_ce_liang
     PUBLIC
-        ${OpenCV_LIBS}
         ${PCL_LIBRARIES}
 )
 

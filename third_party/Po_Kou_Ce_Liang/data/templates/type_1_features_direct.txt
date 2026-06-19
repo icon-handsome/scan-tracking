@@ -1,6 +1,0 @@
-# Direct point measurement features.
-angle_a 0 0 0
-angle_b 1 0 0
-angle_c 1 1 0
-length_a 0 0 0
-length_b 10 0 0

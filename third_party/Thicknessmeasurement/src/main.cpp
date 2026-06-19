@@ -68,9 +68,12 @@ std::string Utf8ToLocalAnsi(const std::string& input)
 
 int main(int argc, char** argv)
 {
-    const std::string configPath = Utf8ToLocalAnsi(argc > 1 ? argv[1] : "D:/1 自研/15 兰铀算法/测量算法/厚度测量/config/thickness_config.json");
-    const std::string innerScanCloudPath = Utf8ToLocalAnsi(argc > 2 ? argv[2] : "D:/1 自研/15 兰铀算法/测量算法/厚度测量/input/inner_surface_sample.pcd");
-    const std::string outerScanCloudPath = Utf8ToLocalAnsi(argc > 3 ? argv[3] : "D:/1 自研/15 兰铀算法/测量算法/厚度测量/input/outer_surface_sample.pcd");
+    const std::string configPath = Utf8ToLocalAnsi(
+        argc > 1 ? argv[1] : "config/thickness_config.json");
+    const std::string innerScanCloudPath = Utf8ToLocalAnsi(
+        argc > 2 ? argv[2] : "input/inner_surface_sample.pcd");
+    const std::string outerScanCloudPath = Utf8ToLocalAnsi(
+        argc > 3 ? argv[3] : "input/outer_surface_sample.pcd");
 
     ThicknessConfig config;
     std::string error;
@@ -80,7 +83,6 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // 内外两帧扫描点云路径由主函数指定，不再从 JSON 配置读取。
     config.pointCloud.innerScanCloudPath = innerScanCloudPath;
     config.pointCloud.outerScanCloudPath = outerScanCloudPath;
 
@@ -98,7 +100,9 @@ int main(int argc, char** argv)
     }
 
     std::cout.precision(12);
-    std::cout << "ICP fitness score: " << result.icpFitnessScore << std::endl;
+    std::cout << "Inner ICP fitness score: " << result.innerIcpFitnessScore << std::endl;
+    std::cout << "Outer ICP fitness score: " << result.outerIcpFitnessScore << std::endl;
+    std::cout << "Thickness method: " << result.thicknessMethod << std::endl;
     std::cout << "Thickness: " << result.thickness << std::endl;
     std::cout << "Result saved to: " << config.output.resultPath << std::endl;
     return 0;

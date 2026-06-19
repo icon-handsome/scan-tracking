@@ -30,7 +30,7 @@ set(HOLE_CONFIG_FILES
 )
 
 set(HOLE_TEMPLATE_FILES
-    template/.gitkeep
+    template/Zhu_Mian_Kai_Kong_Template_cut_trans.pcd
 )
 
 add_library(head_measure STATIC

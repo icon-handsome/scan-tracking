@@ -29,12 +29,12 @@ struct BevelSolveOptions {
 /// 坡口测量单次输出（与 TrackingService::InspectionMeasurement 字段对应）
 struct BevelInspectionResult {
     bool invoked = false;   ///< 是否已进入算法（stub 构建可能为 false）
-    bool ok = false;        ///< 测量是否成功且 qualityCode 合格
-    int bevelType = -1;     ///< 识别出的坡口类型编号
+    bool ok = false;        ///< 算法是否成功（几何求解完成）；合格判定见 qualityCode
+    int bevelType = -1;     ///< 坡口类型编号（V1.2 起取自工艺配方，非算法识别）
     float angleDeg = 0.0f;  ///< 实测坡口角（度）
     float lengthMm = 0.0f;  ///< 实测钝边长度（mm）
     float icpFitness = 0.0f;///< ICP 拟合度，越小越好
-    int qualityCode = 10000;///< 0=合格，非 0 为 Po_Kou 内部质量码
+    int qualityCode = 10000;///< IPC 公差判定：0=合格，1=角度超差，2=长度超差，3=均超差；算法失败时 10000
     QString message;        ///< 失败原因或摘要
 };
 
@@ -42,7 +42,8 @@ struct BevelInspectionResult {
 pcl::PointCloud<pcl::PointXYZ>::Ptr toPclPointCloud(
     const scan_tracking::mech_eye::PointCloudFrame& frame);
 
-/// 解析 config.ini / 环境变量 / exe 旁 bevel 目录，得到 config.txt 绝对路径。
+/// 解析 config.ini / 环境变量 / exe 旁 bevel 目录，得到 config 绝对路径。
+/// V1.2 单模板单 config：优先返回当前配方类型对应的 config_type{N}.txt，缺省回退 config.txt。
 QString resolveBevelConfigPath();
 
 /// 解析模板目录绝对路径（可为空，表示使用 config.txt 内相对路径）。

@@ -1,8 +1,7 @@
-﻿// 厚度测量核心算法，同步自「厚度测量 V1.1」。
-// IPC 集成保留 MeasureThicknessFromClouds 内存接口；V1.1 调试 std::cout 已剔除。
+﻿// 厚度测量核心算法，同步自「厚度测量 V1.2」。
+// IPC 集成保留 MeasureThicknessFromClouds 内存接口；V1.2 调试输出与临时写盘已剔除。
 #include "ThicknessMeasurement.h"
 
-#include <cstdlib>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -69,7 +68,6 @@ bool LoadCloud(const std::string& path, CloudT::Ptr cloud, std::string* error)
         return false;
     }
 
-    // 当前工程只加载常用的 PCD/PLY 点云格式，便于和 PCL 工具链直接配合。
     const std::string ext = LowerExtension(path);
     int status = -1;
     if (ext == "pcd")
@@ -184,7 +182,6 @@ CloudT::Ptr PreprocessCloud(const CloudT::ConstPtr& input, const PreprocessConfi
     CloudT::Ptr current(new CloudT);
     pcl::copyPointCloud(*input, *current);
 
-    // 先做统计孤立点去除，降低离群点对 ICP 和最近点搜索的影响。
     if (config.enableOutlierRemoval && current->size() > static_cast<std::size_t>(config.meanK))
     {
         pcl::StatisticalOutlierRemoval<PointT> sor;
@@ -196,7 +193,6 @@ CloudT::Ptr PreprocessCloud(const CloudT::ConstPtr& input, const PreprocessConfi
         current = filtered;
     }
 
-    // 再做体素降采样，减少 ICP 计算量，同时保持整体几何形状。
     if (config.enableVoxelDownsample)
     {
         pcl::VoxelGrid<PointT> voxel;
@@ -211,24 +207,50 @@ CloudT::Ptr PreprocessCloud(const CloudT::ConstPtr& input, const PreprocessConfi
     return current;
 }
 
-Eigen::Vector3d TransformPoint(const Eigen::Matrix4f& pose, const Eigen::Vector3d& point)
+bool AlignScanToTemplate(const CloudT::Ptr& scanCloud,
+                         const CloudT::Ptr& templateCloud,
+                         const IcpConfig& config,
+                         CloudT::Ptr alignedCloud,
+                         double* fitnessScore,
+                         std::string* error)
 {
-    // PCL 的 ICP 位姿为 4x4 单精度矩阵，这里用齐次坐标变换单个三维点。
-    Eigen::Vector4f hom;
-    hom.x() = static_cast<float>(point.x());
-    hom.y() = static_cast<float>(point.y());
-    hom.z() = static_cast<float>(point.z());
-    hom.w() = 1.0f;
+    if (scanCloud->empty() || templateCloud->empty())
+    {
+        if (error != NULL)
+        {
+            *error = "ICP input cloud is empty";
+        }
+        return false;
+    }
 
-    const Eigen::Vector4f transformed = pose * hom;
-    return Eigen::Vector3d(transformed.x(), transformed.y(), transformed.z());
-}
+    pcl::IterativeClosestPoint<PointT, PointT> icp;
+    icp.setInputSource(scanCloud);
+    icp.setInputTarget(templateCloud);
+    icp.setMaximumIterations(config.maxIterations);
+    icp.setMaxCorrespondenceDistance(config.maxCorrespondenceDistance);
+    icp.setTransformationEpsilon(config.transformationEpsilon);
+    icp.setEuclideanFitnessEpsilon(config.euclideanFitnessEpsilon);
+    if (0)
+    {
+        pcl::registration::CorrespondenceRejectorTrimmed::Ptr trimmed(
+            new pcl::registration::CorrespondenceRejectorTrimmed);
+        trimmed->setOverlapRatio(static_cast<float>(0.98));
+        trimmed->setMinCorrespondences(200.0);
+        icp.addCorrespondenceRejector(trimmed);
+    }
 
-CloudT::Ptr TransformCloud(const CloudT::Ptr& input, const Eigen::Matrix4f& pose)
-{
-    CloudT::Ptr output(new CloudT);
-    pcl::transformPointCloud(*input, *output, pose);
-    return output;
+    icp.align(*alignedCloud);
+    if (!icp.hasConverged())
+    {
+        if (error != NULL)
+        {
+            *error = "ICP did not converge";
+        }
+        return false;
+    }
+
+    *fitnessScore = icp.getFitnessScore();
+    return true;
 }
 
 bool FindNearestPoint(
@@ -237,7 +259,6 @@ bool FindNearestPoint(
     Eigen::Vector3d* nearest,
     std::string* error)
 {
-    // 用 KDTree 在变换后的外表面点云中查找特征点对应的最近实测点。
     PointT point;
     point.x = static_cast<float>(query.x());
     point.y = static_cast<float>(query.y());
@@ -264,7 +285,6 @@ Eigen::Vector3d ProjectToPlane(const Eigen::Vector3d& point,
                                 const Eigen::Vector3d& planePoint,
                                 const Eigen::Vector3d& planeNormal)
 {
-    // 点到平面的正交投影：减去沿法向的距离分量。
     const double distance = (point - planePoint).dot(planeNormal);
     return point - distance * planeNormal;
 }
@@ -275,7 +295,6 @@ bool ComputeThicknessOnTangentPlane(const ThicknessConfig& config,
                                     double* thickness,
                                     std::string* error)
 {
-    // ICP 后所有测量点都在模板坐标系内，柱面轴线直接使用模板配置。
     const Eigen::Vector3d axisPoint = ToEigen(config.templateCylinder.axisPoint);
     const Eigen::Vector3d axisDirection = ToEigen(config.templateCylinder.axisDirection).normalized();
 
@@ -290,7 +309,6 @@ bool ComputeThicknessOnTangentPlane(const ThicknessConfig& config,
         return false;
     }
 
-    // 切面由柱面轴线和第一个特征最近点确定，法向为“轴线方向 × 径向方向”。
     const Eigen::Vector3d planeNormal = axisDirection.cross(radial).normalized();
     const Eigen::Vector3d projectedAxisPoint =
         axisPoint + (nearest[0] - axisPoint).dot(axisDirection) * axisDirection;
@@ -300,15 +318,87 @@ bool ComputeThicknessOnTangentPlane(const ThicknessConfig& config,
     *thickness = (projected[0] - projected[1]).norm();
     return true;
 }
+
+bool MeasureByNearestBetweenSurfaces(const ThicknessConfig& config,
+                                     const CloudT::Ptr& innerScanInTemplate,
+                                     const CloudT::Ptr& outerScanInTemplate,
+                                     ThicknessResult* result,
+                                     std::string* error)
+{
+    pcl::KdTreeFLANN<PointT> outerTree;
+    pcl::KdTreeFLANN<PointT> innerTree;
+    outerTree.setInputCloud(outerScanInTemplate);
+    innerTree.setInputCloud(innerScanInTemplate);
+
+    const Eigen::Vector3d feature = ToEigen(config.templateFeaturePoints[0]);
+    result->templateFeaturePoints[0] = FromEigen(feature);
+    result->templateFeaturePoints[1] = FromEigen(feature);
+
+    Eigen::Vector3d outerNearest;
+    Eigen::Vector3d innerNearest;
+    if (!FindNearestPoint(outerTree, feature, &outerNearest, error))
+    {
+        return false;
+    }
+    if (!FindNearestPoint(innerTree, outerNearest, &innerNearest, error))
+    {
+        return false;
+    }
+
+    result->nearestScanPoints[0] = FromEigen(outerNearest);
+    result->nearestScanPoints[1] = FromEigen(innerNearest);
+    result->projectedPoints[0] = FromEigen(outerNearest);
+    result->projectedPoints[1] = FromEigen(innerNearest);
+    result->thickness = (outerNearest - innerNearest).norm();
+    return true;
 }
 
-bool MeasureThicknessFromClouds(
-    const ThicknessConfig& config,
-    const ThicknessPointCloudConstPtr& templateCloud,
-    const ThicknessPointCloudConstPtr& innerScanCloud,
-    const ThicknessPointCloudConstPtr& outerScanCloud,
-    ThicknessResult* result,
-    std::string* error)
+bool MeasureByTangentPlaneProjection(const ThicknessConfig& config,
+                                     const CloudT::Ptr& innerScanInTemplate,
+                                     const CloudT::Ptr& outerScanInTemplate,
+                                     ThicknessResult* result,
+                                     std::string* error)
+{
+    pcl::KdTreeFLANN<PointT> outerTree;
+    pcl::KdTreeFLANN<PointT> innerTree;
+    outerTree.setInputCloud(outerScanInTemplate);
+    innerTree.setInputCloud(innerScanInTemplate);
+
+    Eigen::Vector3d nearest[2];
+    const Eigen::Vector3d outerFeature = ToEigen(config.templateFeaturePoints[0]);
+    const Eigen::Vector3d innerFeature = ToEigen(config.templateFeaturePoints[1]);
+    result->templateFeaturePoints[0] = FromEigen(outerFeature);
+    result->templateFeaturePoints[1] = FromEigen(innerFeature);
+
+    if (!FindNearestPoint(outerTree, outerFeature, &nearest[0], error))
+    {
+        return false;
+    }
+    if (!FindNearestPoint(innerTree, innerFeature, &nearest[1], error))
+    {
+        return false;
+    }
+    result->nearestScanPoints[0] = FromEigen(nearest[0]);
+    result->nearestScanPoints[1] = FromEigen(nearest[1]);
+
+    Eigen::Vector3d projected[2];
+    if (!ComputeThicknessOnTangentPlane(config, nearest, projected, &result->thickness, error))
+    {
+        return false;
+    }
+
+    result->projectedPoints[0] = FromEigen(projected[0]);
+    result->projectedPoints[1] = FromEigen(projected[1]);
+    return true;
+}
+
+bool RunThicknessMeasurement(const ThicknessConfig& config,
+                             const CloudT::Ptr& innerTemplateCloud,
+                             const CloudT::Ptr& outerTemplateCloud,
+                             const CloudT::Ptr& innerScanCloud,
+                             const CloudT::Ptr& outerScanCloud,
+                             ThicknessResult* result,
+                             std::string* error)
 {
     if (result == NULL)
     {
@@ -319,11 +409,19 @@ bool MeasureThicknessFromClouds(
         return false;
     }
 
-    if (templateCloud == NULL || templateCloud->empty())
+    if (innerTemplateCloud == NULL || innerTemplateCloud->empty())
     {
         if (error != NULL)
         {
-            *error = "template point cloud is null or empty";
+            *error = "inner template point cloud is null or empty";
+        }
+        return false;
+    }
+    if (outerTemplateCloud == NULL || outerTemplateCloud->empty())
+    {
+        if (error != NULL)
+        {
+            *error = "outer template point cloud is null or empty";
         }
         return false;
     }
@@ -364,79 +462,105 @@ bool MeasureThicknessFromClouds(
         return false;
     }
 
-    // 只用第一帧内表面扫描点云做 ICP，位姿表示扫描坐标系到模板坐标系的变换。
-    pcl::IterativeClosestPoint<PointT, PointT> icp;
-    icp.setInputSource(innerScanFiltered);
-    icp.setInputTarget(templateCloud);
-    icp.setMaximumIterations(config.icp.maxIterations);
-    icp.setMaxCorrespondenceDistance(config.icp.maxCorrespondenceDistance);
-    icp.setTransformationEpsilon(config.icp.transformationEpsilon);
-    icp.setEuclideanFitnessEpsilon(config.icp.euclideanFitnessEpsilon);
-    if (0)
+    CloudT::Ptr innerScanInTemplate(new CloudT);
+    CloudT::Ptr outerScanInTemplate(new CloudT);
+    if (!AlignScanToTemplate(innerScanFiltered,
+                             innerTemplateCloud,
+                             config.icp,
+                             innerScanInTemplate,
+                             &result->innerIcpFitnessScore,
+                             error))
     {
-        pcl::registration::CorrespondenceRejectorTrimmed::Ptr trimmed(
-            new pcl::registration::CorrespondenceRejectorTrimmed);
-        trimmed->setOverlapRatio(static_cast<float>(0.98));
-        trimmed->setMinCorrespondences(200.0);
-        icp.addCorrespondenceRejector(trimmed);
-    }
-
-    CloudT aligned;
-    icp.align(aligned);
-    result->icpFitnessScore = icp.getFitnessScore();
-
-    const Eigen::Matrix4f scanToTemplate = icp.getFinalTransformation();
-
-    CloudT::Ptr scanAlignedToTemplate(new CloudT);
-    pcl::transformPointCloud(*innerScanFiltered, *scanAlignedToTemplate, scanToTemplate);
-
-    CloudT::Ptr outerScanInTemplate = TransformCloud(outerScanFiltered, scanToTemplate);
-    CloudT::Ptr wholeScanInTemplate(new CloudT);
-    *wholeScanInTemplate = *scanAlignedToTemplate;
-    *wholeScanInTemplate += *outerScanInTemplate;
-
-    pcl::KdTreeFLANN<PointT> tree;
-    tree.setInputCloud(wholeScanInTemplate);
-
-    Eigen::Vector3d nearest[2];
-    for (int i = 0; i < 2; ++i)
-    {
-        // 特征点绑定在模板点云上，不再使用 ICP 位姿变换。
-        const Eigen::Vector3d feature = ToEigen(config.templateFeaturePoints[i]);
-        result->templateFeaturePoints[i] = FromEigen(feature);
-        if (!FindNearestPoint(tree, feature, &nearest[i], error))
+        if (error != NULL)
         {
-            return false;
+            *error = "inner surface " + *error;
         }
-        result->nearestScanPoints[i] = FromEigen(nearest[i]);
+        return false;
     }
-
-    Eigen::Vector3d projected[2];
-    if (!ComputeThicknessOnTangentPlane(config, nearest, projected, &result->thickness, error))
+    if (!AlignScanToTemplate(outerScanFiltered,
+                             outerTemplateCloud,
+                             config.icp,
+                             outerScanInTemplate,
+                             &result->outerIcpFitnessScore,
+                             error))
     {
+        if (error != NULL)
+        {
+            *error = "outer surface " + *error;
+        }
         return false;
     }
 
-    result->projectedPoints[0] = FromEigen(projected[0]);
-    result->projectedPoints[1] = FromEigen(projected[1]);
-    return true;
+    result->thicknessMethod = ThicknessMethodToString(config.thicknessMethod);
+    if (config.thicknessMethod == ThicknessMethodTangentPlaneProjection)
+    {
+        return MeasureByTangentPlaneProjection(config,
+                                               innerScanInTemplate,
+                                               outerScanInTemplate,
+                                               result,
+                                               error);
+    }
+
+    return MeasureByNearestBetweenSurfaces(config,
+                                           innerScanInTemplate,
+                                           outerScanInTemplate,
+                                           result,
+                                           error);
+}
+}
+
+bool MeasureThicknessFromClouds(
+    const ThicknessConfig& config,
+    const ThicknessPointCloudConstPtr& innerTemplateCloud,
+    const ThicknessPointCloudConstPtr& outerTemplateCloud,
+    const ThicknessPointCloudConstPtr& innerScanCloud,
+    const ThicknessPointCloudConstPtr& outerScanCloud,
+    ThicknessResult* result,
+    std::string* error)
+{
+    CloudT::Ptr innerTemplate(new CloudT);
+    CloudT::Ptr outerTemplate(new CloudT);
+    CloudT::Ptr innerScan(new CloudT);
+    CloudT::Ptr outerScan(new CloudT);
+
+    if (innerTemplateCloud != NULL)
+    {
+        pcl::copyPointCloud(*innerTemplateCloud, *innerTemplate);
+    }
+    if (outerTemplateCloud != NULL)
+    {
+        pcl::copyPointCloud(*outerTemplateCloud, *outerTemplate);
+    }
+    if (innerScanCloud != NULL)
+    {
+        pcl::copyPointCloud(*innerScanCloud, *innerScan);
+    }
+    if (outerScanCloud != NULL)
+    {
+        pcl::copyPointCloud(*outerScanCloud, *outerScan);
+    }
+
+    return RunThicknessMeasurement(
+        config,
+        innerTemplate,
+        outerTemplate,
+        innerScan,
+        outerScan,
+        result,
+        error);
 }
 
 bool MeasureThickness(const ThicknessConfig& config, ThicknessResult* result, std::string* error)
 {
-    if (result == NULL)
-    {
-        if (error != NULL)
-        {
-            *error = "result output pointer is null";
-        }
-        return false;
-    }
-
-    CloudT::Ptr templateCloud(new CloudT);
+    CloudT::Ptr innerTemplateCloud(new CloudT);
+    CloudT::Ptr outerTemplateCloud(new CloudT);
     CloudT::Ptr innerScanCloud(new CloudT);
     CloudT::Ptr outerScanCloud(new CloudT);
-    if (!LoadCloud(config.pointCloud.templateCloudPath, templateCloud, error))
+    if (!LoadCloud(config.pointCloud.innerTemplateCloudPath, innerTemplateCloud, error))
+    {
+        return false;
+    }
+    if (!LoadCloud(config.pointCloud.outerTemplateCloudPath, outerTemplateCloud, error))
     {
         return false;
     }
@@ -449,9 +573,10 @@ bool MeasureThickness(const ThicknessConfig& config, ThicknessResult* result, st
         return false;
     }
 
-    return MeasureThicknessFromClouds(
+    return RunThicknessMeasurement(
         config,
-        templateCloud,
+        innerTemplateCloud,
+        outerTemplateCloud,
         innerScanCloud,
         outerScanCloud,
         result,
@@ -472,7 +597,9 @@ bool SaveResult(const std::string& path, const ThicknessResult& result, std::str
 
     out.precision(12);
     out << "{\n";
-    out << "  \"icp_fitness_score\": " << result.icpFitnessScore << ",\n";
+    out << "  \"inner_icp_fitness_score\": " << result.innerIcpFitnessScore << ",\n";
+    out << "  \"outer_icp_fitness_score\": " << result.outerIcpFitnessScore << ",\n";
+    out << "  \"thickness_method\": \"" << result.thicknessMethod << "\",\n";
     out << "  \"thickness\": " << result.thickness << ",\n";
     out << "  \"template_feature_points\": [\n";
     for (int i = 0; i < 2; ++i)

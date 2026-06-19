@@ -16,7 +16,11 @@ struct ThicknessInspectionResult {
     bool ok = false;
     QString message;
     double thicknessMm = 0.0;
+    /// max(inner, outer) ICP fitness，供寄存器/HMI 向后兼容
     double icpFitnessScore = 0.0;
+    double innerIcpFitnessScore = 0.0;
+    double outerIcpFitnessScore = 0.0;
+    QString thicknessMethod;
 };
 
 QString resolveThicknessConfigPath(int inspectionPathId = 0);

@@ -10,8 +10,10 @@
 
 struct ThicknessResult
 {
-    double icpFitnessScore;
+    double innerIcpFitnessScore;
+    double outerIcpFitnessScore;
     double thickness;
+    std::string thicknessMethod;
     Point3d templateFeaturePoints[2];
     Point3d nearestScanPoints[2];
     Point3d projectedPoints[2];
@@ -22,7 +24,8 @@ using ThicknessPointCloudConstPtr = ThicknessPointCloud::ConstPtr;
 
 bool MeasureThicknessFromClouds(
     const ThicknessConfig& config,
-    const ThicknessPointCloudConstPtr& templateCloud,
+    const ThicknessPointCloudConstPtr& innerTemplateCloud,
+    const ThicknessPointCloudConstPtr& outerTemplateCloud,
     const ThicknessPointCloudConstPtr& innerScanCloud,
     const ThicknessPointCloudConstPtr& outerScanCloud,
     ThicknessResult* result,

@@ -1,0 +1,73 @@
+# Template Path
+data/templates/type_0_template.pcd
+
+# Bevel measurement config
+# The first non-comment line above is the template cloud path.
+# Units must match scan cloud and template cloud, normally mm.
+
+# 1. Preprocess: uniform voxel downsample
+preprocess.uniform.enable = true
+preprocess.uniform.leaf_size = 0.5
+preprocess.uniform.save_cloud = true
+preprocess.uniform.cloud_path = data/downsampled_cloud.pcd
+
+# 2. Preprocess: pose correction
+preprocess.pose.enable = true
+preprocess.pose.translation = 0 0 0
+preprocess.pose.rotation_deg = 0 0 0
+
+# 3. Preprocess: crop box
+preprocess.crop.enable = true
+preprocess.crop.min = -204.3808 -98.1065 435.4672
+preprocess.crop.max = 84.9252 47.8115 520.2348
+
+# 4. Preprocess: isolated point filter
+preprocess.outlier.enable = true
+preprocess.outlier.mean_k = 10
+preprocess.outlier.stddev_mul = 3.0
+
+# 5. Measurement method
+# Use plane_fit or direct_points.
+measurement.method = plane_fit
+
+# 6. Plane-fit feature points in template coordinates
+[features.plane_fit]
+plane1_p1 -65.9281539917 -37.7812271118 438.704589844
+plane1_p2 -64.3859634399 -37.2015838623 438.660247803
+plane1_p3 -62.2620162964 -36.6183547974 438.571533203
+plane1_p4 -66.48021698 -35.3629226685 437.28527832
+plane1_p5 -63.6165771484 -34.4097137451 437.329620361
+plane1_p6 -60.9622764587 -33.6579284668 437.507049561
+plane2_p1 -70.0089874268 -32.0612983704 436.6199646
+plane2_p2 -67.1296234131 -30.9087257385 436.53125
+plane2_p3 -64.2514190674 -29.7566204071 436.4425354
+plane2_p4 -71.0723648071 -28.6660423279 437.28527832
+plane2_p5 -68.038520813 -27.3377513885 437.462677002
+plane2_p6 -64.5602722168 -25.9846515656 437.240905762
+project_normal 0.98575151 0.13451004 0.10100010
+project_point -67.67352295 -27.40843964 442.84786987
+length_a -65.855820 -38.619221 439.502960
+length_b -66.365585 -33.009830 436.531250
+
+# 7. Direct-point feature points in template coordinates
+# Required feature names:
+# angle_a angle_b angle_c define the bevel angle at angle_b.
+# length_a length_b define the measured bevel length.
+# Replace these coordinates with the feature points built in your type 0 template.
+[features.direct_points]
+angle_a -65.855820 -38.619221 439.502960
+angle_b -66.365585 -33.009830 436.531250
+angle_c -67.218292 -26.168007 437.107849
+length_a -65.855820 -38.619221 439.502960
+length_b -66.365585 -33.009830 436.531250
+
+# 8. ICP params
+icp.max_iterations = 300
+icp.max_correspondence_distance = 200.0
+icp.transformation_epsilon = 1e-8
+icp.euclidean_fitness_epsilon = 1e-3
+icp.trim.enable = true
+icp.trim.overlap_ratio = 0.98
+icp.trim.min_correspondences = 50
+icp.save_aligned_cloud = true
+icp.aligned_cloud_path = data/aligned_scan.pcd

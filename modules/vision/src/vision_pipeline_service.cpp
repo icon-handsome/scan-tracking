@@ -385,13 +385,32 @@ void VisionPipelineService::finishBundleIfReady()
                 }
 
                 self->m_processing = false;
-                const bool ok = mechCapturePayloadReady(completedBundle.mechEyeResult) &&
-                                completedBundle.hikCameraAResult.success() &&
-                                completedBundle.hikCameraBResult.success();
+                const bool mechOk = mechCapturePayloadReady(completedBundle.mechEyeResult);
+                // 旁路模式（PLC 联调）：只验 MechEye 采集 + PLC 握手，CXP 未连接不应
+                // 毒化流水线状态、阻断后续段。故旁路下以 MechEye 成功即判定回 Ready，
+                // CXP A/B 失败仅记录、不影响状态。非旁路生产仍要求 CXP 双目成功。
+                const bool bypassEnabled = []() {
+                    if (const auto* cm = scan_tracking::common::ConfigManager::instance()) {
+                        return cm->flowControlConfig().algorithmBypassEnabled;
+                    }
+                    return false;
+                }();
+                const bool ok = bypassEnabled
+                    ? mechOk
+                    : (mechOk
+                       && completedBundle.hikCameraAResult.success()
+                       && completedBundle.hikCameraBResult.success());
+                QString description;
+                if (ok) {
+                    description = bypassEnabled
+                        ? QStringLiteral("视觉组合采集完成（旁路模式：MechEye 成功，CXP 失败不阻断）。")
+                        : QStringLiteral("视觉组合采集成功完成。");
+                } else {
+                    description = QStringLiteral("视觉组合采集完成但有错误。");
+                }
                 self->setState(
                     ok ? VisionPipelineState::Ready : VisionPipelineState::Error,
-                    ok ? QStringLiteral("视觉组合采集成功完成。")
-                       : QStringLiteral("视觉组合采集完成但有错误。"));
+                    description);
                 emit self->bundleCaptureFinished(completedBundle);
             },
             Qt::QueuedConnection);
