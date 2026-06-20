@@ -154,3 +154,7 @@ endif()
 if(SCAN_TRACKING_ENABLE_INTERNAL_SURFACE_MEASUREMENT)
     add_subdirectory(InternalSurfaceMeasurement)
 endif()
+
+if(SCAN_TRACKING_ENABLE_SCANNER_SELF_CHECK)
+    add_subdirectory(Scanner_Self_Check)
+endif()

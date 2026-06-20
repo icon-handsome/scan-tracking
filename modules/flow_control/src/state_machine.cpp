@@ -61,6 +61,9 @@ constexpr quint16 kDeviceOnlineWord0 =
     (1u << 5) |
     (1u << 6);
 
+/// 自检缓存桶 ID（不在 scan_paths 中；仅 IPC 内部区分自检两点缓存）
+constexpr int kSelfCheckCacheBucketId = 9001;
+
 /// 最大扫描分段索引（从1开始计数；须 ≥ scan_paths 中单路径最大 totalPoints）
 constexpr int kMaxScanSegmentIndex = 200;
 
@@ -80,17 +83,6 @@ bool isAlgorithmBypassEnabled()
 {
     const auto* configMgr = scan_tracking::common::ConfigManager::instance();
     return configMgr != nullptr && configMgr->flowControlConfig().algorithmBypassEnabled;
-}
-
-// TODO(field-commissioning): 现场联调临时策略——仅超时向 PLC 报 NG（Res_Inspection=6）；
-// 算法 NG、缺段、Tracking 不可用等其它情况一律回 Res=1(OK)。日志/HMI 仍保留真实结果码。
-// 联调结束、恢复按蓝友/业务判定写 Res 后，删除本函数并在 executeInspectionTask 中直传 actualResultCode。
-quint16 inspectionResForPlcHandshake(quint16 actualResultCode)
-{
-    if (actualResultCode == kInspectionResTimeoutNg) {
-        return kInspectionResTimeoutNg;
-    }
-    return kInspectionResOk;
 }
 
 int countHikImagesInBundle(const scan_tracking::vision::MultiCameraCaptureBundle& bundle)
@@ -360,6 +352,14 @@ QVector<int> enabledScanPathIds()
 
 int segmentTotalForPath(int pathId)
 {
+    if (pathId == kSelfCheckCacheBucketId) {
+        const auto* configMgr = scan_tracking::common::ConfigManager::instance();
+        if (configMgr != nullptr && configMgr->selfCheckConfig().totalPoints > 0) {
+            return configMgr->selfCheckConfig().totalPoints;
+        }
+        return 2;
+    }
+
     const auto* configMgr = scan_tracking::common::ConfigManager::instance();
     if (configMgr == nullptr || pathId <= 0) {
         return 0;
@@ -802,6 +802,9 @@ void StateMachine::onModbusConnected()
     m_dataValid = false;              // 标记数据无效
     setState(AppState::Ready);        // 设置应用状态为就绪
     publishIpcStatus();               // 发布 IPC 状态到 PLC
+    if (m_unloadAreaConfigReceived) {
+        updateUnloadAreaConfig(m_unloadAreaConfig);
+    }
     publishHeartbeat();               // 立即发送一次心跳
     m_pollTimer->start();             // 启动 PLC 轮询定时器
     m_heartbeatTimer->start();        // 启动心跳定时器
@@ -995,6 +998,11 @@ void StateMachine::handleRegistersRead(int startAddress, const QVector<quint16>&
             "Roller_RunFreq_Hz",       // 43  40043
             "Electromagnet_Status",    // 44  40044
             "EstopButton_Status",      // 45  40045
+            "LoadVision_StatusCode",   // 46  40046
+            "UnloadNgArea_Full",       // 47  40047
+            "UnloadOkArea_Full",       // 48  40048
+            "UnloadNgArea_Count",      // 49  40049
+            "UnloadOkArea_Count",      // 50  40050
         };
         constexpr int kNameCount = sizeof(kRegisterNames) / sizeof(kRegisterNames[0]);
         const int compareCount = qMin(previousCommandBlock.size(),
@@ -1189,8 +1197,7 @@ void StateMachine::processTrigger(const protocol::TriggerDefinition& trigger, co
             failure.message = QStringLiteral("综合检测过早：%1").arg(status);
             m_inspectionResultPublisher(failure);
         }
-        const quint16 plcRes = inspectionResForPlcHandshake(7);
-        completeActiveTask(plcRes, protocol::AckState::Completed, plcRes == kInspectionResOk);
+        completeActiveTask(2, protocol::AckState::Completed, false);
         // 过早检测：不等 PLC 释放 Trig_Inspection，立即回到 Ready 以便继续扫下一路径
         clearActiveTask();
         m_ipcState = protocol::IpcState::Ready;
@@ -1204,7 +1211,11 @@ void StateMachine::processTrigger(const protocol::TriggerDefinition& trigger, co
 
     {
         const auto* cfgMgr = scan_tracking::common::ConfigManager::instance();
-        m_activeTask.scanSegmentTotal = cfgMgr ? cfgMgr->trackingConfig().scanSegmentTotal : 1;
+        if (m_selfCheckSessionActive) {
+            m_activeTask.scanSegmentTotal = segmentTotalForPath(kSelfCheckCacheBucketId);
+        } else {
+            m_activeTask.scanSegmentTotal = cfgMgr ? cfgMgr->trackingConfig().scanSegmentTotal : 1;
+        }
     }
     m_activeTask.completionAnnounced = false;  // 重置完成宣告标志
     m_activeTask.captureRequestId = 0;         // 重置采集请求 ID
@@ -2063,6 +2074,10 @@ QString StateMachine::multiPathCacheStatusText() const
 
 int StateMachine::resolvePathIdForIncomingSegment(int segmentIndex) const
 {
+    if (m_selfCheckSessionActive) {
+        return kSelfCheckCacheBucketId;
+    }
+
     const QVector<int> pathIds = enabledScanPathIds();
     if (pathIds.isEmpty()) {
         return m_currentPathId > 0 ? m_currentPathId : 1;
@@ -2100,6 +2115,85 @@ bool StateMachine::hasSegmentInPath(int pathId, int segmentIndex) const
     return m_pathSegmentCaptureResults.contains(pathId) &&
            m_pathSegmentCaptureResults[pathId].contains(segmentIndex) &&
            m_pathSegmentCaptureResults[pathId][segmentIndex].pointCloud.isValid();
+}
+
+int StateMachine::selfCheckCachePathId() const
+{
+    return kSelfCheckCacheBucketId;
+}
+
+void StateMachine::clearPathSegmentCache(int pathId)
+{
+    std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
+    if (m_pathSegmentCaptureBundles.contains(pathId)) {
+        for (auto segIt = m_pathSegmentCaptureBundles[pathId].begin();
+             segIt != m_pathSegmentCaptureBundles[pathId].end(); ++segIt) {
+            scan_tracking::vision::releaseHikMonoFrameBuffers(&segIt->hikCameraAResult.frame);
+            scan_tracking::vision::releaseHikMonoFrameBuffers(&segIt->hikCameraBResult.frame);
+            scan_tracking::mech_eye::releasePointCloudFrameBuffers(&segIt->mechEyeResult.pointCloud);
+        }
+        m_pathSegmentCaptureBundles.remove(pathId);
+    }
+    if (m_pathSegmentCaptureResults.contains(pathId)) {
+        for (auto segIt = m_pathSegmentCaptureResults[pathId].begin();
+             segIt != m_pathSegmentCaptureResults[pathId].end(); ++segIt) {
+            scan_tracking::mech_eye::releasePointCloudFrameBuffers(&segIt->pointCloud);
+        }
+        m_pathSegmentCaptureResults.remove(pathId);
+    }
+    m_pathSegmentCalibrationMatrices.remove(pathId);
+    if (m_currentPathId == pathId) {
+        m_currentPathSegments.clear();
+    }
+}
+
+bool StateMachine::hasSelfCheckCaptureReady() const
+{
+    const int pathId = kSelfCheckCacheBucketId;
+    const auto* configMgr = common::ConfigManager::instance();
+    const int totalPoints = configMgr != nullptr && configMgr->selfCheckConfig().totalPoints > 0
+        ? configMgr->selfCheckConfig().totalPoints
+        : 2;
+
+    std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
+    if (!m_pathSegmentCaptureBundles.contains(pathId)) {
+        return false;
+    }
+    const auto& bundles = m_pathSegmentCaptureBundles[pathId];
+    for (int segmentIndex = 1; segmentIndex <= totalPoints; ++segmentIndex) {
+        if (!bundles.contains(segmentIndex)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void StateMachine::beginSelfCheckScanSession()
+{
+    clearPathSegmentCache(kSelfCheckCacheBucketId);
+    m_selfCheckSessionActive = true;
+    m_currentPathId = kSelfCheckCacheBucketId;
+    m_currentPathSegments.clear();
+    m_currentStage = protocol::Stage::SelfCheck;
+    m_ipcState = protocol::IpcState::Ready;
+    publishIpcStatus();
+
+    const int totalPoints = common::ConfigManager::instance()
+        ? common::ConfigManager::instance()->selfCheckConfig().totalPoints
+        : 2;
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[SelfCheck] 显控已请求自检，IPC 已置阶段=SelfCheck 通知 PLC；")
+        << QStringLiteral("待 PLC 调度") << totalPoints
+        << QStringLiteral(" 次 Trig_ScanSegment 后下发 Trig_SelfCheck");
+}
+
+void StateMachine::endSelfCheckScanSession()
+{
+    if (!m_selfCheckSessionActive) {
+        return;
+    }
+    m_selfCheckSessionActive = false;
+    qInfo(LOG_FLOW).noquote() << QStringLiteral("[SelfCheck] 自检扫描会话已结束");
 }
 
 const protocol::TriggerDefinition* StateMachine::selectPendingTrigger(
@@ -2443,6 +2537,14 @@ tracking::InspectionResult StateMachine::runDebugInspectionOnCachedSegments() co
         ? configManager->inspectionTypeForPath(inspectPathId)
         : scan_tracking::common::InspectionType::Bevel;
 
+    if (inspectionType == scan_tracking::common::InspectionType::CodeRead) {
+        return m_tracking->inspectCodeRead(inspectPathId, false);
+    }
+
+    if (inspectionType == scan_tracking::common::InspectionType::Defect) {
+        return m_tracking->inspectSurfaceDefect(inspectPathId, false);
+    }
+
     if (inspectionType == scan_tracking::common::InspectionType::Thickness) {
         scan_tracking::mech_eye::PointCloudFrame innerCloud;
         scan_tracking::mech_eye::PointCloudFrame outerCloud;
@@ -2651,7 +2753,6 @@ void StateMachine::onProcessTimeout()
         return;
     }
     if (m_activeTask.definition->stage == protocol::Stage::Inspection) {
-        // TODO(field-commissioning): 综合检测超时为唯一向 PLC 报 NG 的路径（Res_Inspection=6）
         writeInspectionResult({});
         completeActiveTask(
             kInspectionResTimeoutNg,
@@ -3079,6 +3180,57 @@ bool StateMachine::reportPersonZoneAlarm(bool alarm)
 
     publishIpcStatus();
     return plcWritten;
+}
+
+bool StateMachine::updateUnloadAreaConfig(const UnloadAreaConfig& config)
+{
+    namespace regs = protocol::registers;
+    namespace limits = protocol::unload_area;
+
+    m_unloadAreaConfig.maxStackCount =
+        static_cast<quint16>(qBound(0, static_cast<int>(config.maxStackCount), limits::kMaxStackCountLimit));
+    m_unloadAreaConfig.okCount =
+        static_cast<quint16>(qBound(0, static_cast<int>(config.okCount), limits::kHeadCountLimit));
+    m_unloadAreaConfig.ngCount =
+        static_cast<quint16>(qBound(0, static_cast<int>(config.ngCount), limits::kHeadCountLimit));
+    m_unloadAreaConfig.autoClear =
+        config.autoClear != 0 ? limits::kAutoClearOn : limits::kAutoClearOff;
+    m_unloadAreaConfigReceived = true;
+
+    if (!m_modbus) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("下料区封头配置已缓存但 Modbus 不可用：maxStack=")
+            << m_unloadAreaConfig.maxStackCount
+            << QStringLiteral(" ok=") << m_unloadAreaConfig.okCount
+            << QStringLiteral(" ng=") << m_unloadAreaConfig.ngCount
+            << QStringLiteral(" autoClear=") << m_unloadAreaConfig.autoClear;
+        return false;
+    }
+
+    const QVector<quint16> values = {
+        m_unloadAreaConfig.maxStackCount,
+        m_unloadAreaConfig.okCount,
+        m_unloadAreaConfig.ngCount,
+        m_unloadAreaConfig.autoClear,
+    };
+    const bool written = m_modbus->writeRegisters(regs::kUnloadAreaMaxStackCount, values);
+    if (!written) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("写入下料区封头配置失败（40176~40179）");
+    } else {
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("已写入下料区封头配置 40176~40179：maxStack=")
+            << m_unloadAreaConfig.maxStackCount
+            << QStringLiteral(" ok=") << m_unloadAreaConfig.okCount
+            << QStringLiteral(" ng=") << m_unloadAreaConfig.ngCount
+            << QStringLiteral(" autoClear=") << m_unloadAreaConfig.autoClear;
+    }
+    return written;
+}
+
+StateMachine::UnloadAreaConfig StateMachine::unloadAreaConfig() const
+{
+    return m_unloadAreaConfig;
 }
 
 /**

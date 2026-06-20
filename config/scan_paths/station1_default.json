@@ -3,7 +3,7 @@
   "description": "封头检测多路径扫描配置文件",
   "lastModified": "2026-06-18",
   "_deprecationNote": "推荐改用 config/scan_paths/station1_default.json；本文件保留用于向后兼容。",
-  "_fieldTestNote": "六路径联调：path1=7, path2=19, path3=1, path4=4, path5=8, path6=144；各路径段号均从1起，全部非转动点；扫满后 Trig_Inspection",
+  "_fieldTestNote": "六路径联调：path1=柱面开孔(hole) path2=内表面 path3=编号(code_read) path4=坡口 path5=厚度 path6=缺陷；扫满后 Trig_Inspection",
   "calibrationMatrix": {
     "_todo": "TODO(calibration): 当前 T0 为临时联调用单位矩阵；正式投产前须替换为现场标定的 Mech-Eye → 机械臂/世界 4×4。",
     "calibrationStatus": "PLACEHOLDER_IDENTITY_FOR_TEMP_TEST",
@@ -39,9 +39,10 @@
   "scanPaths": [
     {
       "pathId": 1,
-      "pathName": "路径1-7点",
-      "inspectionType": "bevel",
-      "description": "7个扫描点，仅3D，无转盘",
+      "pathName": "路径1-柱面开孔",
+      "inspectionType": "hole",
+      "holeConfigPath": "hole/config/default.json",
+      "description": "7个扫描点，柱面与开孔测量",
       "enabled": true,
       "totalPoints": 7,
       "points": [
@@ -98,9 +99,9 @@
     },
     {
       "pathId": 2,
-      "pathName": "路径2-19点",
-      "inspectionType": "bevel",
-      "description": "19个扫描点，仅3D，无转盘",
+      "pathName": "路径2-完整内表面",
+      "inspectionType": "internal_surface",
+      "description": "19个扫描点，完整内表面测量",
       "enabled": true,
       "totalPoints": 19,
       "points": [
@@ -241,9 +242,9 @@
     },
     {
       "pathId": 3,
-      "pathName": "路径3-1点",
-      "inspectionType": "bevel",
-      "description": "1个扫描点，仅3D，无转盘",
+      "pathName": "路径3-编号识别",
+      "inspectionType": "code_read",
+      "description": "1个扫描点，编号识别（海康C/OCR）",
       "enabled": true,
       "totalPoints": 1,
       "points": [
@@ -258,9 +259,9 @@
     },
     {
       "pathId": 4,
-      "pathName": "路径4-4点",
+      "pathName": "路径4-坡口测量",
       "inspectionType": "bevel",
-      "description": "4个扫描点，仅3D，无转盘",
+      "description": "4个扫描点，坡口测量",
       "enabled": true,
       "totalPoints": 4,
       "points": [
@@ -296,9 +297,12 @@
     },
     {
       "pathId": 5,
-      "pathName": "路径5-8点",
-      "inspectionType": "bevel",
-      "description": "8个扫描点，仅3D，无转盘",
+      "pathName": "路径5-厚度测量",
+      "inspectionType": "thickness",
+      "thicknessConfigPath": "thickness/config/thickness_config.json",
+      "innerScanSegmentIndex": 1,
+      "outerScanSegmentIndex": 2,
+      "description": "8个扫描点，厚度测量（段1=内，段2=外）",
       "enabled": true,
       "totalPoints": 8,
       "points": [
@@ -362,9 +366,9 @@
     },
     {
       "pathId": 6,
-      "pathName": "路径6-144点",
-      "inspectionType": "bevel",
-      "description": "144个扫描点，仅3D，无转盘",
+      "pathName": "路径6-缺陷识别",
+      "inspectionType": "defect",
+      "description": "144个扫描点，表面缺陷识别",
       "enabled": true,
       "totalPoints": 144,
       "points": [
@@ -1381,7 +1385,7 @@
   ],
   "executionConfig": {
     "executeAllPaths": false,
-    "description": "六路径联调：path1=7段, path2=19段, path3=1段, path4=4段, path5=8段, path6=144段",
+    "description": "六路径联调：path1=柱面开孔 path2=内表面 path3=编号 path4=坡口 path5=厚度 path6=缺陷",
     "selectedPathIds": [
       1,
       2,

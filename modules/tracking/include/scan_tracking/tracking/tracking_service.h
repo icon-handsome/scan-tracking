@@ -27,6 +27,9 @@ enum class InspectionAlgorithm {
     Bevel = 0,
     Hole = 1,
     Thickness = 2,
+    InternalSurface = 3,
+    CodeRead = 4,
+    Defect = 5,
 };
 
 struct InspectionMeasurement {
@@ -113,6 +116,12 @@ public:
         int outerPointCount,
         int inspectionPathId = 0,
         bool notifyListener = true) const;
+
+    /// 编号识别（inspectionType=code_read，不依赖点云合并）
+    InspectionResult inspectCodeRead(int inspectionPathId = 0, bool notifyListener = true) const;
+
+    /// 表面缺陷识别（inspectionType=defect，不依赖点云合并）
+    InspectionResult inspectSurfaceDefect(int inspectionPathId = 0, bool notifyListener = true) const;
 
     /// 执行位姿校验（LB位姿检测）
     // @return 位姿校验结果结构体

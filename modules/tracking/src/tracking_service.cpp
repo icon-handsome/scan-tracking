@@ -48,6 +48,10 @@ quint16 countMeasuredItems(const InspectionMeasurement& measurement)
         if (std::isfinite(measurement.thicknessMm) && measurement.thicknessMm > 0.0f) {
             ++count;
         }
+        return count;
+    }
+
+    if (measurement.algorithm == InspectionAlgorithm::InternalSurface) {
         if (std::isfinite(measurement.headDepthMm) && measurement.headDepthMm > 0.0f) {
             ++count;
         }
@@ -55,6 +59,11 @@ quint16 countMeasuredItems(const InspectionMeasurement& measurement)
             ++count;
         }
         return count;
+    }
+
+    if (measurement.algorithm == InspectionAlgorithm::CodeRead
+        || measurement.algorithm == InspectionAlgorithm::Defect) {
+        return 1;
     }
 
     if (measurement.algorithm == InspectionAlgorithm::Hole) {
@@ -146,32 +155,15 @@ InspectionMeasurement measurementFromThicknessResult(
 #endif
 
 #ifdef SCAN_TRACKING_HAS_INTERNAL_SURFACE_MEASUREMENT
-bool appendInternalSurfaceMeasurement(
-    const scan_tracking::mech_eye::PointCloudFrame& pointCloud,
-    InspectionResult* result)
+InspectionMeasurement measurementFromInternalSurfaceResult(
+    const scan_tracking::vision::internal_surface::InternalSurfaceInspectionResult& detection)
 {
-    if (result == nullptr) {
-        return false;
-    }
-
-    const auto detection =
-        scan_tracking::vision::internal_surface::runInternalSurfaceMeasurement(pointCloud);
-    if (!detection.invoked || !detection.ok) {
-        const QString detail = detection.message.isEmpty()
-            ? QStringLiteral("内表面测量未产出有效深度/容积。")
-            : detection.message;
-        result->message = result->message.isEmpty()
-            ? detail
-            : result->message + QStringLiteral(" ") + detail;
-        return false;
-    }
-
-    result->measurement.headDepthMm = static_cast<float>(detection.headDepthMm);
-    result->measurement.headVolumeM3 = static_cast<float>(detection.headVolumeM3);
-    result->message = result->message.isEmpty()
-        ? detection.message
-        : result->message + QStringLiteral(" ") + detection.message;
-    return true;
+    InspectionMeasurement measurement;
+    measurement.algorithm = InspectionAlgorithm::InternalSurface;
+    measurement.headDepthMm = static_cast<float>(detection.headDepthMm);
+    measurement.headVolumeM3 = static_cast<float>(detection.headVolumeM3);
+    measurement.qualityCode = detection.ok ? 0 : 1;
+    return measurement;
 }
 #endif
 
@@ -197,6 +189,12 @@ void appendInspectionMeasurementFields(QJsonObject& payload, const InspectionMea
         algorithmName = QStringLiteral("hole");
     } else if (measurement.algorithm == InspectionAlgorithm::Thickness) {
         algorithmName = QStringLiteral("thickness");
+    } else if (measurement.algorithm == InspectionAlgorithm::InternalSurface) {
+        algorithmName = QStringLiteral("internal_surface");
+    } else if (measurement.algorithm == InspectionAlgorithm::CodeRead) {
+        algorithmName = QStringLiteral("code_read");
+    } else if (measurement.algorithm == InspectionAlgorithm::Defect) {
+        algorithmName = QStringLiteral("defect");
     }
     payload[QStringLiteral("inspection_algorithm")] = algorithmName;
     payload[QStringLiteral("head_angle_tol")] = measurementJsonValue(measurement.headAngleTol);
@@ -286,6 +284,60 @@ InspectionResult TrackingService::inspectPointCloud(
     const scan_tracking::common::InspectionType inspectionType =
         resolveInspectionType(configManager, inspectionPathId);
 
+#ifdef SCAN_TRACKING_HAS_INTERNAL_SURFACE_MEASUREMENT
+    if (inspectionType == scan_tracking::common::InspectionType::InternalSurface) {
+        const auto detection =
+            scan_tracking::vision::internal_surface::runInternalSurfaceMeasurement(pointCloud);
+        if (!detection.invoked) {
+            result.resultCode = 2;
+            result.ngReasonWord0 = (1u << 4);
+            result.message = detection.message.isEmpty()
+                ? QStringLiteral("内表面测量适配层未启动。")
+                : detection.message;
+            return deliverInspectionResult(result, notifyListener);
+        }
+
+        result.measurement = measurementFromInternalSurfaceResult(detection);
+        if (!detection.ok) {
+            result.resultCode = 2;
+            result.ngReasonWord0 = (1u << 5);
+            result.message = detection.message.isEmpty()
+                ? QStringLiteral("内表面测量算法失败。")
+                : detection.message;
+            return deliverInspectionResult(result, notifyListener);
+        }
+
+        result.resultCode = 1;
+        result.message = detection.message;
+        result.measureItemCount = countMeasuredItems(result.measurement);
+        return deliverInspectionResult(result, notifyListener);
+    }
+#else
+    if (inspectionType == scan_tracking::common::InspectionType::InternalSurface) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral(
+            "内表面测量未编译（SCAN_TRACKING_ENABLE_INTERNAL_SURFACE_MEASUREMENT=OFF）。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+#endif
+
+    if (inspectionType == scan_tracking::common::InspectionType::CodeRead) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral(
+            "编号识别应通过 inspectCodeRead 调用，不应走 inspectPointCloud。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    if (inspectionType == scan_tracking::common::InspectionType::Defect) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral(
+            "缺陷识别应通过 inspectSurfaceDefect 调用，不应走 inspectPointCloud。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+
 #ifdef SCAN_TRACKING_HAS_THICKNESS_MEASUREMENT
     if (inspectionType == scan_tracking::common::InspectionType::Thickness) {
         result.resultCode = 2;
@@ -331,9 +383,6 @@ InspectionResult TrackingService::inspectPointCloud(
 
         result.resultCode = 1;
         result.message = detection.message;
-#ifdef SCAN_TRACKING_HAS_INTERNAL_SURFACE_MEASUREMENT
-        appendInternalSurfaceMeasurement(pointCloud, &result);
-#endif
         result.measureItemCount = countMeasuredItems(result.measurement);
         return deliverInspectionResult(result, notifyListener);
     }
@@ -395,10 +444,43 @@ InspectionResult TrackingService::inspectPointCloud(
                          .arg(detection.lengthMm, 0, 'f', 3)
                          .arg(detection.bevelType)
                          .arg(detection.icpFitness, 0, 'f', 6);
-#ifdef SCAN_TRACKING_HAS_INTERNAL_SURFACE_MEASUREMENT
-    appendInternalSurfaceMeasurement(pointCloud, &result);
-#endif
     result.measureItemCount = countMeasuredItems(result.measurement);
+    return deliverInspectionResult(result, notifyListener);
+}
+
+InspectionResult TrackingService::inspectCodeRead(int inspectionPathId, bool notifyListener) const
+{
+    ensureInspectionMeasurementMetaTypeRegistered();
+
+    InspectionResult result;
+    result.sourcePointCount = 0;
+    result.measurement.algorithm = InspectionAlgorithm::CodeRead;
+    result.measureItemCount = 1;
+
+    Q_UNUSED(inspectionPathId);
+    // TODO: 接入 HikCameraCController CaptureType::NumberRecognition → kCodeValueAscii
+    result.resultCode = 1;
+    result.message = QStringLiteral(
+        "编号识别已执行（占位）：路径 %1，待接入海康 C OCR。").arg(inspectionPathId);
+    qInfo(LOG_TRACKING).noquote() << result.message;
+    return deliverInspectionResult(result, notifyListener);
+}
+
+InspectionResult TrackingService::inspectSurfaceDefect(int inspectionPathId, bool notifyListener) const
+{
+    ensureInspectionMeasurementMetaTypeRegistered();
+
+    InspectionResult result;
+    result.sourcePointCount = 0;
+    result.measurement.algorithm = InspectionAlgorithm::Defect;
+    result.measureItemCount = 1;
+
+    Q_UNUSED(inspectionPathId);
+    // TODO: 接入 HikCameraCController CaptureType::SurfaceDefect
+    result.resultCode = 1;
+    result.message = QStringLiteral(
+        "缺陷识别已执行（占位）：路径 %1，待接入海康 C 表面缺陷算法。").arg(inspectionPathId);
+    qInfo(LOG_TRACKING).noquote() << result.message;
     return deliverInspectionResult(result, notifyListener);
 }
 
@@ -448,9 +530,6 @@ InspectionResult TrackingService::inspectThicknessPointClouds(
 
     result.resultCode = 1;
     result.message = detection.message;
-#ifdef SCAN_TRACKING_HAS_INTERNAL_SURFACE_MEASUREMENT
-    appendInternalSurfaceMeasurement(innerCloud, &result);
-#endif
     result.measureItemCount = countMeasuredItems(result.measurement);
     return deliverInspectionResult(result, notifyListener);
 #else

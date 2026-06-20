@@ -183,7 +183,7 @@ inline quint16 plcAnalogToUInt16(quint16 word0, quint16 word1 = 0)
 // ==================== 寄存器区块定义 ====================
 
 constexpr int kCommandBlockStart = 0;    ///< 命令区起始地址：PLC→IPC的控制指令区域（0 基偏移）
-constexpr int kCommandBlockSize = 46;    ///< 命令区大小：40001~40045（modbusIndex 1~45，含 index 0 预留）
+constexpr int kCommandBlockSize = 51;    ///< 命令区大小：40001~40050（modbusIndex 1~50，含 index 0 预留）
 constexpr int kResultBlockStart = 101;   ///< 结果区起始：40101（modbusIndex=101）
 constexpr int kResultBlockSize = 84;     ///< 结果区大小：共84个寄存器
 
@@ -233,6 +233,11 @@ constexpr int kRollerSetFreqHz = modbusIndexFromPlcAddress(40042);
 constexpr int kRollerRunFreqHz = modbusIndexFromPlcAddress(40043);
 constexpr int kElectromagnetStatus = modbusIndexFromPlcAddress(40044);
 constexpr int kEstopButtonStatus = modbusIndexFromPlcAddress(40045);
+constexpr int kLoadVisionStatusCode = modbusIndexFromPlcAddress(40046);
+constexpr int kUnloadNgAreaFull = modbusIndexFromPlcAddress(40047);
+constexpr int kUnloadOkAreaFull = modbusIndexFromPlcAddress(40048);
+constexpr int kUnloadNgAreaCount = modbusIndexFromPlcAddress(40049);
+constexpr int kUnloadOkAreaCount = modbusIndexFromPlcAddress(40050);
 
 /// 六轴位姿（x/y/z + rx/ry/rz）
 struct Pose6f {
@@ -360,7 +365,22 @@ constexpr int kIpcSafetyActionWord = modbusIndexFromPlcAddress(40173);
 constexpr int kAckResultReset = modbusIndexFromPlcAddress(40174);
 constexpr int kResResultReset = modbusIndexFromPlcAddress(40175);
 
+// --- 下料区封头计数（显控 → IPC → PLC，无 Trig 握手）---
+constexpr int kUnloadAreaMaxStackCount = modbusIndexFromPlcAddress(40176);
+constexpr int kUnloadAreaOkCount = modbusIndexFromPlcAddress(40177);
+constexpr int kUnloadAreaNgCount = modbusIndexFromPlcAddress(40178);
+constexpr int kUnloadAreaAutoClear = modbusIndexFromPlcAddress(40179);
+constexpr int kUnloadAreaRegisterCount = 4;
+
 }  // namespace registers
+
+/// 下料区封头计数约定（40176~40179）
+namespace unload_area {
+constexpr quint16 kAutoClearOff = 0;  ///< 不自动清零
+constexpr quint16 kAutoClearOn = 1;   ///< 启用自动清零（PLC 侧在整垛取走后清零对应计数）
+constexpr int kMaxStackCountLimit = 255;
+constexpr int kHeadCountLimit = 9999;
+}  // namespace unload_area
 
 /// IPC_SafetyAction_Word (40173) 位域
 namespace safety_bits {

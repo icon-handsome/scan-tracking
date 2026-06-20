@@ -15,14 +15,8 @@ void InspectionHandler::execute(TaskHandlerContext& ctx) { ctx.machine.executeIn
 
 namespace {
 constexpr quint16 kInspectionResOk = 1;
-constexpr quint16 kInspectionResTimeoutNg = 6;
-quint16 inspectionResForPlcHandshake(quint16 actualResultCode)
-{
-    if (actualResultCode == kInspectionResTimeoutNg) {
-        return kInspectionResTimeoutNg;
-    }
-    return kInspectionResOk;
-}
+/// IPC 侧处理失败（Tracking 不可用、点云加载失败等），与算法 NG(2) 区分
+constexpr quint16 kInspectionResProcessingFail = 7;
 }
 
 void StateMachine::executeInspectionTask()
@@ -49,9 +43,10 @@ void StateMachine::executeInspectionTask()
             m_inspectionResultPublisher(failure);
         }
 
-        // TODO(field-commissioning): 真实失败码为 7；PLC 侧临时强制 Res_Inspection=1(OK)
-        const quint16 plcRes = inspectionResForPlcHandshake(7);
-        completeActiveTask(plcRes, protocol::AckState::Completed, plcRes == kInspectionResOk);
+        completeActiveTask(
+            kInspectionResProcessingFail,
+            protocol::AckState::Completed,
+            false);
         return;
     }
 
@@ -67,7 +62,11 @@ void StateMachine::executeInspectionTask()
     tracking::InspectionResult trackingResult;
     int segmentCount = 0;
 
-    if (inspectionType == scan_tracking::common::InspectionType::Thickness) {
+    if (inspectionType == scan_tracking::common::InspectionType::CodeRead) {
+        trackingResult = m_tracking->inspectCodeRead(m_activeTask.inspectionPathId);
+    } else if (inspectionType == scan_tracking::common::InspectionType::Defect) {
+        trackingResult = m_tracking->inspectSurfaceDefect(m_activeTask.inspectionPathId);
+    } else if (inspectionType == scan_tracking::common::InspectionType::Thickness) {
         scan_tracking::mech_eye::PointCloudFrame innerCloud;
         scan_tracking::mech_eye::PointCloudFrame outerCloud;
         int innerPointCount = 0;
@@ -95,8 +94,10 @@ void StateMachine::executeInspectionTask()
                     : loadError;
                 m_inspectionResultPublisher(failure);
             }
-            const quint16 plcRes = inspectionResForPlcHandshake(7);
-            completeActiveTask(plcRes, protocol::AckState::Completed, plcRes == kInspectionResOk);
+            completeActiveTask(
+                kInspectionResProcessingFail,
+                protocol::AckState::Completed,
+                false);
             clearActiveTask();
             m_ipcState = protocol::IpcState::Ready;
             m_currentStage = protocol::Stage::Idle;
@@ -131,8 +132,10 @@ void StateMachine::executeInspectionTask()
                     : loadError;
                 m_inspectionResultPublisher(failure);
             }
-            const quint16 plcRes = inspectionResForPlcHandshake(7);
-            completeActiveTask(plcRes, protocol::AckState::Completed, plcRes == kInspectionResOk);
+            completeActiveTask(
+                kInspectionResProcessingFail,
+                protocol::AckState::Completed,
+                false);
             clearActiveTask();
             m_ipcState = protocol::IpcState::Ready;
             m_currentStage = protocol::Stage::Idle;
@@ -161,19 +164,14 @@ void StateMachine::executeInspectionTask()
         << QStringLiteral(" thicknessMm=") << trackingResult.measurement.thicknessMm
         << QStringLiteral(" 说明=") << trackingResult.message;
 
-    // 将检测结果写入 PLC 寄存器（NG 字等仍写真实算法结果，供联调日志/后续恢复）
     writeInspectionResult(summary);
 
-    // TODO(field-commissioning): Res_Inspection 仅超时(6)报 NG，其它一律 OK(1)
-    const quint16 actualResultCode = summary.resultCode;
-    const quint16 plcRes = inspectionResForPlcHandshake(actualResultCode);
-    if (plcRes != actualResultCode) {
-        qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("TODO(field-commissioning): Res_Inspection 临时强制 OK")
-            << QStringLiteral(" actualResultCode=") << actualResultCode
-            << QStringLiteral(" plcRes=") << plcRes
-            << QStringLiteral(" message=") << trackingResult.message;
-    }
+    const quint16 plcRes = summary.resultCode;
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("Trig_Inspection Res_Inspection=") << plcRes
+        << QStringLiteral(" ngReasonWord0=") << summary.ngReasonWord0
+        << QStringLiteral(" ngReasonWord1=") << summary.ngReasonWord1
+        << QStringLiteral(" measureItemCount=") << summary.measureItemCount;
     completeActiveTask(plcRes, protocol::AckState::Completed, plcRes == kInspectionResOk);
     emit inspectionFinished(
         summary.resultCode, summary.ngReasonWord0, summary.ngReasonWord1,

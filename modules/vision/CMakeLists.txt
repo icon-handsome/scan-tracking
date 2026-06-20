@@ -254,6 +254,35 @@ if(SCAN_TRACKING_ENABLE_INTERNAL_SURFACE_MEASUREMENT)
     )
 endif()
 
+if(SCAN_TRACKING_ENABLE_SCANNER_SELF_CHECK)
+    add_library(scan_tracking_self_check_adapter STATIC
+        src/self_check_measurement_adapter.cpp
+        include/scan_tracking/vision/self_check_measurement_adapter.h
+    )
+
+    target_include_directories(scan_tracking_self_check_adapter
+        PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/third_party/Scanner_Self_Check
+            ${SCAN_TRACKING_OPENCV_INCLUDE_DIR}
+    )
+
+    target_link_libraries(scan_tracking_self_check_adapter
+        PUBLIC
+            Qt5::Core
+            scan_tracking_common
+            scan_tracking_mech_eye
+            ScannerSelfCheck::core
+    )
+
+    target_compile_features(scan_tracking_self_check_adapter PUBLIC cxx_std_17)
+
+    set_target_properties(scan_tracking_self_check_adapter PROPERTIES
+        FOLDER "modules"
+    )
+endif()
+
 if(SCAN_TRACKING_ENABLE_LBN_POSE_DETECTION)
     add_executable(scan_tracking_lbn_offline_runner
         tests/lbn_offline_runner.cpp

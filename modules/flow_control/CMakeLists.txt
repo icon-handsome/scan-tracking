@@ -43,3 +43,10 @@ target_link_libraries(scan_tracking_flow_control
         scan_tracking_vision
         scan_tracking_tracking
 )
+
+if(SCAN_TRACKING_ENABLE_SCANNER_SELF_CHECK)
+    target_link_libraries(scan_tracking_flow_control
+        PRIVATE
+            scan_tracking_self_check_adapter
+    )
+endif()

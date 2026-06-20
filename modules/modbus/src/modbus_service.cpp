@@ -20,9 +20,9 @@ Q_LOGGING_CATEGORY(LOG_MODBUS, "modbus")
 namespace {
 /// 寄存器总大小：覆盖 40001-40200（offset 0-199），足够容纳命令区+结果区+预留
 constexpr int kTotalRegisterCount = 200;
-/// 命令区（PLC 写入）：offset 0-45，覆盖 PLC 40001~40045
+/// 命令区（PLC 写入）：offset 0-50，覆盖 PLC 40001~40050
 constexpr int kCommandBlockStart = 0;
-constexpr int kCommandBlockSize = 46;
+constexpr int kCommandBlockSize = 51;
 /// 结果区（IPC 写入，PLC 读取）：offset 100-183
 constexpr int kResultBlockStart = 101;  // 40101，与 plc_protocol 一致（40000+下标）
 constexpr int kResultBlockSize = 84;
@@ -51,7 +51,7 @@ void ModbusService::initRegisterMap()
     m_server->setMap(reg);
 
     qInfo(LOG_MODBUS) << "寄存器映射已初始化，总大小:" << kTotalRegisterCount
-                      << "命令区: 0-45, 结果区: 100-183";
+                      << "命令区: 0-50, 结果区: 100-183";
 }
 
 bool ModbusService::connectDevice()
@@ -185,7 +185,7 @@ void ModbusService::onDataWritten(QModbusDataUnit::RegisterType table, int addre
         return;
     }
 
-    // 只关心命令区（offset 0-45）的写入——这是 PLC 发来的命令
+    // 只关心命令区（offset 0-50）的写入——这是 PLC 发来的命令
     if (address >= kCommandBlockStart && address < kCommandBlockStart + kCommandBlockSize) {
         // 读取完整命令区
         QModbusDataUnit unit(QModbusDataUnit::HoldingRegisters, kCommandBlockStart, kCommandBlockSize);

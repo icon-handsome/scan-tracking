@@ -326,6 +326,8 @@ void HmiTcpServer::initializeMessageHandlers()
         &HmiTcpServer::handleCmdSetBevelRecipe;
     m_messageHandlers[QString::fromLatin1(msg_type::kCmdReportPersonZoneAlarm)] =
         &HmiTcpServer::handleCmdReportPersonZoneAlarm;
+    m_messageHandlers[QString::fromLatin1(msg_type::kCmdSetUnloadAreaConfig)] =
+        &HmiTcpServer::handleCmdSetUnloadAreaConfig;
     // 兼容显控侧 zone 误拼为 zome
     m_messageHandlers[QString::fromLatin1(msg_type::kCmdReportPersonZoneAlarmTypo)] =
         &HmiTcpServer::handleCmdReportPersonZoneAlarm;
@@ -657,14 +659,16 @@ void HmiTcpServer::handleCmdTriggerInspection(const QJsonObject& message)
 void HmiTcpServer::handleCmdTriggerSelfCheck(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
-    // TODO(hmi): 显控自检命令已接入接收，后续对接 StateMachine::executeSelfCheckTask 或独立流程，并推送 event.self_check.finished
+    if (m_stateMachine) {
+        m_stateMachine->beginSelfCheckScanSession();
+    }
     qInfo(LOG_HMI_SERVER).noquote()
-        << QStringLiteral("[TCPIP] 显控触发自检") << msgId;
+        << QStringLiteral("[TCPIP] 显控请求自检，已通知 PLC（IPC_CurrentStage=SelfCheck）") << msgId;
     sendResponse(
         QLatin1String(msg_type::kCmdTriggerSelfCheck),
         msgId,
         true,
-        QStringLiteral("自检命令已接收，后续执行逻辑待实现"));
+        QStringLiteral("已通知 PLC 开始自检流程；PLC 调度两点扫描后下发 Trig_SelfCheck"));
 }
 
 void HmiTcpServer::handleCmdTriggerPoseCheck(const QJsonObject& message)
@@ -930,6 +934,126 @@ void HmiTcpServer::handleCmdReportPersonZoneAlarm(const QJsonObject& message)
         responseMessage);
 }
 
+namespace {
+
+quint16 clampUnloadAreaCount(int value, int maxValue)
+{
+    return static_cast<quint16>(qBound(0, value, maxValue));
+}
+
+bool parseOptionalUnloadAreaUInt(
+    const QJsonObject& payload,
+    const char* key,
+    int maxValue,
+    quint16& outValue,
+    bool& hasField,
+    QString& errorMessage)
+{
+    if (!payload.contains(QLatin1String(key))) {
+        return true;
+    }
+    hasField = true;
+    const QJsonValue raw = payload.value(QLatin1String(key));
+    if (!raw.isDouble()) {
+        errorMessage = QStringLiteral("字段 %1 必须为整数").arg(QString::fromLatin1(key));
+        return false;
+    }
+    const int intValue = raw.toInt(-1);
+    if (intValue < 0) {
+        errorMessage = QStringLiteral("字段 %1 不能为负数").arg(QString::fromLatin1(key));
+        return false;
+    }
+    outValue = clampUnloadAreaCount(intValue, maxValue);
+    return true;
+}
+
+}  // namespace
+
+void HmiTcpServer::handleCmdSetUnloadAreaConfig(const QJsonObject& message)
+{
+    namespace limits = flow_control::protocol::unload_area;
+
+    const QString msgId = message.value(QLatin1String("msgId")).toString();
+    const QJsonObject payload = message.value(QLatin1String("payload")).toObject();
+
+    bool hasMaxStack = false;
+    bool hasOkCount = false;
+    bool hasNgCount = false;
+    bool hasAutoClear = false;
+    QString parseError;
+
+    flow_control::StateMachine::UnloadAreaConfig config;
+    if (m_stateMachine) {
+        config = m_stateMachine->unloadAreaConfig();
+    }
+
+    if (!parseOptionalUnloadAreaUInt(
+            payload, "maxStackCount", limits::kMaxStackCountLimit, config.maxStackCount, hasMaxStack, parseError)
+        || !parseOptionalUnloadAreaUInt(
+            payload, "okCount", limits::kHeadCountLimit, config.okCount, hasOkCount, parseError)
+        || !parseOptionalUnloadAreaUInt(
+            payload, "ngCount", limits::kHeadCountLimit, config.ngCount, hasNgCount, parseError)) {
+        sendResponse(QLatin1String(msg_type::kCmdSetUnloadAreaConfig), msgId, false, parseError);
+        return;
+    }
+
+    if (payload.contains(QLatin1String("autoClear"))) {
+        hasAutoClear = true;
+        config.autoClear = payload.value(QLatin1String("autoClear")).toBool(false)
+            ? limits::kAutoClearOn
+            : limits::kAutoClearOff;
+    }
+
+    if (!hasMaxStack && !hasOkCount && !hasNgCount && !hasAutoClear) {
+        sendResponse(
+            QLatin1String(msg_type::kCmdSetUnloadAreaConfig),
+            msgId,
+            false,
+            QStringLiteral("至少提供一个字段：maxStackCount / okCount / ngCount / autoClear"));
+        return;
+    }
+
+    if (!m_stateMachine) {
+        sendResponse(
+            QLatin1String(msg_type::kCmdSetUnloadAreaConfig),
+            msgId,
+            false,
+            QStringLiteral("状态机不可用"));
+        return;
+    }
+
+    const bool plcWritten = m_stateMachine->updateUnloadAreaConfig(config);
+
+    QJsonObject responsePayload = buildResponsePayload(
+        true,
+        plcWritten ? QStringLiteral("下料区封头配置已转发 PLC")
+                   : QStringLiteral("下料区封头配置已缓存（PLC 未连接或写入失败）"));
+    responsePayload[QLatin1String("maxStackCount")] = static_cast<int>(config.maxStackCount);
+    responsePayload[QLatin1String("okCount")] = static_cast<int>(config.okCount);
+    responsePayload[QLatin1String("ngCount")] = static_cast<int>(config.ngCount);
+    responsePayload[QLatin1String("autoClear")] = config.autoClear != 0;
+    responsePayload[QLatin1String("plcWritten")] = plcWritten;
+
+    QJsonObject envelope;
+    envelope[QStringLiteral("version")] = QLatin1String(kProtocolVersion);
+    envelope[QStringLiteral("msgId")] = msgId;
+    envelope[QStringLiteral("type")] = QLatin1String(msg_type::kCmdSetUnloadAreaConfig);
+    envelope[QStringLiteral("timestamp")] = QDateTime::currentMSecsSinceEpoch();
+    envelope[QStringLiteral("payload")] = responsePayload;
+    sendToClient(envelope);
+
+    m_plcStatusCache.isValid = false;
+    pushPlcStatus();
+
+    qInfo(LOG_HMI_SERVER).noquote()
+        << QStringLiteral("[TCPIP] 下料区封头配置")
+        << QStringLiteral(" maxStack=") << config.maxStackCount
+        << QStringLiteral(" ok=") << config.okCount
+        << QStringLiteral(" ng=") << config.ngCount
+        << QStringLiteral(" autoClear=") << config.autoClear
+        << QStringLiteral(" plcWritten=") << plcWritten;
+}
+
 void HmiTcpServer::handleCmdCaptureMechEye(const QJsonObject& message)
 {
     const QString msgId = message.value(QLatin1String("msgId")).toString();
@@ -1159,7 +1283,20 @@ QJsonObject HmiTcpServer::buildPlcStatusPayload() const
                 payload[QLatin1String("electromagnetStatus")] = cb.value(regs::kElectromagnetStatus);
                 payload[QLatin1String("estopButtonStatus")] = cb.value(regs::kEstopButtonStatus);
             }
+            if (cb.size() > regs::kUnloadOkAreaCount) {
+                payload[QLatin1String("loadVisionStatusCode")] = cb.value(regs::kLoadVisionStatusCode);
+                payload[QLatin1String("unloadNgAreaFull")] = cb.value(regs::kUnloadNgAreaFull);
+                payload[QLatin1String("unloadOkAreaFull")] = cb.value(regs::kUnloadOkAreaFull);
+                payload[QLatin1String("plcUnloadNgAreaCount")] = cb.value(regs::kUnloadNgAreaCount);
+                payload[QLatin1String("plcUnloadOkAreaCount")] = cb.value(regs::kUnloadOkAreaCount);
+            }
         }
+
+        const auto unloadCfg = m_stateMachine->unloadAreaConfig();
+        payload[QLatin1String("unloadAreaMaxStackCount")] = static_cast<int>(unloadCfg.maxStackCount);
+        payload[QLatin1String("unloadAreaOkCount")] = static_cast<int>(unloadCfg.okCount);
+        payload[QLatin1String("unloadAreaNgCount")] = static_cast<int>(unloadCfg.ngCount);
+        payload[QLatin1String("unloadAreaAutoClear")] = unloadCfg.autoClear != 0;
     }
     return payload;
 }

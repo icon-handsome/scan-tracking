@@ -69,7 +69,10 @@ void StateMachine::executeScanSegmentTask()
         : kDefaultScanSegmentCaptureTimeoutMs;
 
     const int pathIdForCapture = resolvePathIdForIncomingSegment(m_activeTask.scanSegmentIndex);
-    const bool needMechEye2D = resolveNeedRotationForSegment(pathIdForCapture, m_activeTask.scanSegmentIndex);
+    const bool forceSelfCheckCapture = isSelfCheckSessionActive();
+    const bool needMechEye2D = forceSelfCheckCapture
+        ? true
+        : resolveNeedRotationForSegment(pathIdForCapture, m_activeTask.scanSegmentIndex);
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[ScanSync] 触发") << QDateTime::currentMSecsSinceEpoch();
     const auto mechCaptureMode = needMechEye2D

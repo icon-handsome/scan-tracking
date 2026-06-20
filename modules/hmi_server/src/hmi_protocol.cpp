@@ -81,6 +81,14 @@ QString summarizeHmiTracePayload(const QString& type, const QJsonObject& payload
                             .arg(payload.value(QLatin1String("electromagnetStatus")).toInt())
                             .arg(payload.value(QLatin1String("estopButtonStatus")).toInt());
         }
+        if (payload.contains(QLatin1String("loadVisionStatusCode"))) {
+            summary += QStringLiteral(" loadVision=%1 ngFull=%2 okFull=%3 ngCnt=%4 okCnt=%5")
+                            .arg(payload.value(QLatin1String("loadVisionStatusCode")).toInt())
+                            .arg(payload.value(QLatin1String("unloadNgAreaFull")).toInt())
+                            .arg(payload.value(QLatin1String("unloadOkAreaFull")).toInt())
+                            .arg(payload.value(QLatin1String("plcUnloadNgAreaCount")).toInt())
+                            .arg(payload.value(QLatin1String("plcUnloadOkAreaCount")).toInt());
+        }
         return summary;
     }
     if (type == QLatin1String(kStatusCamera)) {

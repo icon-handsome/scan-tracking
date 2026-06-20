@@ -88,6 +88,9 @@ inline constexpr const char* kCmdSetBevelRecipe = "cmd.set_bevel_recipe";
 /// 显控上报监控区域人员状态：payload.alarm true=有人，false=无人（可周期重复上报）
 inline constexpr const char* kCmdReportPersonZoneAlarm = "cmd.report_person_zone_alarm";
 
+/// 显控设置下料区封头叠加个数、OK/NG 区数量及自动清零使能（经 IPC 转发 PLC 40176~40179）
+inline constexpr const char* kCmdSetUnloadAreaConfig = "cmd.set_unload_area_config";
+
 /// 显控早期拼写别名（zome → zone），与 kCmdReportPersonZoneAlarm 同义
 inline constexpr const char* kCmdReportPersonZoneAlarmTypo = "cmd.report_person_zome_alarm";
 

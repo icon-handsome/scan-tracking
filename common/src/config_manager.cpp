@@ -195,16 +195,46 @@ const InternalSurfaceConfig& ConfigManager::internalSurfaceConfig() const
     return m_internalSurfaceConfig;
 }
 
+const SelfCheckConfig& ConfigManager::selfCheckConfig() const
+{
+    return m_selfCheckConfig;
+}
+
 InspectionType inspectionTypeFromString(const QString& value)
 {
     const QString normalized = value.trimmed().toLower();
-    if (normalized == QStringLiteral("hole") || normalized == QStringLiteral("opening")) {
+    if (normalized == QStringLiteral("hole")
+        || normalized == QStringLiteral("opening")
+        || normalized == QStringLiteral("cylinder_hole")
+        || normalized == QStringLiteral("柱面")
+        || normalized == QStringLiteral("开孔")) {
         return InspectionType::Hole;
+    }
+    if (normalized == QStringLiteral("internal_surface")
+        || normalized == QStringLiteral("internal-surface")
+        || normalized == QStringLiteral("内表面")) {
+        return InspectionType::InternalSurface;
+    }
+    if (normalized == QStringLiteral("code_read")
+        || normalized == QStringLiteral("code")
+        || normalized == QStringLiteral("ocr")
+        || normalized == QStringLiteral("number")
+        || normalized == QStringLiteral("编号")) {
+        return InspectionType::CodeRead;
+    }
+    if (normalized == QStringLiteral("defect")
+        || normalized == QStringLiteral("surface_defect")
+        || normalized == QStringLiteral("缺陷")) {
+        return InspectionType::Defect;
     }
     if (normalized == QStringLiteral("thickness")
         || normalized == QStringLiteral("weld")
-        || normalized == QStringLiteral("焊缝")) {
+        || normalized == QStringLiteral("焊缝")
+        || normalized == QStringLiteral("厚度")) {
         return InspectionType::Thickness;
+    }
+    if (normalized == QStringLiteral("bevel") || normalized == QStringLiteral("坡口")) {
+        return InspectionType::Bevel;
     }
     return InspectionType::Bevel;
 }
@@ -214,6 +244,12 @@ QString inspectionTypeToString(InspectionType type)
     switch (type) {
     case InspectionType::Hole:
         return QStringLiteral("hole");
+    case InspectionType::InternalSurface:
+        return QStringLiteral("internal_surface");
+    case InspectionType::CodeRead:
+        return QStringLiteral("code_read");
+    case InspectionType::Defect:
+        return QStringLiteral("defect");
     case InspectionType::Thickness:
         return QStringLiteral("thickness");
     case InspectionType::Bevel:
@@ -470,6 +506,11 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("templateType", 1);
     settings.setValue("minDepthMm", 0.0);
     settings.setValue("minVolumeM3", 0.0);
+    settings.endGroup();
+
+    settings.beginGroup("SelfCheck");
+    settings.setValue("totalPoints", 2);
+    settings.setValue("configPath", "self_check/self_check.ini");
     settings.endGroup();
 
     settings.beginGroup("OrbbecGemini");
@@ -761,6 +802,12 @@ void ConfigManager::load(const QString& filePath)
     m_internalSurfaceConfig.templateType = settings.value("templateType", 1).toInt();
     m_internalSurfaceConfig.minDepthMm = settings.value("minDepthMm", 0.0).toDouble();
     m_internalSurfaceConfig.minVolumeM3 = settings.value("minVolumeM3", 0.0).toDouble();
+    settings.endGroup();
+
+    settings.beginGroup("SelfCheck");
+    m_selfCheckConfig.totalPoints = settings.value("totalPoints", 2).toInt();
+    m_selfCheckConfig.configPath = settings.value(
+        "configPath", QStringLiteral("self_check/self_check.ini")).toString();
     settings.endGroup();
 
     settings.beginGroup("OrbbecGemini");

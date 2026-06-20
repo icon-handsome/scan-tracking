@@ -1,6 +1,6 @@
 # 封头检测工位 IPC-Qt 显控通信协议
 
-**版本**：v1.0（2026-05-25 增补 `cmd.debug_trigger_inspection` 与检测推送说明）  
+**版本**：v1.1（2026-06-19 增补 `cmd.set_unload_area_config` 与 `status.plc` 下料区封头字段）  
 **适用范围**：第一工位核心控制程序（Windows）与 Qt 显控界面（麒麟 OS）的 TCP/IP 通信。
 
 ---
@@ -81,9 +81,19 @@ TCP 是流式协议，为解决粘包和半包问题，采用长度前缀的帧�
   - `rollerRunFreqHz` (int): 滚轮运行频率 Hz（PLC 40043）
   - `electromagnetStatus` (int): 电磁吸盘状态，0=退磁, 1=充磁, 2=报警（PLC 40044）
   - `estopButtonStatus` (int): 急停按钮，0=断开(未按下), 1=按下（PLC 40045）
+  - `loadVisionStatusCode` (int): 上料视觉状态码（PLC 40046），1100=坐标发送完成，1102=拍照计算完成
+  - `unloadNgAreaFull` (int): NG 区满料，0=未满料, 1=满料（PLC 40047）
+  - `unloadOkAreaFull` (int): OK 区满料，0=未满料, 1=满料（PLC 40048）
+  - `plcUnloadNgAreaCount` (int): PLC 上报 NG 区封头数量（PLC 40049，单位：个）
+  - `plcUnloadOkAreaCount` (int): PLC 上报 OK 区封头数量（PLC 40050，单位：个）
   - `modbusConnected` (bool)
+  - `unloadAreaMaxStackCount` (int): 下料区封头最大叠加个数（IPC 缓存，来源显控 `cmd.set_unload_area_config`）
+  - `unloadAreaOkCount` (int): 下料 OK 区封头数量（**显控经 IPC 写入 40177 的配置/计数**，非 PLC 40050）
+  - `unloadAreaNgCount` (int): 下料 NG 区封头数量（**显控经 IPC 写入 40178 的配置/计数**，非 PLC 40049）
+  - `unloadAreaAutoClear` (bool): 自动清零使能，true=PLC 在整垛取走后自动清零对应计数
 
-> **辅机字段**：第一、第二工位均推送；无 PLC 数据时缺省为 0。`telescopicRodStatus` 或 `electromagnetStatus` 变为 **2** 时，Core 向显控推送 `event.alarm`（`level=2`，`code` 920/921，见 §2.8）。
+> **辅机字段**：第一、第二工位均推送；无 PLC 数据时缺省为 0。`telescopicRodStatus` 或 `electromagnetStatus` 变为 **2** 时，Core 向显控推送 `event.alarm`（`level=2`，`code` 920/921，见 §2.8）。  
+> **下料区计数区分**：`plcUnloadOkAreaCount` / `plcUnloadNgAreaCount` 为 **PLC 实时上报**（40049/40050）；`unloadAreaOkCount` / `unloadAreaNgCount` 为 **显控经 `cmd.set_unload_area_config` 写入 IPC 后回显**（40177/40178），两者来源不同，UI 勿混用。
 
 ### 2.4 相机与设备状态 (`status.camera` / `status.device`)
 - **频率**：
@@ -185,7 +195,7 @@ Qt 发送 request（附带不重复的 `msgId`），Core 执行后返回对应 `
 | `cmd.trigger_scan` | `{ "segmentIndex": 1, "taskId": 123 }` | - | 触发单段扫描 |
 | `cmd.trigger_inspection` | `{ "taskId": 123 }` | - | 触发综合检测（**Core 拒绝**，须 PLC） |
 | `cmd.debug_trigger_inspection` | `{}` | `resultCode`, `cachedSegmentIndices`, `cachedSegmentCount`, `inspectionMessage`, `multiPathNote` | **调试**：用内存缓存点云跑蓝友并推 `event.inspection.finished`；须 `allowDebugTriggerInspection=true`；不写 PLC |
-| `cmd.trigger_self_check` | `{}` | - | 显控触发自检；**Core 已接收并应答 success**，实际自检流程与 `event.self_check.finished` 推送待实现 |
+| `cmd.trigger_self_check` | `{}` | - | 显控触发自检：IPC 置 `IPC_CurrentStage=SelfCheck` 通知 PLC；PLC 调度两点 `Trig_ScanSegment` 后下发 `Trig_SelfCheck` 执行算法；完成后推送 `event.self_check.finished` |
 | `cmd.trigger_pose_check` | `{}` | - | 触发位姿校验 (当前为占位) |
 | `cmd.trigger_code_read` | `{}` | - | 触发条码读取 (当前为占位) |
 | `cmd.trigger_result_reset`| `{}` | - | 触发结果缓存清空 |
@@ -194,9 +204,23 @@ Qt 发送 request（附带不重复的 `msgId`），Core 执行后返回对应 `
 | `cmd.refresh_camera` | `{}` | - | 刷新相机连接状态 |
 | `cmd.modbus_connect` | `{}` | - | 重连 PLC Modbus |
 | `cmd.modbus_disconnect` | `{}` | - | 断开 PLC Modbus |
+| `cmd.set_unload_area_config` | 见下表 | 回显四个字段及 `plcWritten` | 设置下料区封头叠加上限、OK/NG 区数量、自动清零使能；**IPC 收到后写入 PLC 40176~40179** |
 
-> **备注**：不需要支持 `cmd.set_config` （热修改配置），不涉及直接控制 PLC 寄存器的命令（Qt 不直接控制 PLC）。第二、第三工位参数暂不加入协议。  
-> **`cmd.trigger_*` 与 `cmd.debug_trigger_inspection` 区别**：除 `cmd.trigger_self_check`（仅接收应答，执行待实现）外，其余 `cmd.trigger_*` 一律拒绝（防撞机）；`cmd.debug_trigger_inspection` 为配置门控的演示/联调入口，默认关闭。
+**`cmd.set_unload_area_config` request payload（字段均可选，但至少提供一个）**
+
+| 字段 | 类型 | 范围 | 说明 |
+|------|------|------|------|
+| `maxStackCount` | int | 0~255 | 下料区封头最大叠加个数 |
+| `okCount` | int | 0~9999 | 下料 OK 区当前封头数量 |
+| `ngCount` | int | 0~9999 | 下料 NG 区当前封头数量 |
+| `autoClear` | bool | - | 自动清零使能：`true`=启用（PLC 在整垛取走后自动清零对应区计数），`false`=关闭 |
+
+**response payload 附加字段**：`maxStackCount`、`okCount`、`ngCount`、`autoClear`（bool）、`plcWritten`（bool，是否已成功写入 Modbus）。
+
+> **数据流**：显控维护 UI 计数 → 经 TCP 下发 IPC → IPC 写入 PLC 结果区 `40176~40179`（无 Trig 握手，PLC 周期读取）。IPC 重启或结果区清零后，显控应重新下发当前配置。
+
+> **备注**：不需要支持 `cmd.set_config` （热修改配置）。Qt 不直连 PLC；下料区封头计数经 `cmd.set_unload_area_config` 由 IPC 转发至 Modbus 40176~40179。第二、第三工位参数暂不加入协议。  
+> **`cmd.trigger_*` 与 `cmd.debug_trigger_inspection` 区别**：`cmd.trigger_self_check` 由显控发起，IPC 通过 Modbus 状态字通知 PLC 进入自检流程（不占用 scan_paths 生产路径）；PLC 完成两点扫描并下发 `Trig_SelfCheck` 后 IPC 执行算法。其余 `cmd.trigger_*` 一律拒绝（防撞机）；`cmd.debug_trigger_inspection` 为配置门控的演示/联调入口，默认关闭。
 
 ---
 
@@ -225,6 +249,43 @@ Qt 发送 request（附带不重复的 `msgId`），Core 执行后返回对应 `
   "payload": {
     "success": true,
     "message": "Inspection triggered."
+  }
+}
+```
+
+### 4.3 设置下料区封头配置
+
+**Qt 请求：**
+```json
+{
+  "version": "1.0",
+  "msgId": "req-210",
+  "type": "cmd.set_unload_area_config",
+  "timestamp": 1710000000000,
+  "payload": {
+    "maxStackCount": 8,
+    "okCount": 3,
+    "ngCount": 1,
+    "autoClear": true
+  }
+}
+```
+
+**Core 响应：**
+```json
+{
+  "version": "1.0",
+  "msgId": "req-210",
+  "type": "cmd.set_unload_area_config",
+  "timestamp": 1710000000050,
+  "payload": {
+    "success": true,
+    "message": "下料区封头配置已转发 PLC",
+    "maxStackCount": 8,
+    "okCount": 3,
+    "ngCount": 1,
+    "autoClear": true,
+    "plcWritten": true
   }
 }
 ```

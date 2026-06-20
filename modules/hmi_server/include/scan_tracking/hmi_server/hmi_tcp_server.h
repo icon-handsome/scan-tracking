@@ -163,7 +163,7 @@ private:
     /// 处理触发综合检测指令 (安全限制：拦截 Qt 端触发，须由 PLC 触发)
     void handleCmdTriggerInspection(const QJsonObject& message);
     
-    /// 处理触发自检指令 (安全限制：拦截 Qt 端触发，须由 PLC 触发)
+    /// 处理触发自检指令（显控发起 → IPC 通知 PLC → PLC 调度扫描与 Trig_SelfCheck）
     void handleCmdTriggerSelfCheck(const QJsonObject& message);
     
     /// 处理触发位姿校验指令 (安全限制：拦截 Qt 端触发，须由 PLC 触发)
@@ -183,6 +183,9 @@ private:
 
     /// 显控上报监控区域有无人员（经 StateMachine 写 IPC_SafetyAction_Word 停 PLC）
     void handleCmdReportPersonZoneAlarm(const QJsonObject& message);
+
+    /// 显控设置下料区封头计数/叠加上限（经 StateMachine 写 PLC 40176~40179）
+    void handleCmdSetUnloadAreaConfig(const QJsonObject& message);
     
     /// 处理单独通过 Mech-Eye 进行采图的指令（多用于独立标定或调试测试）
     void handleCmdCaptureMechEye(const QJsonObject& message);

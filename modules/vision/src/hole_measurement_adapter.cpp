@@ -8,7 +8,9 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
+#include <QtCore/QLoggingCategory>
 
+#include <pcl/filters/voxel_grid.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
@@ -19,6 +21,41 @@
 namespace scan_tracking::vision::hole {
 
 namespace {
+
+Q_LOGGING_CATEGORY(LOG_HOLE, "vision.hole")
+
+constexpr int kHolePreprocessTargetPoints = 2000000;
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr downsampleLargeCloudForHolePipeline(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
+    double voxelLeafMm)
+{
+    if (!cloud || cloud->empty()) {
+        return cloud;
+    }
+
+    double leafMm = voxelLeafMm > 0.0 ? voxelLeafMm : 1.0;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr current = cloud;
+    for (int pass = 0; pass < 4 && static_cast<int>(current->size()) > kHolePreprocessTargetPoints; ++pass) {
+        pcl::PointCloud<pcl::PointXYZ>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZ>());
+        pcl::VoxelGrid<pcl::PointXYZ> voxel;
+        voxel.setInputCloud(current);
+        const float leaf = static_cast<float>(leafMm);
+        voxel.setLeafSize(leaf, leaf, leaf);
+        voxel.filter(*filtered);
+        if (filtered->empty()) {
+            break;
+        }
+        qInfo(LOG_HOLE).noquote()
+            << QStringLiteral("[Hole] 路径合并点云预降采样 pass=") << (pass + 1)
+            << QStringLiteral(" leafMm=") << leafMm
+            << QStringLiteral(" ") << static_cast<int>(current->size())
+            << QStringLiteral(" -> ") << static_cast<int>(filtered->size());
+        current = filtered;
+        leafMm *= 1.5;
+    }
+    return current;
+}
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr toPclPointCloud(
     const scan_tracking::mech_eye::PointCloudFrame& frame)
@@ -195,6 +232,15 @@ HoleInspectionResult runHoleMeasurement(
                                  .arg(QString::fromStdString(measureConfig.templateCloud));
             return result;
         }
+
+        qInfo(LOG_HOLE).noquote()
+            << QStringLiteral("[Hole] 开始测量 pathId=") << inspectionPathId
+            << QStringLiteral(" 输入点数=") << static_cast<int>(pclCloud->size());
+
+        pclCloud = downsampleLargeCloudForHolePipeline(pclCloud, measureConfig.voxelLeafMm);
+
+        qInfo(LOG_HOLE).noquote()
+            << QStringLiteral("[Hole] 预处理后点数=") << static_cast<int>(pclCloud->size());
 
         hm::MeasurePipeline pipeline(measureConfig);
         result.measureResult = pipeline.runWithScanCloud(pclCloud);

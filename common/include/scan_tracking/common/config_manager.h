@@ -158,11 +158,20 @@ struct InternalSurfaceConfig {
     double minVolumeM3 = 0.0;
 };
 
+/// 扫描仪编码标记点距离自检（[SelfCheck]）
+struct SelfCheckConfig {
+    int totalPoints = 2;
+    QString configPath = QStringLiteral("self_check/self_check.ini");
+};
+
 /// 综合检测算法类型（按 scan_paths 路径配置）
 enum class InspectionType {
-    Bevel,
-    Hole,
-    Thickness,
+    Bevel,            ///< 坡口测量（Po_Kou）
+    Hole,             ///< 柱面 / 开孔测量（HeadMeasure）
+    Thickness,        ///< 厚度测量
+    InternalSurface,  ///< 完整内表面测量
+    CodeRead,         ///< 编号识别（海康 C / OCR，Trig_Inspection 按路径触发）
+    Defect,           ///< 表面缺陷识别（海康 C，Trig_Inspection 按路径触发）
 };
 
 InspectionType inspectionTypeFromString(const QString& value);
@@ -310,6 +319,7 @@ public:
     const HoleConfig& holeConfig() const;
     const ThicknessConfig& thicknessConfig() const;
     const InternalSurfaceConfig& internalSurfaceConfig() const;
+    const SelfCheckConfig& selfCheckConfig() const;
     void setBevelRecipe(const BevelRecipe& recipe);
     BevelRecipe bevelRecipe() const;
     bool hasActiveBevelRecipe() const;
@@ -359,6 +369,7 @@ CameraConfig m_cameraConfig;
     HoleConfig m_holeConfig;
     ThicknessConfig m_thicknessConfig;
     InternalSurfaceConfig m_internalSurfaceConfig;
+    SelfCheckConfig m_selfCheckConfig;
     mutable std::mutex m_bevelRecipeMutex;
     BevelRecipe m_runtimeBevelRecipe;
     bool m_runtimeRecipeSet = false;

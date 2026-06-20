@@ -69,6 +69,7 @@ option(SCAN_TRACKING_ENABLE_THICKNESS_MEASUREMENT "Build thickness measurement a
 option(SCAN_TRACKING_ENABLE_INTERNAL_SURFACE_MEASUREMENT "Build internal surface depth/volume measurement algorithms" ON)
 option(SCAN_TRACKING_ENABLE_LB_POSE_DETECTION "Build the LB stereo pose detection library" ON)
 option(SCAN_TRACKING_ENABLE_LBN_POSE_DETECTION "Build the LBN Mech-Eye pose detection library" ON)
+option(SCAN_TRACKING_ENABLE_SCANNER_SELF_CHECK "Build scanner self-check coded marker algorithm" ON)
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Network SerialPort)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Network SerialPort)

@@ -143,6 +143,30 @@ public:
      */
     bool reportPersonZoneAlarm(bool alarm);
 
+    /// 显控下发的下料区封头计数与叠加配置（经 IPC 写入 PLC 40176~40179）
+    struct UnloadAreaConfig {
+        quint16 maxStackCount = 0;
+        quint16 okCount = 0;
+        quint16 ngCount = 0;
+        quint16 autoClear = 0;
+    };
+
+    /**
+     * @brief 更新下料区封头配置并写入 PLC 结果区 40176~40179
+     * @return 是否成功写入 Modbus（未连接时仍更新本地缓存，返回 false）
+     */
+    bool updateUnloadAreaConfig(const UnloadAreaConfig& config);
+
+    UnloadAreaConfig unloadAreaConfig() const;
+
+    /// 显控 cmd.trigger_self_check：进入自检会话并写 IPC_CurrentStage 通知 PLC
+    void beginSelfCheckScanSession();
+
+    /// 结束扫描仪自检扫描会话
+    void endSelfCheckScanSession();
+
+    bool isSelfCheckSessionActive() const { return m_selfCheckSessionActive; }
+
 signals:
     // 状态改变信号
     // @param newState 新的状态
@@ -417,6 +441,9 @@ private:
 
     /// 检查指定路径的指定段号是否已缓存
     bool hasSegmentInPath(int pathId, int segmentIndex) const;
+    int selfCheckCachePathId() const;
+    void clearPathSegmentCache(int pathId);
+    bool hasSelfCheckCaptureReady() const;
 
     /// 本次 Trig_ScanSegment 应写入的路径 ID（段号重复且当前路径已满则切下一路径）
     int resolvePathIdForIncomingSegment(int segmentIndex) const;
@@ -586,6 +613,9 @@ private:
     quint16 m_progress = 0;                                 // 进度百分比
     quint16 m_ipcSafetyActionWord = 0;                      // IPC_SafetyAction_Word 本地缓存
     bool m_personZoneAlarmActive = false;                   // 是否因人员区域报警处于联锁
+    UnloadAreaConfig m_unloadAreaConfig;                    // 下料区封头计数本地缓存（40176~40179）
+    bool m_unloadAreaConfigReceived = false;                // 显控是否至少下发过一次下料区配置
+    bool m_selfCheckSessionActive = false;                  // 显控触发的自检扫描会话
     bool m_dataValid = false;                               // 数据有效标志
     bool m_isPollingPlc = false;                            // 是否正在轮询 PLC
     quint64 m_pollRequestSequence = 0;                      // 轮询请求序号
