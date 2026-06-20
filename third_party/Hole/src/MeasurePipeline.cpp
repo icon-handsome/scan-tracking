@@ -254,6 +254,47 @@ FitReport fitPlanePca(const CloudConstPtr& cloud, Eigen::Vector4d& plane)
     return report;
 }
 
+CloudPtr downsampleForIcp(const CloudConstPtr& input, int targetPoints)
+{
+    if (!input || input->empty()) {
+        return CloudPtr(new Cloud);
+    }
+    if (static_cast<int>(input->size()) <= targetPoints) {
+        return CloudPtr(new Cloud(*input));
+    }
+
+    CloudPtr current(new Cloud(*input));
+    double leafMm = 2.0;
+    for (int pass = 0;
+         pass < 8 && static_cast<int>(current->size()) > targetPoints;
+         ++pass) {
+        CloudPtr filtered(new Cloud);
+        pcl::VoxelGrid<PointT> voxel;
+        voxel.setInputCloud(current);
+        const float leaf = static_cast<float>(leafMm);
+        voxel.setLeafSize(leaf, leaf, leaf);
+        voxel.filter(*filtered);
+        if (filtered->empty() || filtered->size() >= current->size()) {
+            leafMm *= 2.0;
+            continue;
+        }
+        current = filtered;
+        leafMm *= 1.5;
+    }
+    return current;
+}
+
+bool isGlobalIcpUsable(const FitReport& icpFit, const MeasureConfig& cfg)
+{
+    if (!std::isfinite(icpFit.rmsMm)) {
+        return false;
+    }
+    const double maxRms = cfg.icpMaxCorrespondenceDistanceMm > 0.0
+        ? cfg.icpMaxCorrespondenceDistanceMm
+        : 100.0;
+    return icpFit.rmsMm <= maxRms;
+}
+
 // �����scanInTemplate---�����?�
 FitReport alignScanToTemplate(const CloudConstPtr& scan,
                               const CloudConstPtr& templ,
@@ -270,14 +311,24 @@ FitReport alignScanToTemplate(const CloudConstPtr& scan,
         return report;
     }
 
+    constexpr int kGlobalIcpMaxPoints = 80000;
+    CloudPtr scanDs = downsampleForIcp(scan, kGlobalIcpMaxPoints);
+    CloudPtr templDs = downsampleForIcp(templ, kGlobalIcpMaxPoints);
+    std::cout << "global_icp_downsample scan=" << scan->size() << "->" << scanDs->size()
+              << " template=" << templ->size() << "->" << templDs->size() << std::endl;
+
     pcl::IterativeClosestPoint<PointT, PointT> icp;
-    icp.setInputSource(scan);
-    icp.setInputTarget(templ);
+    icp.setInputSource(scanDs);
+    icp.setInputTarget(templDs);
     icp.setMaxCorrespondenceDistance(cfg.icpMaxCorrespondenceDistanceMm);
     icp.setMaximumIterations(cfg.icpMaxIterations);
     icp.setTransformationEpsilon(cfg.icpTransformationEpsilon);
     icp.setEuclideanFitnessEpsilon(cfg.icpFitnessEpsilon);
-    icp.align(*scanInTemplate);
+    Cloud alignedDs;
+    icp.align(alignedDs);
+
+    const Eigen::Matrix4f transform = icp.getFinalTransformation();
+    pcl::transformPointCloud(*scan, *scanInTemplate, transform);
 
     report.inlierCount = static_cast<int>(scanInTemplate->size());
     report.rmsMm       = std::sqrt(std::max(0.0, icp.getFitnessScore()));
@@ -785,6 +836,11 @@ std::vector<CircleSection> sliceByCylinderAxis(const CloudConstPtr& cloud,
                                                const CylinderModel& cylinder,
                                                const MeasureConfig& cfg)
 {
+    std::vector<CircleSection> sections;
+    if (!cloud || cloud->empty()) {
+        return sections;
+    }
+
     Eigen::Vector3d u;
     Eigen::Vector3d v;
     cylinderBasis(cylinder.axis, u, v);
@@ -800,7 +856,6 @@ std::vector<CircleSection> sliceByCylinderAxis(const CloudConstPtr& cloud,
         minH = std::min(minH, value);
     }
 	minH += 10.0;                         // �?�����?������?�?��10.0mm
-    std::vector<CircleSection> sections;
     for (int i = 0; i < cfg.sliceCount; ++i)
 	{
         const double centerH = minH + static_cast<double>(i) * cfg.sliceSpacingMm;
@@ -2244,6 +2299,16 @@ MeasureResult MeasurePipeline::runWithScanCloud(const CloudConstPtr& rawScan)
     return runPipelineWithPreprocessedScan(scan);
 }
 
+MeasureResult MeasurePipeline::runWithPreprocessedScanCloud(const CloudConstPtr& preprocessedScan)
+{
+    if (!preprocessedScan || preprocessedScan->empty())
+    {
+        throw std::runtime_error("input scan cloud is empty");
+    }
+    std::cout << "preprocessed_points=" << preprocessedScan->size() << '\n';
+    return runPipelineWithPreprocessedScan(preprocessedScan);
+}
+
 MeasureResult MeasurePipeline::run()
 {
     if (config_.inputFrames.empty())
@@ -2265,6 +2330,23 @@ MeasureResult MeasurePipeline::runPipelineWithPreprocessedScan(const CloudConstP
     {
         *scanInTemplate = *scan;
     }
+
+    CloudConstPtr alignmentInput = scan;
+    CloudPtr croppedScan;
+    if (scan && !config_.cropBoxes.empty())
+    {
+        croppedScan = cropCloudAny(scan, config_.cropBoxes);
+        if (croppedScan && !croppedScan->empty())
+        {
+            alignmentInput = croppedScan;
+            std::cout << "online_scan_cropped points=" << croppedScan->size() << std::endl;
+        }
+        else
+        {
+            std::cout << "online_scan_crop_empty keep_full_cloud points=" << scan->size() << std::endl;
+        }
+    }
+
 	if (1)
 	{
 		clock_t start_t, end_t;
@@ -2272,45 +2354,46 @@ MeasureResult MeasurePipeline::runPipelineWithPreprocessedScan(const CloudConstP
 		if (!config_.templateCloud.empty())
 		{
 			templ = loadCloud(config_.templateCloud);
-			result.icpFit = alignScanToTemplate(scan, templ, config_, scanInTemplate);
+			result.icpFit = alignScanToTemplate(alignmentInput, templ, config_, scanInTemplate);
 			printFit(result.icpFit);
 		}
 		end_t = clock();
-		std::cout << "?��?���?��" << 0.001 * (end_t - start_t) << " s" << std::endl;
-    /* ����PCD������?�??�����������??��?������?�?�
-		const std::string alignedPath = "C:/Users/lenovo/Desktop/aligned_scan_in_template.pcd";
-		if (scanInTemplate && !scanInTemplate->empty())
-		{
-			const int saveRc = pcl::io::savePCDFileBinary(alignedPath, *scanInTemplate);
-			if (saveRc == 0)
-			{
-				std::cout << "���������?��?" << alignedPath << " ������" << scanInTemplate->size() << std::endl;
-			}
-			else
-			{
-				std::cout << "�������?���?�?�" << alignedPath << " �����?" << saveRc << std::endl;
-			}
-		}
-		else
-		{
-			std::cout << "��������?�?�?����" << std::endl;
-		}
-    */
+		std::cout << "global_icp_elapsed_s=" << 0.001 * (end_t - start_t) << std::endl;
 	}
+
+    if (!isGlobalIcpUsable(result.icpFit, config_))
+    {
+        std::cout << "global_icp_failed status=abort rms_mm=" << result.icpFit.rmsMm
+                  << " max_mm=" << config_.icpMaxCorrespondenceDistanceMm << std::endl;
+        return result;
+    }
 	 
 	// ��?�?�?�����
     FitReport topFit;
     buildTopPlaneCloud(scanInTemplate, config_, topFit);
     result.topPlaneFit = topFit;
     printFit(result.topPlaneFit);
+
+    if (!g_topPlaneValid)
+    {
+        std::cout << "top_plane_invalid status=abort" << std::endl;
+        return result;
+    }
 	
 	// ?��??���
     CloudPtr straightSide = buildStraightSideCloud(scanInTemplate, config_, topFit);
     if (!straightSide)
     {
-        throw std::runtime_error("straight side cloud pointer is null");
+        std::cout << "straight_side_null status=abort" << std::endl;
+        return result;
     }
     std::cout << "straight_side_points=" << straightSide->size() << std::endl;
+
+    if (straightSide->size() < 10)
+    {
+        std::cout << "straight_side_empty status=abort" << std::endl;
+        return result;
+    }
 	
 	// ?�����
     CylinderModel cylinder = fitCylinderByPcaAxis(straightSide, config_);
@@ -2456,8 +2539,18 @@ MeasureResult MeasurePipeline::runPipelineWithPreprocessedScan(const CloudConstP
 
 
 	// ���?��
-    result.opening = solveOpeningsByProjectionAndLocalIcp(config_, templ, scanInTemplate, cylinder);
-    printFit(result.opening.fit);
+    if (cylinder.radiusMm > 0.0 && std::isfinite(cylinder.radiusMm))
+    {
+        result.opening = solveOpeningsByProjectionAndLocalIcp(config_, templ, scanInTemplate, cylinder);
+        if (!result.opening.name.empty() || result.opening.fit.inlierCount > 0)
+        {
+            printFit(result.opening.fit);
+        }
+    }
+    else
+    {
+        std::cout << "opening_detection status=skip reason=invalid_cylinder" << std::endl;
+    }
 
     return result;
 }

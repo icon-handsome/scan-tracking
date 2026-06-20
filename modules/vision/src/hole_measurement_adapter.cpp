@@ -10,6 +10,8 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QLoggingCategory>
 
+#include <pcl/common/common.h>
+#include <pcl/common/transforms.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -24,7 +26,26 @@ namespace {
 
 Q_LOGGING_CATEGORY(LOG_HOLE, "vision.hole")
 
-constexpr int kHolePreprocessTargetPoints = 2000000;
+// ICP / SOR 在百万级点云上易 OOM 或触发 PCL 索引溢出，IPC 在线路径目标 ≤ 30 万点。
+constexpr int kHolePreprocessTargetPoints = 300000;
+constexpr int kHolePreprocessMaxPasses = 8;
+
+double adaptiveVoxelLeafMm(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
+    double configuredLeafMm)
+{
+    pcl::PointXYZ minPt{};
+    pcl::PointXYZ maxPt{};
+    pcl::getMinMax3D(*cloud, minPt, maxPt);
+    const double extentX = std::max(1.0, static_cast<double>(maxPt.x - minPt.x));
+    const double extentY = std::max(1.0, static_cast<double>(maxPt.y - minPt.y));
+    const double extentZ = std::max(1.0, static_cast<double>(maxPt.z - minPt.z));
+    const double maxExtent = std::max({extentX, extentY, extentZ});
+    // PCL VoxelGrid 在 (extent/leaf) 过大时会 integer overflow 并几乎不降采样。
+    const double minLeafForGrid = maxExtent / 512.0;
+    const double baseLeaf = configuredLeafMm > 0.0 ? configuredLeafMm : 1.0;
+    return std::max(baseLeaf, minLeafForGrid);
+}
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr downsampleLargeCloudForHolePipeline(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
@@ -34,9 +55,12 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr downsampleLargeCloudForHolePipeline(
         return cloud;
     }
 
-    double leafMm = voxelLeafMm > 0.0 ? voxelLeafMm : 1.0;
+    double leafMm = adaptiveVoxelLeafMm(cloud, voxelLeafMm);
     pcl::PointCloud<pcl::PointXYZ>::Ptr current = cloud;
-    for (int pass = 0; pass < 4 && static_cast<int>(current->size()) > kHolePreprocessTargetPoints; ++pass) {
+    for (int pass = 0;
+         pass < kHolePreprocessMaxPasses
+             && static_cast<int>(current->size()) > kHolePreprocessTargetPoints;
+         ++pass) {
         pcl::PointCloud<pcl::PointXYZ>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZ>());
         pcl::VoxelGrid<pcl::PointXYZ> voxel;
         voxel.setInputCloud(current);
@@ -44,13 +68,23 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr downsampleLargeCloudForHolePipeline(
         voxel.setLeafSize(leaf, leaf, leaf);
         voxel.filter(*filtered);
         if (filtered->empty()) {
-            break;
+            leafMm *= 2.0;
+            continue;
         }
+
+        const int beforeCount = static_cast<int>(current->size());
+        const int afterCount = static_cast<int>(filtered->size());
         qInfo(LOG_HOLE).noquote()
             << QStringLiteral("[Hole] 路径合并点云预降采样 pass=") << (pass + 1)
             << QStringLiteral(" leafMm=") << leafMm
-            << QStringLiteral(" ") << static_cast<int>(current->size())
-            << QStringLiteral(" -> ") << static_cast<int>(filtered->size());
+            << QStringLiteral(" ") << beforeCount
+            << QStringLiteral(" -> ") << afterCount;
+
+        if (afterCount >= beforeCount) {
+            leafMm *= 2.0;
+            continue;
+        }
+
         current = filtered;
         leafMm *= 1.5;
     }
@@ -242,8 +276,11 @@ HoleInspectionResult runHoleMeasurement(
         qInfo(LOG_HOLE).noquote()
             << QStringLiteral("[Hole] 预处理后点数=") << static_cast<int>(pclCloud->size());
 
+        auto transformedCloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+        pcl::transformPointCloud(*pclCloud, *transformedCloud, measureConfig.poseCorrection);
+
         hm::MeasurePipeline pipeline(measureConfig);
-        result.measureResult = pipeline.runWithScanCloud(pclCloud);
+        result.measureResult = pipeline.runWithPreprocessedScanCloud(transformedCloud);
         result.icpRmsMm = result.measureResult.icpFit.rmsMm;
         result.cylinderRmsMm = result.measureResult.cylinderFit.rmsMm;
 
@@ -267,6 +304,13 @@ HoleInspectionResult runHoleMeasurement(
                                         0,
                                         'f',
                                         3);
+        } else if (!isFiniteDouble(result.icpRmsMm)
+                   || result.icpRmsMm > icpRmsMaxMm * 20.0) {
+            result.message = QStringLiteral(
+                "Hole 模板 ICP 未收敛（rms=%1 mm，阈值 %2 mm）。"
+                "请检查 LB 位姿/T0 标定，或确认扫描点云与模板在同一坐标系。")
+                                   .arg(result.icpRmsMm, 0, 'f', 1)
+                                   .arg(icpRmsMaxMm, 0, 'f', 1);
         } else {
             result.message = QStringLiteral(
                 "Hole 测量未通过：icpRms=%1 mm (max %2), cylinderRms=%3 mm (max %4), innerDiameter=%5 mm。")
