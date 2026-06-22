@@ -116,6 +116,7 @@ scan_tracking::mech_eye::CaptureResult cloneCaptureResult(
 {
     scan_tracking::mech_eye::CaptureResult dst = src;
     dst.pointCloud = clonePointCloudFrame(src.pointCloud);
+    dst.comparisonPointCloud = clonePointCloudFrame(src.comparisonPointCloud);
     if (src.texture2D.isValid()) {
         dst.texture2D.pixels =
             std::make_shared<std::vector<uint8_t>>(*src.texture2D.pixels);
@@ -648,6 +649,7 @@ QString buildSegmentCaptureExportMetaText(
     int segmentIndex,
     const scan_tracking::vision::MultiCameraCaptureBundle& bundle,
     const scan_tracking::mech_eye::PointCloudFrame& rawPointCloud,
+    const scan_tracking::mech_eye::PointCloudFrame& comparisonPointCloud,
     const scan_tracking::mech_eye::PointCloudFrame& stitchedPointCloud,
     const StateMachine::SegmentPoseStitchRecord& stitchRecord,
     const SegmentCaptureCxpExportMeta& cxpExportMeta)
@@ -675,6 +677,7 @@ QString buildSegmentCaptureExportMetaText(
     text += QStringLiteral("lbMessage=") + bundle.lbPoseResult.message + QStringLiteral("\n");
     text += QStringLiteral("lbTrackingValid=") + QString(stitchRecord.lbTrackingValid ? "true" : "false") + QStringLiteral("\n");
     text += QStringLiteral("rawPointCount=") + QString::number(rawPointCloud.pointCount) + QStringLiteral("\n");
+    text += QStringLiteral("comparisonPointCount=") + QString::number(comparisonPointCloud.pointCount) + QStringLiteral("\n");
     text += QStringLiteral("stitchedPointCount=") + QString::number(stitchedPointCloud.pointCount) + QStringLiteral("\n");
     text += QStringLiteral("\n# CXP image fingerprints (compare pixelMd5 / savedFileMd5 across segments)\n");
     appendCxpImageMetaLines(text, QStringLiteral("cxpLeft"), cxpExportMeta.left);
@@ -4296,7 +4299,13 @@ void StateMachine::applySegmentPoseStitching(int pathId, int segmentIndex)
         }
     }
     persistSegmentCaptureExportGroup(
-        pathId, segmentIndex, bundleSnapshot, inputCloud, stitchedCloud, stitchRecord);
+        pathId,
+        segmentIndex,
+        bundleSnapshot,
+        inputCloud,
+        bundleSnapshot.mechEyeResult.comparisonPointCloud,
+        stitchedCloud,
+        stitchRecord);
 }
 
 void StateMachine::recordSegmentPoseStitch(
@@ -4640,6 +4649,7 @@ void StateMachine::persistSegmentCaptureExportGroup(
     int segmentIndex,
     const scan_tracking::vision::MultiCameraCaptureBundle& bundle,
     const scan_tracking::mech_eye::PointCloudFrame& rawPointCloud,
+    const scan_tracking::mech_eye::PointCloudFrame& comparisonPointCloud,
     const scan_tracking::mech_eye::PointCloudFrame& stitchedPointCloud,
     const SegmentPoseStitchRecord& stitchRecord)
 {
@@ -4681,6 +4691,7 @@ void StateMachine::persistSegmentCaptureExportGroup(
                 segmentIndex,
                 bundle,
                 rawPointCloud,
+                comparisonPointCloud,
                 stitchedPointCloud,
                 stitchRecord,
                 cxpExportMeta))) {
@@ -4689,6 +4700,7 @@ void StateMachine::persistSegmentCaptureExportGroup(
     }
 
     bool rawSaved = false;
+    bool comparisonSaved = false;
     bool stitchedSaved = false;
     if (configManager->segmentCaptureExportConfig().saveRawPointCloud) {
         if (rawPointCloud.isValid()) {
@@ -4697,6 +4709,16 @@ void StateMachine::persistSegmentCaptureExportGroup(
             if (!rawSaved) {
                 qWarning(LOG_FLOW).noquote()
                     << QStringLiteral("[SegmentCaptureExport] 原始点云写入失败：") << rawPath;
+            }
+        }
+
+        if (comparisonPointCloud.isValid()) {
+            const QString comparisonPath = QDir(groupDir).filePath(QStringLiteral("pointcloud_comparison.ply"));
+            comparisonSaved =
+                scan_tracking::mech_eye::savePointCloudFrameToPly(comparisonPointCloud, comparisonPath);
+            if (!comparisonSaved) {
+                qWarning(LOG_FLOW).noquote()
+                    << QStringLiteral("[SegmentCaptureExport] 比较点云写入失败：") << comparisonPath;
             }
         }
 
@@ -4720,6 +4742,7 @@ void StateMachine::persistSegmentCaptureExportGroup(
         << QStringLiteral(" 左pixelMd5=") << cxpExportMeta.left.pixelMd5
         << QStringLiteral(" 右pixelMd5=") << cxpExportMeta.right.pixelMd5
         << QStringLiteral(" 原始PLY=") << (rawSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"))
+        << QStringLiteral(" 比较PLY=") << (comparisonSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"))
         << QStringLiteral(" 拼接PLY=") << (stitchedSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"));
 }
 

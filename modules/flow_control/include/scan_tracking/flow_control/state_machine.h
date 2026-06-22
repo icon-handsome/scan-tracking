@@ -546,6 +546,7 @@ private:
         int segmentIndex,
         const scan_tracking::vision::MultiCameraCaptureBundle& bundle,
         const scan_tracking::mech_eye::PointCloudFrame& rawPointCloud,
+        const scan_tracking::mech_eye::PointCloudFrame& comparisonPointCloud,
         const scan_tracking::mech_eye::PointCloudFrame& stitchedPointCloud,
         const SegmentPoseStitchRecord& stitchRecord);
 

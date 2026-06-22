@@ -106,6 +106,8 @@ struct CaptureRequest {
     QString cameraKey;  // 相机唯一标识
     CaptureMode mode = CaptureMode::Capture3DOnly;  // 采集模式
     int timeoutMs = 30000;  // 采集超时时间，单位毫秒，默认30秒
+    bool edgeArtifactRemovalEnabled = true;  // 本次采集是否启用边缘伪点去除
+    bool comparisonCaptureEnabled = false;  // 是否同次额外采一帧做对比
 };
 
 /* 采集结果 */
@@ -117,13 +119,20 @@ struct CaptureResult {
     QString errorMessage;   // 错误描述，便于日志记录和调试
     CameraInfoSnapshot cameraInfo;  // 采集时的相机信息快照
     PointCloudFrame pointCloud; // 采集到的点云数据
+    PointCloudFrame comparisonPointCloud; // 同次对比点云（可选）
     GrayTextureFrame texture2D; // 与点云对齐的 2D 灰度纹理（仅 Capture2DAnd3D）
     qint64 elapsedMs = 0;   // 采集耗时，单位毫秒
+    qint64 comparisonElapsedMs = 0; // 对比点云采集耗时，单位毫秒
 
     /* 判断采集是否成功 */
     bool success() const
     {
         return errorCode == CaptureErrorCode::Success;
+    }
+
+    bool hasComparisonPointCloud() const
+    {
+        return comparisonPointCloud.isValid();
     }
 };
 

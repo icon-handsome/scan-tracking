@@ -65,7 +65,14 @@ public:
         int segmentIndex,
         quint32 taskId,
         scan_tracking::mech_eye::CaptureMode mechCaptureMode =
-            scan_tracking::mech_eye::CaptureMode::Capture3DOnly);
+            scan_tracking::mech_eye::CaptureMode::Capture3DOnly,
+        bool mechEdgeArtifactRemovalEnabled = true,
+        bool mechComparisonCaptureEnabled = false);
+
+    quint64 requestCaptureBundle(
+        int segmentIndex,
+        quint32 taskId,
+        scan_tracking::mech_eye::CaptureMode mechCaptureMode);
 
 signals:
     /* 组合采集（含位姿检测结果）完成；即使部分失败也会发出，调用方需检查各子结果 */

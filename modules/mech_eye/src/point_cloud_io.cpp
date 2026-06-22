@@ -50,6 +50,37 @@ QString buildSegmentPlyPath(
     return QDir(baseDir).absoluteFilePath(fileName);
 }
 
+QString buildComparisonPlyPath(
+    const QString& configuredRoot,
+    int segmentIndex,
+    quint32 taskId,
+    bool edgeArtifactRemovalEnabled,
+    const QString& timestamp)
+{
+    const QString baseDir = scan_tracking::common::captureCacheMech3DDir(configuredRoot);
+    if (baseDir.isEmpty()) {
+        qWarning(LOG_POINT_CLOUD_IO).noquote() << "无法创建 mech_3d 缓存目录";
+        return QString();
+    }
+
+    const QString compareDir =
+        QDir(baseDir).absoluteFilePath(QStringLiteral("compare"));
+    const QString modeDir =
+        QDir(compareDir).absoluteFilePath(edgeArtifactRemovalEnabled
+            ? QStringLiteral("edge_on")
+            : QStringLiteral("edge_off"));
+    if (!scan_tracking::common::ensureDirectoryExists(modeDir).isEmpty()) {
+        const QString ts =
+            timestamp.trimmed().isEmpty() ? scan_tracking::common::buildCaptureTimestamp() : timestamp;
+        const QString fileName =
+            QStringLiteral("segment_%1_task%2_%3_cmp.ply").arg(segmentIndex).arg(taskId).arg(ts);
+        return QDir(modeDir).absoluteFilePath(fileName);
+    }
+
+    qWarning(LOG_POINT_CLOUD_IO).noquote() << "无法创建比较版点云目录:" << modeDir;
+    return QString();
+}
+
 bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absolutePath)
 {
     if (!frame.isValid() || absolutePath.trimmed().isEmpty()) {

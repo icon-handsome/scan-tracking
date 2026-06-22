@@ -142,7 +142,9 @@ bool mechCapturePayloadReady(const scan_tracking::mech_eye::CaptureResult& resul
 quint64 VisionPipelineService::requestCaptureBundle(
     int segmentIndex,
     quint32 taskId,
-    scan_tracking::mech_eye::CaptureMode mechCaptureMode)
+    scan_tracking::mech_eye::CaptureMode mechCaptureMode,
+    bool mechEdgeArtifactRemovalEnabled,
+    bool mechComparisonCaptureEnabled)
 {
     // ---- 前置校验 ----
     if (!m_started) {
@@ -167,6 +169,8 @@ quint64 VisionPipelineService::requestCaptureBundle(
     // Capture2DAnd3D 表示转盘段，后续会跑 LBN 而非 LB
     request.needMechEye2D =
         mechCaptureMode == scan_tracking::mech_eye::CaptureMode::Capture2DAnd3D;
+    request.mechEdgeArtifactRemovalEnabled = mechEdgeArtifactRemovalEnabled;
+    request.mechComparisonCaptureEnabled = mechComparisonCaptureEnabled;
     request.mechEyeCameraKey = m_config.mechEyeCameraKey;
     request.mechEyeTimeoutMs = m_config.mechCaptureTimeoutMs > 0 ? m_config.mechCaptureTimeoutMs : 5000;
     request.hikCameraAKey = m_config.hikCxpCameraA.cameraKey;
@@ -185,7 +189,9 @@ quint64 VisionPipelineService::requestCaptureBundle(
     pending.mechRequestId = m_mechEyeService->requestCapture(
         request.mechEyeCameraKey,
         mechCaptureMode,
-        request.mechEyeTimeoutMs);
+        request.mechEyeTimeoutMs,
+        request.mechEdgeArtifactRemovalEnabled,
+        request.mechComparisonCaptureEnabled);
     if (pending.mechRequestId == 0) {
         emit fatalError(VisionErrorCode::CaptureRejected, QStringLiteral("启动 Mech-Eye 采集失败。"));
         return 0;
@@ -199,6 +205,23 @@ quint64 VisionPipelineService::requestCaptureBundle(
         VisionPipelineState::Capturing,
         QStringLiteral("梅卡采集已启动（CXP 将在梅卡完成后延迟 %1ms）").arg(kMechToHikCaptureDelayMs));
     return request.requestId;
+}
+
+quint64 VisionPipelineService::requestCaptureBundle(
+    int segmentIndex,
+    quint32 taskId,
+    scan_tracking::mech_eye::CaptureMode mechCaptureMode)
+{
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    const auto visionConfig = configManager != nullptr
+        ? configManager->visionConfig()
+        : scan_tracking::common::VisionConfig{};
+    return requestCaptureBundle(
+        segmentIndex,
+        taskId,
+        mechCaptureMode,
+        visionConfig.mechEdgeArtifactRemovalEnabled,
+        visionConfig.mechEdgeArtifactRemovalComparisonEnabled);
 }
 
 // 梅卡延迟到期后调用：并行发起 CXP 左/右目 poseCapture

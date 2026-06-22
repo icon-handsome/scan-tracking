@@ -78,10 +78,15 @@ void StateMachine::executeScanSegmentTask()
     const auto mechCaptureMode = needMechEye2D
         ? scan_tracking::mech_eye::CaptureMode::Capture2DAnd3D
         : scan_tracking::mech_eye::CaptureMode::Capture3DOnly;
+    const auto visionConfig = scan_tracking::common::ConfigManager::instance()
+        ? scan_tracking::common::ConfigManager::instance()->visionConfig()
+        : scan_tracking::common::VisionConfig{};
     const quint64 requestId = m_visionPipeline->requestCaptureBundle(
         m_activeTask.scanSegmentIndex,
         m_activeTask.taskId,
-        mechCaptureMode);
+        mechCaptureMode,
+        visionConfig.mechEdgeArtifactRemovalEnabled,
+        visionConfig.mechEdgeArtifactRemovalComparisonEnabled);
 
     if (requestId == 0) {
         finishScanSegmentFailure(

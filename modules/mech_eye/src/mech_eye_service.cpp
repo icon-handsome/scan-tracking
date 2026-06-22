@@ -147,7 +147,12 @@ void MechEyeService::requestRefreshStatus()
 /* 发起采集请求。
  * 这里仅做状态与参数检查，真正的采集逻辑在 worker 线程执行。
  */
-quint64 MechEyeService::requestCapture(const QString& cameraKey, CaptureMode mode, int timeoutMs)
+quint64 MechEyeService::requestCapture(
+    const QString& cameraKey,
+    CaptureMode mode,
+    int timeoutMs,
+    bool edgeArtifactRemovalEnabled,
+    bool comparisonCaptureEnabled)
 {
     if (!m_started || m_stopping || m_worker == nullptr) {
         return 0;
@@ -165,6 +170,8 @@ quint64 MechEyeService::requestCapture(const QString& cameraKey, CaptureMode mod
 
     request.mode = mode;    // 采集模式
     request.timeoutMs = timeoutMs > 0 ? timeoutMs : m_defaultCaptureTimeoutMs;  //超时设置
+    request.edgeArtifactRemovalEnabled = edgeArtifactRemovalEnabled;
+    request.comparisonCaptureEnabled = comparisonCaptureEnabled;
 
     m_busy = true;
     emit sig_performCapture(request);   // 发出采集请求，worker 线程会接收并执行

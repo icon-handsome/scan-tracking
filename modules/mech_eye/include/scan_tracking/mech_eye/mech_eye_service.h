@@ -63,7 +63,9 @@ public:
     quint64 requestCapture(
         const QString& cameraKey,
         CaptureMode mode = CaptureMode::Capture3DOnly,
-        int timeoutMs = 30000);
+        int timeoutMs = 30000,
+        bool edgeArtifactRemovalEnabled = true,
+        bool comparisonCaptureEnabled = false);
 
 signals:
     /* 采集完成信号

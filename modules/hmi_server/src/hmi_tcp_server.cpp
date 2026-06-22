@@ -1105,7 +1105,15 @@ void HmiTcpServer::handleCmdCaptureBundle(const QJsonObject& message)
         const auto mechCaptureMode = needMechEye2D
             ? scan_tracking::mech_eye::CaptureMode::Capture2DAnd3D
             : scan_tracking::mech_eye::CaptureMode::Capture3DOnly;
-        quint64 reqId = m_visionPipeline->requestCaptureBundle(segmentIndex, taskId, mechCaptureMode);
+        const auto visionConfig = scan_tracking::common::ConfigManager::instance()
+            ? scan_tracking::common::ConfigManager::instance()->visionConfig()
+            : scan_tracking::common::VisionConfig{};
+        quint64 reqId = m_visionPipeline->requestCaptureBundle(
+            segmentIndex,
+            taskId,
+            mechCaptureMode,
+            visionConfig.mechEdgeArtifactRemovalEnabled,
+            visionConfig.mechEdgeArtifactRemovalComparisonEnabled);
         
         QJsonObject payload = buildResponsePayload(true, QStringLiteral("组合采集请求已发送"));
         payload[QLatin1String("requestId")] = static_cast<qint64>(reqId);

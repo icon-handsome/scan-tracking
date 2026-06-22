@@ -653,6 +653,10 @@ void ConfigManager::load(const QString& filePath)
     m_visionConfig.mechDepthRangeMax = settings.value("mechDepthRangeMax", 2000).toInt();
     m_visionConfig.mechEdgeArtifactRemovalEnabled =
         settings.value("mechEdgeArtifactRemovalEnabled", true).toBool();
+    m_visionConfig.mechEdgeArtifactRemovalComparisonEnabled =
+        settings.value("mechEdgeArtifactRemovalComparisonEnabled", false).toBool();
+    m_visionConfig.mechEdgeArtifactRemovalComparisonSaveEnabled =
+        settings.value("mechEdgeArtifactRemovalComparisonSaveEnabled", false).toBool();
     m_visionConfig.hikConnectTimeoutMs = settings.value("hikConnectTimeoutMs", 3000).toInt();
     m_visionConfig.hikCaptureTimeoutMs = settings.value("hikCaptureTimeoutMs", 1000).toInt();
     m_visionConfig.hikExposureTimeUs =

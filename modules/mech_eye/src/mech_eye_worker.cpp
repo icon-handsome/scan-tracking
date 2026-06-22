@@ -108,7 +108,7 @@ PointCloudFrame ConvertUntexturedPointCloudToFrame(
     return pointCloud;
 }
 
-void applyMech3DCaptureUserSet(mmind::eye::UserSet& userSet)
+void applyMech3DCaptureUserSet(mmind::eye::UserSet& userSet, bool edgeArtifactRemovalEnabled)
 {
     const auto& visionCfg = common::ConfigManager::instance()->visionConfig();
 
@@ -122,16 +122,75 @@ void applyMech3DCaptureUserSet(mmind::eye::UserSet& userSet)
 
     const auto edgeStatus = userSet.setBoolValue(
         mmind::eye::pointcloud_processing_setting::EdgeArtifactRemoval::name,
-        visionCfg.mechEdgeArtifactRemovalEnabled);
+        edgeArtifactRemovalEnabled);
     qInfo(LOG_MECHEYE_WORKER).noquote()
         << QStringLiteral("[边缘伪点去除] EdgeArtifactRemoval=")
-        << visionCfg.mechEdgeArtifactRemovalEnabled
+        << edgeArtifactRemovalEnabled
         << QStringLiteral("，成功=") << edgeStatus.isOK();
     if (!edgeStatus.isOK()) {
         qWarning(LOG_MECHEYE_WORKER).noquote()
             << QStringLiteral("[边缘伪点去除] 设置失败（当前型号可能不支持）: ")
             << QString::fromStdString(edgeStatus.errorDescription);
     }
+}
+
+PointCloudFrame capturePointCloud3D(
+    mmind::eye::Camera& camera,
+    int timeoutMs,
+    bool edgeArtifactRemovalEnabled,
+    qint64* elapsedMs,
+    QString* errorMessage)
+{
+    QElapsedTimer timer;
+    timer.start();
+
+    mmind::eye::Frame3D frame3D;
+    applyMech3DCaptureUserSet(camera.currentUserSet(), edgeArtifactRemovalEnabled);
+    const auto status = camera.capture3D(frame3D, static_cast<unsigned int>(timeoutMs));
+    if (!status.isOK()) {
+        if (elapsedMs != nullptr) {
+            *elapsedMs = timer.elapsed();
+        }
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("采集失败: %1")
+                                .arg(QString::fromStdString(status.errorDescription));
+        }
+        return {};
+    }
+
+    std::size_t validCount = 0;
+    PointCloudFrame cloud = ConvertUntexturedPointCloudToFrame(
+        frame3D.getUntexturedPointCloud(),
+        static_cast<quint64>(frame3D.frameId()),
+        &validCount);
+    if (elapsedMs != nullptr) {
+        *elapsedMs = timer.elapsed();
+    }
+    if (validCount == 0) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("点云全 NaN");
+        }
+        return {};
+    }
+    if (errorMessage != nullptr) {
+        errorMessage->clear();
+    }
+    return cloud;
+}
+
+PointCloudFrame capturePointCloud3DComparison(
+    mmind::eye::Camera& camera,
+    int timeoutMs,
+    bool edgeArtifactRemovalEnabled,
+    qint64* elapsedMs,
+    QString* errorMessage)
+{
+    return capturePointCloud3D(
+        camera,
+        timeoutMs,
+        edgeArtifactRemovalEnabled,
+        elapsedMs,
+        errorMessage);
 }
 
 GrayTextureFrame ConvertGrayTextureFrame(const mmind::eye::Frame2D& frame2d)
@@ -312,30 +371,37 @@ void MechEyeWorker::performCapture(const scan_tracking::mech_eye::CaptureRequest
                 result.texture2D = ConvertGrayTextureFrame(frame2D);
             }
         } else if (normalized.mode == CaptureMode::Capture3DOnly) {
-            mmind::eye::Frame3D frame3D;
+            QString errorMessage;
+            result.pointCloud = capturePointCloud3D(
+                m_impl->camera,
+                normalized.timeoutMs,
+                normalized.edgeArtifactRemovalEnabled,
+                &result.elapsedMs,
+                &errorMessage);
+            if (!errorMessage.isEmpty()) {
+                status = mmind::eye::ErrorStatus(
+                    mmind::eye::ErrorStatus::MMIND_STATUS_NO_DATA_ERROR,
+                    errorMessage.toStdString());
+            }
 
-            applyMech3DCaptureUserSet(m_impl->camera.currentUserSet());
-
-            // 先尝试 capture3D（不含相机侧法向量计算）
-            status = m_impl->camera.capture3D(
-                frame3D,
-                static_cast<unsigned int>(normalized.timeoutMs));
-            if (status.isOK()) {
-                const auto untexturedCloud = frame3D.getUntexturedPointCloud();
-                std::size_t validCount = 0;
-                result.pointCloud = ConvertUntexturedPointCloudToFrame(
-                    untexturedCloud,
-                    static_cast<quint64>(frame3D.frameId()),
-                    &validCount);
-
-                if (validCount == 0) {
-                    qWarning(LOG_MECHEYE_WORKER)
-                        << QStringLiteral("点云全 NaN，请检查 DepthRange 配置和目标物距离；本段将不会写入内存缓存");
+            if (normalized.comparisonCaptureEnabled && status.isOK()) {
+                const bool oppositeEdgeSetting = !normalized.edgeArtifactRemovalEnabled;
+                result.comparisonPointCloud = capturePointCloud3DComparison(
+                    m_impl->camera,
+                    normalized.timeoutMs,
+                    oppositeEdgeSetting,
+                    &result.comparisonElapsedMs,
+                    &errorMessage);
+                if (!errorMessage.isEmpty()) {
+                    qWarning(LOG_MECHEYE_WORKER).noquote()
+                        << QStringLiteral("[对比采集] ") << errorMessage;
                 }
             }
         } else {
             mmind::eye::Frame2DAnd3D frame2DAnd3D;
-            applyMech3DCaptureUserSet(m_impl->camera.currentUserSet());
+            applyMech3DCaptureUserSet(
+                m_impl->camera.currentUserSet(),
+                normalized.edgeArtifactRemovalEnabled);
             status = m_impl->camera.capture2DAnd3D(
                 frame2DAnd3D,
                 static_cast<unsigned int>(normalized.timeoutMs));
