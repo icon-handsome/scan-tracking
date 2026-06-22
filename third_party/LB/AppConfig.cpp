@@ -486,8 +486,8 @@ AppConfig::AppConfig()
 	paths.left_images = "D:/3 Data/11 LanYou_S1/Scan_Register/Hik/L/*.bmp";
 	paths.right_images = "D:/3 Data/11 LanYou_S1/Scan_Register/Hik/R/*.bmp";
 	paths.template_points = "D:/3 Data/4 Track_Match/template-3D-ALL-Shift-Cut-Cut.txt";
-
-	geo_hash.cos_tolerance = 0.015f;
+	geo_hash.angle_tolerance_deg = 2.0f;
+	geo_hash.length_tolerance = 1.0f;
 	geo_hash.min_percent = 0.5f;
 	geo_hash.max_distance = 650.0f;
 	geo_hash.min_distance = 30.0f;
@@ -557,8 +557,11 @@ AppConfig::AppConfig()
 
 	limits.mark_point_size_max = 150;
 	limits.debscan_filter_dist_max = 500.0f;
-	limits.vote_pnt_size_max = 9;
+	limits.vote_pnt_size_max = 40;
 	limits.vote_filter_pnt_size_min = 4;
+	limits.recon_neighbor_count_min = 3;
+	limits.pose_ransac_inlier_dist = 1.0f;
+	limits.pose_ransac_iterations = 200;
 }
 
 AppConfig& AppConfig::Instance()
@@ -599,8 +602,8 @@ bool AppConfig::Load(const wchar_t* file_name)
 	ok = ReadString(values, "Paths", "left_images", paths.left_images) && ok;
 	ok = ReadString(values, "Paths", "right_images", paths.right_images) && ok;
 	ok = ReadString(values, "Paths", "template_points", paths.template_points) && ok;
-
-	ok = ReadFloat(values, "GeoHash", "cos_tolerance", geo_hash.cos_tolerance) && ok;
+	ok = ReadFloat(values, "GeoHash", "angle_tolerance_deg", geo_hash.angle_tolerance_deg) && ok;
+	ok = ReadFloat(values, "GeoHash", "length_tolerance", geo_hash.length_tolerance) && ok;
 	ok = ReadFloat(values, "GeoHash", "min_percent", geo_hash.min_percent) && ok;
 	ok = ReadFloat(values, "GeoHash", "max_distance", geo_hash.max_distance) && ok;
 	ok = ReadFloat(values, "GeoHash", "min_distance", geo_hash.min_distance) && ok;
@@ -632,6 +635,9 @@ bool AppConfig::Load(const wchar_t* file_name)
 	ok = ReadFloat(values, "Limits", "debscan_filter_dist_max", limits.debscan_filter_dist_max) && ok;
 	ok = ReadInt(values, "Limits", "vote_pnt_size_max", limits.vote_pnt_size_max) && ok;
 	ok = ReadInt(values, "Limits", "vote_filter_pnt_size_min", limits.vote_filter_pnt_size_min) && ok;
+	ok = ReadInt(values, "Limits", "recon_neighbor_count_min", limits.recon_neighbor_count_min) && ok;
+	ok = ReadFloat(values, "Limits", "pose_ransac_inlier_dist", limits.pose_ransac_inlier_dist) && ok;
+	ok = ReadInt(values, "Limits", "pose_ransac_iterations", limits.pose_ransac_iterations) && ok;
 
 	if (!ok)
 	{
@@ -653,6 +659,21 @@ bool AppConfig::Load(const wchar_t* file_name)
 		std::cerr << "[Config] Limits.vote_filter_pnt_size_min must be at least 3." << std::endl;
 		return false;
 	}
+	if (limits.recon_neighbor_count_min < 0)
+	{
+		std::cerr << "[Config] Limits.recon_neighbor_count_min must be non-negative." << std::endl;
+		return false;
+	}
+	if (limits.pose_ransac_inlier_dist <= 0.0f)
+	{
+		std::cerr << "[Config] Limits.pose_ransac_inlier_dist must be positive." << std::endl;
+		return false;
+	}
+	if (limits.pose_ransac_iterations <= 0)
+	{
+		std::cerr << "[Config] Limits.pose_ransac_iterations must be positive." << std::endl;
+		return false;
+	}
 	if (detector.pyramid_levels < 0)
 	{
 		std::cerr << "[Config] Detector.pyramid_levels must be non-negative." << std::endl;
@@ -671,6 +692,16 @@ bool AppConfig::Load(const wchar_t* file_name)
 	if (geo_hash.min_distance <= 0.0f || geo_hash.max_distance <= geo_hash.min_distance)
 	{
 		std::cerr << "[Config] GeoHash distance range is invalid." << std::endl;
+		return false;
+	}
+	if (geo_hash.angle_tolerance_deg <= 0.0f || geo_hash.angle_tolerance_deg >= 180.0f)
+	{
+		std::cerr << "[Config] GeoHash.angle_tolerance_deg must be in (0, 180)." << std::endl;
+		return false;
+	}
+	if (geo_hash.length_tolerance <= 0.0f)
+	{
+		std::cerr << "[Config] GeoHash.length_tolerance must be positive." << std::endl;
 		return false;
 	}
 	if (recon.min_z_range >= recon.max_z_range)

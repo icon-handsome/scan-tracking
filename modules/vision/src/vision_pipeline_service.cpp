@@ -56,6 +56,10 @@ VisionPipelineService::VisionPipelineService(
     , m_hikCameraAService(hikCameraAService)
     , m_hikCameraBService(hikCameraBService)
 {
+    qInfo() << QStringLiteral("[VisionPipeline] 构造函数入口 mechEye=")
+            << (m_mechEyeService != nullptr) << QStringLiteral(" hikA=")
+            << (m_hikCameraAService != nullptr) << QStringLiteral(" hikB=")
+            << (m_hikCameraBService != nullptr);
     registerMetaTypes();
 
     // 三路相机服务的完成信号均通过 QueuedConnection 回到主线程槽
@@ -83,6 +87,7 @@ VisionPipelineService::VisionPipelineService(
             &VisionPipelineService::onHikPoseCaptureFinished,
             Qt::QueuedConnection);
     }
+    qInfo() << QStringLiteral("[VisionPipeline] 构造函数完成。");
 }
 
 void VisionPipelineService::start(const scan_tracking::common::VisionConfig& config)

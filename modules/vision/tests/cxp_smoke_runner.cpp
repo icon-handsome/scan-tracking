@@ -123,12 +123,14 @@ int main(int argc, char* argv[])
         visionConfig.hikCxpCameraA,
         visionConfig.hikCxpCaptureTimeoutMs,
         visionConfig.hikCxpExposureTimeUs,
-        visionConfig.hikCxpGain);
+        visionConfig.hikCxpGain,
+        visionConfig.hikCxpTriggerMode);
     cameraB.start(
         visionConfig.hikCxpCameraB,
         visionConfig.hikCxpCaptureTimeoutMs,
         visionConfig.hikCxpExposureTimeUs,
-        visionConfig.hikCxpGain);
+        visionConfig.hikCxpGain,
+        visionConfig.hikCxpTriggerMode);
 
   // 等待后台连接尝试
     QThread::msleep(2000);

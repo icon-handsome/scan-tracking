@@ -74,6 +74,7 @@ if exist "%ROOT%\third_party\LB" robocopy "%ROOT%\third_party\LB" "%APP_DEBUG%\t
 if exist "%ROOT%\third_party\LBN" robocopy "%ROOT%\third_party\LBN" "%APP_DEBUG%\third_party\LBN" /E /NFL /NDL /NJH /NJS /nc /ns /np /XF *.obj *.pdb *.lib *.exp >nul
 if not exist "%APP_DEBUG%\data\LB" mkdir "%APP_DEBUG%\data\LB"
 if not exist "%APP_DEBUG%\data\LBN" mkdir "%APP_DEBUG%\data\LBN"
+if not exist "D:\HikCameraFTP" mkdir "D:\HikCameraFTP"
 if exist "%ROOT%\third_party\LB\data" robocopy "%ROOT%\third_party\LB\data" "%APP_DEBUG%\data\LB" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
 if exist "%ROOT%\third_party\LB\template_for_scanner_ori.txt" copy /Y "%ROOT%\third_party\LB\template_for_scanner_ori.txt" "%APP_DEBUG%\data\LB\template_for_scanner_ori.txt" >nul
 if exist "%ROOT%\third_party\LBN\data" robocopy "%ROOT%\third_party\LBN\data" "%APP_DEBUG%\data\LBN" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
@@ -85,6 +86,15 @@ if not exist "%APP_DEBUG%\config.ini" (
 )
 powershell -NoProfile -Command "(Get-Content -LiteralPath '%APP_DEBUG%\config.ini' -Raw) -replace '(?m)^scanSegmentTotal=.*','scanSegmentTotal=144' | Set-Content -LiteralPath '%APP_DEBUG%\config.ini' -NoNewline"
 echo [scan_tracking_dev] Updated scanSegmentTotal=144 in deploy config.ini
+rem Debug 包在工控机无 VS 时缺 ucrtbased.dll，会导致 0xC0000135 静默退出（windeployqt --no-compiler-runtime）
+if exist "%SystemRoot%\System32\ucrtbased.dll" (
+  copy /Y "%SystemRoot%\System32\ucrtbased.dll" "%APP_DEBUG%\" >nul
+  echo [scan_tracking_dev] Copied ucrtbased.dll for IPC debug deploy
+)
+if exist "%SystemRoot%\System32\vcruntime140_1d.dll" (
+  copy /Y "%SystemRoot%\System32\vcruntime140_1d.dll" "%APP_DEBUG%\" >nul
+  echo [scan_tracking_dev] Copied vcruntime140_1d.dll for IPC debug deploy
+)
 echo [scan_tracking_dev] Stage complete: %APP_DEBUG%
 exit /b 0
 

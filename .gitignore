@@ -67,3 +67,4 @@ third_party/MVS/**/obj/
 third_party/MVS/**/objnetfx/
 third_party/MVS/**/bin/
 /scripts
+/.idea/encodings.xml

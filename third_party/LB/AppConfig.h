@@ -15,7 +15,8 @@ public:
 
 	struct GeoHash
 	{
-		float cos_tolerance;
+		float angle_tolerance_deg;
+		float length_tolerance;
 		float min_percent;
 		float max_distance;
 		float min_distance;
@@ -56,6 +57,9 @@ public:
 		float debscan_filter_dist_max;
 		int vote_pnt_size_max;
 		int vote_filter_pnt_size_min;
+		int recon_neighbor_count_min;
+		float pose_ransac_inlier_dist;
+		int pose_ransac_iterations;
 	};
 
 	static AppConfig& Instance();

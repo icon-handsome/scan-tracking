@@ -4,7 +4,10 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QLoggingCategory>
-#include <QtCore/QThread>
+#include <QtCore/QTimer>
+
+#include <filesystem>
+#include <system_error>
 
 #include "scan_tracking/vision/hik_smart_camera_tcp_server.h"
 #include "scan_tracking/vision/hik_smart_camera_ftp_monitor.h"
@@ -14,6 +17,25 @@ Q_LOGGING_CATEGORY(hikCControllerLog, "vision.hik_camera_c_controller")
 namespace scan_tracking {
 namespace vision {
 
+namespace {
+
+bool ensureDirectoryTreeExists(const QString& directoryPath)
+{
+    if (directoryPath.trimmed().isEmpty()) {
+        return false;
+    }
+
+    std::error_code ec;
+    const auto fsPath = std::filesystem::path(directoryPath.toStdWString());
+    std::filesystem::create_directories(fsPath, ec);
+    if (ec) {
+        return false;
+    }
+    return std::filesystem::is_directory(fsPath);
+}
+
+}  // namespace
+
 void HikCameraCController::registerMetaTypes()
 {
     static bool registered = false;
@@ -22,7 +44,8 @@ void HikCameraCController::registerMetaTypes()
     }
     qRegisterMetaType<scan_tracking::vision::HikCameraCState>("scan_tracking::vision::HikCameraCState");
     qRegisterMetaType<scan_tracking::vision::CaptureType>("scan_tracking::vision::CaptureType");
-    qRegisterMetaType<scan_tracking::vision::ImageFileInfo>("scan_tracking::vision::ImageFileInfo");    registered = true;
+    qRegisterMetaType<scan_tracking::vision::ImageFileInfo>("scan_tracking::vision::ImageFileInfo");
+    registered = true;
 }
 
 HikCameraCController::HikCameraCController(QObject* parent)
@@ -53,7 +76,8 @@ void HikCameraCController::start(const scan_tracking::common::VisionConfig& conf
         return;
     }
 
-    m_config = config;
+    qInfo(hikCControllerLog) << QStringLiteral("HikCameraCController::start 入口");
+
     m_smartCameraIp = config.hikCameraC.ipAddress;
     m_tcpListenIp = config.hikCameraCTcpListenIp.isEmpty()
                         ? QStringLiteral("192.168.8.13")
@@ -64,19 +88,26 @@ void HikCameraCController::start(const scan_tracking::common::VisionConfig& conf
     m_ftpDirectory = config.hikCameraCFtpDirectory.isEmpty()
                          ? QStringLiteral("D:/HikCameraFTP")
                          : config.hikCameraCFtpDirectory;
+    qInfo(hikCControllerLog) << QStringLiteral("HikCameraCController 配置已读取");
 
     m_started = true;
-    setState(HikCameraCState::Initializing, QStringLiteral("海康相机 C 控制器正在初始化（纯TCP模式）"));
+    // 启动期不 emit stateChanged，避免在 SDK 初始化窗口内触发跨模块回调
+    m_state = HikCameraCState::Initializing;
 
-    qInfo(hikCControllerLog) << QStringLiteral("HikCameraCController 已启动，相机：")
-                             << m_config.hikCameraC.logicalName
-                             << QStringLiteral(" IP:") << m_config.hikCameraC.ipAddress;
+    qInfo(hikCControllerLog) << QStringLiteral("HikCameraCController 已启动，相机 IP:")
+                             << m_smartCameraIp
+                             << QStringLiteral(" TCP:") << m_tcpListenIp << QStringLiteral(":") << m_tcpListenPort;
 
     // 初始化 TCP 服务器（唯一通信通道）
     initializeTcpServer();
 
-    // 初始化 FTP 监控器
-    initializeFtpMonitor();
+    // FTP 监控涉及目录 I/O 与 QFileSystemWatcher，延迟到下一轮事件循环，避免与相机 SDK 初始化冲突。
+    QTimer::singleShot(0, this, [this]() {
+        if (!m_started) {
+            return;
+        }
+        initializeFtpMonitor();
+    });
 }
 
 void HikCameraCController::stop()
@@ -105,9 +136,10 @@ void HikCameraCController::initializeTcpServer()
         return;
     }
 
-    m_tcpServer = new HikSmartCameraTcpServer(this);
+    qInfo(hikCControllerLog) << QStringLiteral("initializeTcpServer 入口");
 
-    // 连接 TCP 服务器信号
+    m_tcpServer = new HikSmartCameraTcpServer(this);
+    qInfo(hikCControllerLog) << QStringLiteral("HikSmartCameraTcpServer 已构造");
     connect(m_tcpServer, &HikSmartCameraTcpServer::serverStarted,
             this, &HikCameraCController::onTcpServerStarted);
     connect(m_tcpServer, &HikSmartCameraTcpServer::serverStopped,
@@ -129,22 +161,25 @@ void HikCameraCController::initializeTcpServer()
     const QString listenIp = m_tcpListenIp;
     const quint16 listenPort = m_tcpListenPort;
 
-    // 尝试启动服务器，如果失败则等待一段时间后重试
+    // 尝试启动服务器，如果失败则异步重试（避免在启动路径上阻塞主线程 sleep）
     if (!m_tcpServer->start(listenIp, listenPort)) {
-        qWarning(hikCControllerLog) << QStringLiteral("首次启动 TCP 服务器失败，等待 2 秒后重试...");
-        
-        // 等待2秒让系统释放端口
-        QThread::msleep(2000);
-        
-        // 重试一次
-        if (!m_tcpServer->start(listenIp, listenPort)) {
-            qCritical(hikCControllerLog) << QStringLiteral("重试后仍无法启动 TCP 服务器") << listenIp << QStringLiteral(":") << listenPort;
+        qWarning(hikCControllerLog) << QStringLiteral("首次启动 TCP 服务器失败，2 秒后重试...")
+                                      << listenIp << QStringLiteral(":") << listenPort;
+
+        QTimer::singleShot(2000, this, [this, listenIp, listenPort]() {
+            if (m_tcpServer == nullptr) {
+                return;
+            }
+            if (m_tcpServer->start(listenIp, listenPort)) {
+                qInfo(hikCControllerLog) << QStringLiteral("重试后 TCP 服务器启动成功");
+                return;
+            }
+            qCritical(hikCControllerLog) << QStringLiteral("重试后仍无法启动 TCP 服务器")
+                                           << listenIp << QStringLiteral(":") << listenPort;
             setState(HikCameraCState::Error, QStringLiteral("TCP 服务器启动失败（端口可能被占用）"));
             emit fatalError(VisionErrorCode::DeviceOpenFailed,
-                          QStringLiteral("TCP 服务器启动失败，端口 %1 可能被其他进程占用。").arg(listenPort));
-        } else {
-        qInfo(hikCControllerLog) << "重试后 TCP 服务器启动成功";
-        }
+                            QStringLiteral("TCP 服务器启动失败，端口 %1 可能被其他进程占用。").arg(listenPort));
+        });
     } else {
         qInfo(hikCControllerLog) << "TCP 服务器启动成功，地址" << listenIp << ":" << listenPort;
     }
@@ -288,12 +323,9 @@ bool HikCameraCController::saveImageToFile(const QByteArray& imageData, CaptureT
 {
     // 创建保存目录
     QString saveDir = QStringLiteral("./smart_camera_images");
-    QDir dir;
-    if (!dir.exists(saveDir)) {
-        if (!dir.mkpath(saveDir)) {
-            qWarning(hikCControllerLog) << QStringLiteral("创建目录失败：") << saveDir;
-            return false;
-        }
+    if (!ensureDirectoryTreeExists(saveDir)) {
+        qWarning(hikCControllerLog) << QStringLiteral("创建目录失败：") << saveDir;
+        return false;
     }
 
     // 生成文件名：类型_时间戳_计数器.jpg

@@ -63,6 +63,8 @@ struct VisionConfig {
     int hikCxpCaptureTimeoutMs = 5000;
     float hikCxpExposureTimeUs = 50000.0f;
     float hikCxpGain = 0.0f;
+    // CXP 触发模式：0=连续，1=软件触发，2=硬件触发(Line0)
+    quint32 hikCxpTriggerMode = 1;
     QString hikCxpSmokeOutputDir;
     VisionCameraEndpointConfig hikCxpCameraA;
     VisionCameraEndpointConfig hikCxpCameraB;
@@ -79,16 +81,18 @@ struct FlowControlConfig {
     int simulatedProcessingMs;
     /// 临时联调：跳过检测/位姿/点云后处理算法；Trig_ScanSegment 仍执行相机采集
     bool algorithmBypassEnabled = false;
+    /// 第一条扫描路径联调：0=不暂停跑完全流程；N>0 时路径1第 N 点采集且 CXP 落盘完成后暂停，拒绝后续 Trig_ScanSegment
+    int firstPathPauseAfterPoint = 0;
     /// @deprecated 分段点云/海康已改内存缓存；仅 LatencyTest 等调试落盘仍可读此路径
     QString scanCacheDirectory;
     /// @deprecated 不再用于分段 PLY 生命周期
     bool retainSegmentPly = true;
 };
 
-/// 每段扫描分组落盘：CXP 左右图 + 矩阵 + 点云（对照分析用）
+/// 每段扫描分组落盘：CXP 左右 2D 图（扁平 output/）+ 矩阵/meta（会话子目录）
 struct SegmentCaptureExportConfig {
     bool enabled = false;
-    QString outputRoot = QStringLiteral("output/segment_capture");
+    QString outputRoot = QStringLiteral("output");
     bool saveRawPointCloud = true;
 };
 
@@ -235,6 +239,12 @@ struct LbPoseConfig {
     QString dataRoot;
     QString leftPattern;
     QString rightPattern;
+    /// 新版 LB 查询角度容差（度）
+    float angleToleranceDeg = 2.0f;
+    /// 新版 LB 查询长度容差（mm）
+    float lengthTolerance = 0.5f;
+    /// 新版 LB 最低票数占比
+    float minPercent = 0.5f;
 };
 
 /** LBN 位姿检测配置。生产环境请多工况标定，勿仅按单帧离线 success 放大容差。 */

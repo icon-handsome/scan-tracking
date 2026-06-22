@@ -318,89 +318,156 @@ void ConsoleRuntime::initModules()
         ? configManager->visionConfig()
         : scan_tracking::common::VisionConfig{};
 
-    if (!visionConfig.hikCxpEnabled) {
-        qCritical(appLog) << QStringLiteral("hikCxpEnabled=false，CXP 双目未启动；请在 config.ini [Vision] 中启用。");
-    } else {
-        // CXP 左/右目各一个 HikCxpCameraService 实例，roleName 区分 ch250_a / ch250_b
-        hikCxpCameraAService_ = std::make_unique<scan_tracking::vision::HikCxpCameraService>(
-            QStringLiteral("ch250_a"));
-        hikCxpCameraBService_ = std::make_unique<scan_tracking::vision::HikCxpCameraService>(
-            QStringLiteral("ch250_b"));
+    if (startupStage >= 2) {
+        if (!visionConfig.hikCxpEnabled) {
+            qCritical(appLog) << QStringLiteral("hikCxpEnabled=false，CXP 双目未启动；请在 config.ini [Vision] 中启用。");
+        } else {
+            // CXP 左/右目各一个 HikCxpCameraService 实例，roleName 区分 ch250_a / ch250_b
+            hikCxpCameraAService_ = std::make_unique<scan_tracking::vision::HikCxpCameraService>(
+                QStringLiteral("ch250_a"));
+            hikCxpCameraBService_ = std::make_unique<scan_tracking::vision::HikCxpCameraService>(
+                QStringLiteral("ch250_b"));
 
-        QObject::connect(
-            hikCxpCameraAService_.get(),
-            &scan_tracking::vision::HikCxpCameraService::stateChanged,
-            [](const QString& roleName, const QString& stateText, const QString& description) {
-                qInfo(appLog) << QStringLiteral("[CXP]") << roleName << stateText << description;
-            });
-        QObject::connect(
-            hikCxpCameraBService_.get(),
-            &scan_tracking::vision::HikCxpCameraService::stateChanged,
-            [](const QString& roleName, const QString& stateText, const QString& description) {
-                qInfo(appLog) << QStringLiteral("[CXP]") << roleName << stateText << description;
-            });
+            QObject::connect(
+                hikCxpCameraAService_.get(),
+                &scan_tracking::vision::HikCxpCameraService::stateChanged,
+                [](const QString& roleName, const QString& stateText, const QString& description) {
+                    qInfo(appLog) << QStringLiteral("[CXP]") << roleName << stateText << description;
+                });
+            QObject::connect(
+                hikCxpCameraBService_.get(),
+                &scan_tracking::vision::HikCxpCameraService::stateChanged,
+                [](const QString& roleName, const QString& stateText, const QString& description) {
+                    qInfo(appLog) << QStringLiteral("[CXP]") << roleName << stateText << description;
+                });
 
-        hikCxpCameraAService_->start(
-            visionConfig.hikCxpCameraA,
-            visionConfig.hikCxpCaptureTimeoutMs,
-            visionConfig.hikCxpExposureTimeUs,
-            visionConfig.hikCxpGain);
-        hikCxpCameraBService_->start(
-            visionConfig.hikCxpCameraB,
-            visionConfig.hikCxpCaptureTimeoutMs,
-            visionConfig.hikCxpExposureTimeUs,
-            visionConfig.hikCxpGain);
-        qInfo(appLog) << QStringLiteral("CXP 双目相机服务已启动。");
+            hikCxpCameraAService_->start(
+                visionConfig.hikCxpCameraA,
+                visionConfig.hikCxpCaptureTimeoutMs,
+                visionConfig.hikCxpExposureTimeUs,
+                visionConfig.hikCxpGain,
+                visionConfig.hikCxpTriggerMode);
+            hikCxpCameraBService_->start(
+                visionConfig.hikCxpCameraB,
+                visionConfig.hikCxpCaptureTimeoutMs,
+                visionConfig.hikCxpExposureTimeUs,
+                visionConfig.hikCxpGain,
+                visionConfig.hikCxpTriggerMode);
+            qInfo(appLog) << QStringLiteral("CXP 双目相机服务已启动。");
+        }
     }
 
-    // 海康相机 C（智能相机）：纯 TCP 控制，不通过 MVS SDK 打开设备，避免与 SCMVS 冲突
-    hikCameraCController_ = std::make_unique<scan_tracking::vision::HikCameraCController>();
+    if (startupStage < 2) {
+        qInfo(appLog) << QStringLiteral("启动阶段仅到 MechEye/辅助传感器。");
+        return;
+    }
 
-    QObject::connect(
-        hikCameraCController_.get(),
-        &scan_tracking::vision::HikCameraCController::stateChanged,
-        [](scan_tracking::vision::HikCameraCState state, const QString& description) {
-            qInfo(appLog) << QStringLiteral("[海康C控制器] 状态 =") << static_cast<int>(state) << description;
-        });
-    QObject::connect(
-        hikCameraCController_.get(),
-        &scan_tracking::vision::HikCameraCController::fatalError,
-        [](scan_tracking::vision::VisionErrorCode code, const QString& message) {
-            qCritical(appLog) << QStringLiteral("[海康C控制器] 致命错误：")
-                              << static_cast<int>(code) << message;
-        });
-    QObject::connect(
-        hikCameraCController_.get(),
-        &scan_tracking::vision::HikCameraCController::captureCompleted,
-        [](scan_tracking::vision::CaptureType type, const QByteArray& imageData) {
-            QString typeStr;
-            switch (type) {
-                case scan_tracking::vision::CaptureType::SurfaceDefect:
-                    typeStr = QStringLiteral("表面缺陷");
-                    break;
-                case scan_tracking::vision::CaptureType::WeldDefect:
-                    typeStr = QStringLiteral("焊缝缺陷");
-                    break;
-                case scan_tracking::vision::CaptureType::NumberRecognition:
-                    typeStr = QStringLiteral("编号识别");
-                    break;
-                default:
-                    typeStr = QStringLiteral("未知");
-                    break;
-            }
-            qInfo(appLog) << QStringLiteral("[海康C控制器] 采集完成：") << typeStr
-                          << imageData.size() << QStringLiteral("字节");
-        });
+    // MechEye/Hik MVS SDK 与后续 Qt 网络/目录操作错开：延迟到事件循环稳定后再启动流程模块。
+    QTimer::singleShot(200, &application_, [this, startupStage, visionConfig]() {
+        initFlowModules(startupStage, visionConfig);
+    });
+}
+
+void ConsoleRuntime::initFlowModules(
+    int startupStage,
+    scan_tracking::common::VisionConfig visionConfig)
+{
+    qInfo(appLog) << QStringLiteral("[启动] initFlowModules 开始，stage=") << startupStage;
+
+    // 海康相机 C（智能相机）：纯 TCP 控制，不通过 MVS SDK 打开设备，避免与 SCMVS 冲突
+    qInfo(appLog) << QStringLiteral("[启动] 创建 HikCameraCController...");
+    hikCameraCController_ = std::make_unique<scan_tracking::vision::HikCameraCController>();
+    qInfo(appLog) << QStringLiteral("[启动] HikCameraCController 对象已创建。");
 
     hikCameraCController_->start(visionConfig);
     qInfo(appLog) << QStringLiteral("海康 C 相机控制器已启动（TCP 通信模式）。");
 
+    if (startupStage < 3) {
+        QObject::connect(
+            hikCameraCController_.get(),
+            &scan_tracking::vision::HikCameraCController::stateChanged,
+            [](scan_tracking::vision::HikCameraCState state, const QString& description) {
+                qInfo(appLog) << QStringLiteral("[海康C控制器] 状态 =") << static_cast<int>(state) << description;
+            });
+        QObject::connect(
+            hikCameraCController_.get(),
+            &scan_tracking::vision::HikCameraCController::fatalError,
+            [](scan_tracking::vision::VisionErrorCode code, const QString& message) {
+                qCritical(appLog) << QStringLiteral("[海康C控制器] 致命错误：")
+                                  << static_cast<int>(code) << message;
+            });
+        QObject::connect(
+            hikCameraCController_.get(),
+            &scan_tracking::vision::HikCameraCController::captureCompleted,
+            [](scan_tracking::vision::CaptureType type, const QByteArray& imageData) {
+                QString typeStr;
+                switch (type) {
+                    case scan_tracking::vision::CaptureType::SurfaceDefect:
+                        typeStr = QStringLiteral("表面缺陷");
+                        break;
+                    case scan_tracking::vision::CaptureType::WeldDefect:
+                        typeStr = QStringLiteral("焊缝缺陷");
+                        break;
+                    case scan_tracking::vision::CaptureType::NumberRecognition:
+                        typeStr = QStringLiteral("编号识别");
+                        break;
+                    default:
+                        typeStr = QStringLiteral("未知");
+                        break;
+                }
+                qInfo(appLog) << QStringLiteral("[海康C控制器] 采集完成：") << typeStr
+                              << imageData.size() << QStringLiteral("字节");
+            });
+        qInfo(appLog) << QStringLiteral("启动阶段仅到 HikCameraC。");
+        return;
+    }
+
+    // stage>=3：海康 C 信号与视觉流水线均延后，让 FTP/TCP 的 singleShot(0) 先完成。
+    QTimer::singleShot(0, &application_, [this, startupStage]() {
+        if (hikCameraCController_ != nullptr) {
+            QObject::connect(
+                hikCameraCController_.get(),
+                &scan_tracking::vision::HikCameraCController::stateChanged,
+                [](scan_tracking::vision::HikCameraCState state, const QString& description) {
+                    qInfo(appLog) << QStringLiteral("[海康C控制器] 状态 =") << static_cast<int>(state) << description;
+                });
+            QObject::connect(
+                hikCameraCController_.get(),
+                &scan_tracking::vision::HikCameraCController::fatalError,
+                [](scan_tracking::vision::VisionErrorCode code, const QString& message) {
+                    qCritical(appLog) << QStringLiteral("[海康C控制器] 致命错误：")
+                                      << static_cast<int>(code) << message;
+                });
+            QObject::connect(
+                hikCameraCController_.get(),
+                &scan_tracking::vision::HikCameraCController::captureCompleted,
+                [](scan_tracking::vision::CaptureType type, const QByteArray& imageData) {
+                    qInfo(appLog) << QStringLiteral("[海康C控制器] 采集完成：")
+                                  << static_cast<int>(type) << imageData.size() << QStringLiteral("字节");
+                });
+        }
+        const auto* configManager = scan_tracking::common::ConfigManager::instance();
+        const auto visionConfig =
+            configManager != nullptr ? configManager->visionConfig() : scan_tracking::common::VisionConfig{};
+        initVisionFlowModules(startupStage, visionConfig);
+    });
+    qInfo(appLog) << QStringLiteral("[启动] initFlowModules 已调度视觉模块初始化。");
+}
+
+void ConsoleRuntime::initVisionFlowModules(
+    int startupStage,
+    scan_tracking::common::VisionConfig visionConfig)
+{
+    qInfo(appLog) << QStringLiteral("[启动] initVisionFlowModules 开始，stage=") << startupStage;
 
     // 统一视觉编排层负责把“1 份点云 + 2 份矩阵”收口为一个算法输入包。
+    qInfo(appLog) << QStringLiteral("[启动] 即将创建 VisionPipelineService...");
     visionPipelineService_ = std::make_unique<scan_tracking::vision::VisionPipelineService>(
         mechEyeService_.get(),
         hikCxpCameraAService_.get(),
-        hikCxpCameraBService_.get());
+        hikCxpCameraBService_.get(),
+        &application_);
+    qInfo(appLog) << QStringLiteral("[启动] VisionPipelineService 已创建。");
 
     QObject::connect(
         visionPipelineService_.get(),
@@ -424,15 +491,29 @@ void ConsoleRuntime::initModules()
     visionPipelineService_->start(visionConfig);
     qInfo(appLog) << QStringLiteral("视觉集成框架已启动。");
 
+    if (startupStage < 4) {
+        qInfo(appLog) << QStringLiteral("启动阶段仅到 VisionPipeline。");
+        return;
+    }
+
+    qInfo(appLog) << QStringLiteral("[启动] 即将创建 TrackingService...");
     trackingService_ = std::make_unique<scan_tracking::tracking::TrackingService>();
+    qInfo(appLog) << QStringLiteral("[启动] TrackingService 已创建。");
+
+    if (startupStage < 5) {
+        qInfo(appLog) << QStringLiteral("启动阶段仅到 Tracking。");
+        return;
+    }
 
     // StateMachine 是主流程编排核心，注入 Modbus / 视觉 / 跟踪等依赖
+    qInfo(appLog) << QStringLiteral("[启动] 即将创建 StateMachine...");
     stateMachine_ = std::make_unique<scan_tracking::flow_control::StateMachine>(
         modbusService_.get(),
         mechEyeService_.get(),
         visionPipelineService_.get(),
         trackingService_.get(),
         &application_);
+    qInfo(appLog) << QStringLiteral("[启动] StateMachine 已创建。");
 
     // HMI：先注入依赖并绑定信号，再 listen / 启动状态机，避免 start() 内重复 connect 或漏接早期事件
     const auto& hmiConfig = scan_tracking::common::ConfigManager::instance()->hmiConfig();

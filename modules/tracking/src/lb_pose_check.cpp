@@ -281,8 +281,13 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
 
         // 创建哈希索引对象并配置查询参数
         FastGeoHash geoHash(trackCfg.geo_hash.max_distance, trackCfg.geo_hash.min_distance);
+        const float angleToleranceDeg =
+            config.angleToleranceDeg > 0.0f ? config.angleToleranceDeg : 2.0f;
+        const float lengthTolerance =
+            config.lengthTolerance > 0.0f ? config.lengthTolerance : 0.5f;
+        const float minPercent = config.minPercent > 0.0f ? config.minPercent : 0.5f;
         if (geoHash.set_template_config(trackCfg.geo_hash.min_distance, trackCfg.geo_hash.max_distance) != 0 ||
-            geoHash.set_query_config(trackCfg.geo_hash.cos_tolerance, trackCfg.geo_hash.min_percent) != 0) {
+            geoHash.set_query_config(angleToleranceDeg, minPercent, lengthTolerance) != 0) {
             result.resultCode = 7;
             result.message = QStringLiteral("LB 位姿设置哈希配置失败。");
             qWarning(LOG_LB_POSE).noquote() << result.message;
@@ -317,8 +322,8 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
 
         const int trackResult = geoHash.Get_Track_Pose(
             recon.frame_3d_points,
-            trackCfg.geo_hash.cos_tolerance,
-            trackCfg.geo_hash.min_percent);
+            angleToleranceDeg,
+            minPercent);
 
         // 检查位姿估计结果
         if (trackResult != 0 || !isValidRt(geoHash.Rt_global)) {

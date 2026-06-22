@@ -29,7 +29,8 @@ public:
         const scan_tracking::common::VisionCameraEndpointConfig& endpointConfig,
         int defaultCaptureTimeoutMs,
         float exposureTimeUs = 50000.0f,
-        float gain = 0.0f);
+        float gain = 0.0f,
+        quint32 triggerMode = 1);
 
     /* 停止服务：关闭设备并拒绝新采集请求 */
     void stop();
@@ -77,6 +78,7 @@ private:
     int m_defaultCaptureTimeoutMs = 5000;
     float m_exposureTimeUs = 50000.0f;
     float m_gain = 0.0f;
+    quint32 m_triggerMode = 1;
     quint64 m_nextRequestId = 1;
     bool m_started = false;
     std::atomic_bool m_connectInFlight{false};

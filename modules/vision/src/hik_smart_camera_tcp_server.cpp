@@ -208,23 +208,39 @@ bool HikSmartCameraTcpServer::start(const QString& listenIp, quint16 port)
         return false;
     }
 
-    QHostAddress address(listenIp);
-    
     // 设置地址重用选项，允许快速重启
     m_tcpServer->setMaxPendingConnections(30);
-    
-    if (!m_tcpServer->listen(address, port)) {
-        QString errorMsg = m_tcpServer->errorString();
-        qCritical(hikTcpLog) << QStringLiteral("TCP 服务器启动失败") << listenIp << QStringLiteral(":") << port << QStringLiteral(" - ") << errorMsg;
-        emit error(QStringLiteral("TCP 服务器启动失败: %1").arg(errorMsg));
+
+    auto tryListen = [&](const QHostAddress& address, const QString& displayIp) -> bool {
+        if (m_tcpServer->listen(address, port)) {
+            startHeartbeatMonitor();
+            qInfo(hikTcpLog) << "TCP 服务器已启动，地址" << displayIp << ":" << port;
+            emit serverStarted(displayIp, port);
+            return true;
+        }
         return false;
+    };
+
+    const QHostAddress configuredAddress(listenIp);
+    if (!listenIp.trimmed().isEmpty() && !configuredAddress.isNull()) {
+        if (tryListen(configuredAddress, listenIp)) {
+            return true;
+        }
+        qWarning(hikTcpLog) << QStringLiteral("配置地址绑定失败，回退到 AnyIPv4")
+                            << listenIp << QStringLiteral(":") << port
+                            << QStringLiteral(" - ") << m_tcpServer->errorString();
     }
 
-    startHeartbeatMonitor();
+    if (tryListen(QHostAddress::AnyIPv4, QStringLiteral("0.0.0.0"))) {
+        return true;
+    }
 
-    qInfo(hikTcpLog) << "TCP 服务器已启动，地址" << listenIp << ":" << port;
-    emit serverStarted(listenIp, port);
-    return true;
+    QString errorMsg = m_tcpServer->errorString();
+    qCritical(hikTcpLog) << QStringLiteral("TCP 服务器启动失败")
+                         << listenIp << QStringLiteral(":") << port
+                         << QStringLiteral(" - ") << errorMsg;
+    emit error(QStringLiteral("TCP 服务器启动失败: %1").arg(errorMsg));
+    return false;
 }
 
 void HikSmartCameraTcpServer::stop()

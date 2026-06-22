@@ -208,18 +208,6 @@ QString buildLbDiagnosticText(
         text += formatPoint3fCsv(point) + QStringLiteral("\n");
     }
 
-    text += QStringLiteral("\n左目2D标记点中心数量: ")
-        + QString::number(recon.frame_2d_points_left.size()) + QStringLiteral("\n");
-    for (const cv::Point2f& point : recon.frame_2d_points_left) {
-        text += formatPoint2fCsvZeroZ(point) + QStringLiteral("\n");
-    }
-
-    text += QStringLiteral("\n右目2D标记点中心数量: ")
-        + QString::number(recon.frame_2d_points_right.size()) + QStringLiteral("\n");
-    for (const cv::Point2f& point : recon.frame_2d_points_right) {
-        text += formatPoint2fCsvZeroZ(point) + QStringLiteral("\n");
-    }
-
     text += QStringLiteral("\n对应点数量: ")
         + QString::number(geoHash.filtered_frame_3d_points.size()) + QStringLiteral("\n");
     text += QStringLiteral("标记点:\n");
@@ -227,11 +215,10 @@ QString buildLbDiagnosticText(
         text += formatPoint3fSpace(point) + QStringLiteral("\n");
     }
     text += QStringLiteral("\n模板点:\n");
-    for (const cv::Point3f& point : geoHash.corres_template_points) {
+    for (const cv::Point3f& point : geoHash.template_pnts) {
         text += formatPoint3fSpace(point) + QStringLiteral("\n");
     }
     text += QStringLiteral("\n");
-    text += formatCvMat4x8Block(QStringLiteral("Opt Rt (from Template to Vision) is:"), geoHash.Rt);
     text += formatCvMat4x8Block(QStringLiteral("scan_to_marker_RT is:"), geoHash.scan_to_marker_RT);
     text += formatCvMat4x8Block(
         QStringLiteral("Realtime Rt_global (from Scanner to Vision) is:"), geoHash.Rt_global);
@@ -304,7 +291,15 @@ LbPoseResult runLbPoseDetection(
         if (geoHash.set_template_config(trackCfg.geo_hash.min_distance, trackCfg.geo_hash.max_distance) != 0) {
             return makeFailure(QStringLiteral("设置 LB 模板配置失败（track_config.ini [GeoHash]）。"));
         }
-        if (geoHash.set_query_config(trackCfg.geo_hash.cos_tolerance, trackCfg.geo_hash.min_percent) != 0) {
+        const float angleToleranceDeg =
+            config.angleToleranceDeg > 0.0f ? config.angleToleranceDeg : trackCfg.geo_hash.angle_tolerance_deg;
+        const float lengthTolerance =
+            config.lengthTolerance > 0.0f ? config.lengthTolerance : trackCfg.geo_hash.length_tolerance;
+        const float minPercent = config.minPercent > 0.0f ? config.minPercent : trackCfg.geo_hash.min_percent;
+        if (geoHash.set_query_config(
+                angleToleranceDeg,
+                minPercent,
+                lengthTolerance) != 0) {
             return makeFailure(QStringLiteral("设置 LB 查询配置失败（track_config.ini [GeoHash]）。"));
         }
 
@@ -329,11 +324,19 @@ LbPoseResult runLbPoseDetection(
             return makeFailure(QStringLiteral("配置 LB scan_to_marker_RT 失败（track_config.ini [GeoHash]）。"));
         }
 
+        const int reconPointCount = static_cast<int>(recon.frame_3d_points.size());
         const int trackResult = geoHash.Get_Track_Pose(
             recon.frame_3d_points,
-            trackCfg.geo_hash.cos_tolerance,
-            trackCfg.geo_hash.min_percent);
+            angleToleranceDeg,
+            minPercent);
         if (trackResult != 0) {
+            qWarning(LOG_LB_POSE).noquote()
+                << QStringLiteral("LB Get_Track_Pose 失败 code=%1").arg(trackResult)
+                << QStringLiteral("三维重建点数=") << geoHash.track_pose_last_recon_count
+                << QStringLiteral("邻域滤波后=") << geoHash.track_pose_last_neighbor_filtered_count
+                << QStringLiteral("模板匹配点数=") << geoHash.track_pose_last_matched_count
+                << QStringLiteral("最少需要=") << geoHash.track_pose_last_min_pose_points
+                << QStringLiteral("当前重建点数(调用前)=") << reconPointCount;
             return makeFailure(QStringLiteral("LB 跟踪返回错误代码 %1。").arg(trackResult));
         }
 

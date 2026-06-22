@@ -531,6 +531,16 @@ private:
         const scan_tracking::mech_eye::PointCloudFrame& mergedCloud) const;
 
     bool ensureSegmentCaptureExportSessionRoot();
+    void exportSegmentCxp2dImages(
+        int segmentIndex,
+        const scan_tracking::vision::MultiCameraCaptureBundle& bundle);
+
+    int firstEnabledScanPathId() const;
+    int configuredFirstPathPauseAfterPoint() const;
+    void maybeLatchFirstPathStepPause(int pathId, int segmentIndex);
+    bool isFirstPathStepPauseBlocking(QString* errorMessage) const;
+    void clearFirstPathStepPauseLatch();
+
     void persistSegmentCaptureExportGroup(
         int pathId,
         int segmentIndex,
@@ -674,6 +684,8 @@ private:
     QMap<int, QMap<int, scan_tracking::vision::MultiCameraCaptureBundle>> m_pathSegmentCaptureBundles;  // 多路径视觉 bundle
     int m_currentPathId = 1;                                // 当前路径ID（自动递增）
     QSet<int> m_currentPathSegments;                        // 当前路径已缓存的段号集合（用于检测重复）
+    bool m_firstPathStepPauseLatched = false;               // 路径1联调：已达暂停点，拒绝后续扫描
+    int m_firstPathStepPauseAtSegment = 0;                  // 路径1联调：已暂停的点位号
     mutable std::mutex m_segmentCacheMutex;
     std::array<float, 16> m_baseCalibrationMatrix{};       // 基准 T0（来自 scan_paths_config.json）
     std::array<float, 16> m_currentCalibrationMatrix{};    // 当前 T0' / T0''（转动点由 LBN 链式更新）

@@ -31,6 +31,41 @@ std::string dailyLogFilePath(const std::string& log_dir, const QDate& date)
         + date.toString(QStringLiteral("yyyy-MM-dd")).toStdString() + ".txt";
 }
 
+std::string runLogFileBaseName(const QDateTime& start_time)
+{
+    return (QStringLiteral("scan_tracking_run_")
+            + start_time.toString(QStringLiteral("yyyy-MM-dd_HH-mm-ss"))
+            + QStringLiteral(".txt"))
+        .toStdString();
+}
+
+std::string runLogFilePath(const std::string& log_dir, const QDateTime& start_time)
+{
+    return log_dir + '/' + runLogFileBaseName(start_time);
+}
+
+std::string resolveUniqueRunLogFilePath(const std::string& log_dir, const QDateTime& start_time)
+{
+    std::string candidate = runLogFilePath(log_dir, start_time);
+    if (!std::filesystem::exists(candidate)) {
+        return candidate;
+    }
+
+    const std::string base_name = runLogFileBaseName(start_time);
+    const std::size_t dot_pos = base_name.rfind('.');
+    const std::string stem = base_name.substr(0, dot_pos);
+    const std::string extension = base_name.substr(dot_pos);
+
+    for (int suffix = 2; suffix < 1000; ++suffix) {
+        candidate = log_dir + '/' + stem + '_' + std::to_string(suffix) + extension;
+        if (!std::filesystem::exists(candidate)) {
+            return candidate;
+        }
+    }
+
+    return runLogFilePath(log_dir, start_time);
+}
+
 bool ensureLogDirectory(const std::string& log_dir)
 {
     if (log_dir.empty()) {
@@ -127,14 +162,30 @@ Logger::Logger(const QString& log_dir)
     if (!ensureLogDirectory(log_dir_)) {
         std::cerr << "严重错误：Logger 无法创建日志目录：" << log_dir_ << "\n";
     }
-    openLogFile(QDate::currentDate());
+    const QDateTime start_time = QDateTime::currentDateTime();
+    openDailyLogFile(start_time.date());
+    openRunLogFile(start_time);
 }
 
 Logger::~Logger()
 {
-    if (log_file_ != nullptr) {
-        std::fclose(log_file_);
-        log_file_ = nullptr;
+    if (run_log_file_ != nullptr) {
+        const std::string end_stamp =
+            QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")).toStdString();
+        const std::string footer = buildLogLine(
+            end_stamp.c_str(),
+            "INF",
+            "logger",
+            "===== 进程会话结束 =====",
+            nullptr);
+        writeLogLineToFile(run_log_file_, footer);
+        std::fclose(run_log_file_);
+        run_log_file_ = nullptr;
+    }
+
+    if (daily_log_file_ != nullptr) {
+        std::fclose(daily_log_file_);
+        daily_log_file_ = nullptr;
     }
 }
 
@@ -202,7 +253,18 @@ const char* Logger::getLogSeverity(QtMsgType type)
     }
 }
 
-void Logger::openLogFile(const QDate& target_date)
+void Logger::writeLogLineToFile(FILE* file, const std::string& line)
+{
+    if (file == nullptr) {
+        return;
+    }
+
+    std::fwrite(line.c_str(), 1, line.size(), file);
+    std::fwrite("\r\n", 1, 2, file);
+    std::fflush(file);
+}
+
+void Logger::openDailyLogFile(const QDate& target_date)
 {
     if (!target_date.isValid()) {
         return;
@@ -210,24 +272,55 @@ void Logger::openLogFile(const QDate& target_date)
 
     const std::string file_path = dailyLogFilePath(log_dir_, target_date);
 
-    if (log_file_ != nullptr) {
-        std::fclose(log_file_);
-        log_file_ = nullptr;
+    if (daily_log_file_ != nullptr) {
+        std::fclose(daily_log_file_);
+        daily_log_file_ = nullptr;
     }
 
-    log_file_ = std::fopen(file_path.c_str(), "ab");
-    if (log_file_ == nullptr) {
-        std::cerr << "严重错误：Logger 无法打开目标文件：" << file_path << "\n";
+    daily_log_file_ = std::fopen(file_path.c_str(), "ab");
+    if (daily_log_file_ == nullptr) {
+        std::cerr << "严重错误：Logger 无法打开日日志文件：" << file_path << "\n";
         return;
     }
 
-    std::fseek(log_file_, 0, SEEK_END);
-    if (std::ftell(log_file_) == 0) {
-        std::fwrite(kUtf8Bom, 1, 3, log_file_);
-        std::fflush(log_file_);
+    std::fseek(daily_log_file_, 0, SEEK_END);
+    if (std::ftell(daily_log_file_) == 0) {
+        std::fwrite(kUtf8Bom, 1, 3, daily_log_file_);
+        std::fflush(daily_log_file_);
     }
 
     current_date_ = target_date;
+}
+
+void Logger::openRunLogFile(const QDateTime& start_time)
+{
+    if (!start_time.isValid()) {
+        return;
+    }
+
+    if (run_log_file_ != nullptr) {
+        std::fclose(run_log_file_);
+        run_log_file_ = nullptr;
+    }
+
+    const std::string file_path = resolveUniqueRunLogFilePath(log_dir_, start_time);
+    run_log_file_ = std::fopen(file_path.c_str(), "wb");
+    if (run_log_file_ == nullptr) {
+        std::cerr << "严重错误：Logger 无法打开运行日志文件：" << file_path << "\n";
+        return;
+    }
+
+    std::fwrite(kUtf8Bom, 1, 3, run_log_file_);
+    std::fflush(run_log_file_);
+
+    const std::string start_stamp = start_time.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")).toStdString();
+    const std::string header = buildLogLine(
+        start_stamp.c_str(),
+        "INF",
+        "logger",
+        ("===== 进程会话开始 | 日志文件: " + file_path + " =====").c_str(),
+        nullptr);
+    writeLogLineToFile(run_log_file_, header);
 }
 
 void Logger::messageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg)
@@ -264,7 +357,7 @@ void Logger::log(QtMsgType type, const QMessageLogContext& context, const QStrin
 
     const QDateTime now = QDateTime::currentDateTime();
     if (now.date() != current_date_) {
-        openLogFile(now.date());
+        openDailyLogFile(now.date());
     }
 
     const std::string time_stamp = now.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")).toStdString();
@@ -278,11 +371,8 @@ void Logger::log(QtMsgType type, const QMessageLogContext& context, const QStrin
         msg_utf8.constData(),
         suffix.empty() ? nullptr : suffix.c_str());
 
-    if (log_file_ != nullptr) {
-        std::fwrite(line.c_str(), 1, line.size(), log_file_);
-        std::fwrite("\r\n", 1, 2, log_file_);
-        std::fflush(log_file_);
-    }
+    writeLogLineToFile(daily_log_file_, line);
+    writeLogLineToFile(run_log_file_, line);
 
     writeConsoleLine(type, line.c_str(), line.size());
 }

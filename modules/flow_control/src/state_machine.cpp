@@ -375,6 +375,58 @@ QString mono8SampleHex(const scan_tracking::vision::HikMonoFrame& frame, int ind
     return QStringLiteral("0x%1").arg(pixels[static_cast<std::size_t>(index)], 2, 16, QChar('0'));
 }
 
+QString sanitizeFileNameComponent(const QString& value)
+{
+    QString sanitized;
+    sanitized.reserve(value.size());
+    for (const QChar ch : value.trimmed()) {
+        if (ch.isLetterOrNumber() || ch == QLatin1Char('_') || ch == QLatin1Char('-')) {
+            sanitized.append(ch);
+        } else if (ch.isSpace() || ch == QLatin1Char('.')) {
+            sanitized.append(QLatin1Char('_'));
+        }
+    }
+    return sanitized.isEmpty() ? QStringLiteral("unknown") : sanitized;
+}
+
+QString resolveCxpExportCameraTag(
+    const scan_tracking::vision::HikPoseCaptureResult& result,
+    const QString& fallbackSide)
+{
+    if (!result.logicalName.trimmed().isEmpty()) {
+        return sanitizeFileNameComponent(result.logicalName);
+    }
+    if (!result.cameraKey.trimmed().isEmpty()) {
+        return sanitizeFileNameComponent(result.cameraKey);
+    }
+    if (result.frame.isValid() && !result.frame.sourceCameraKey.trimmed().isEmpty()) {
+        return sanitizeFileNameComponent(result.frame.sourceCameraKey);
+    }
+    return fallbackSide;
+}
+
+QString formatCxpCaptureTimestampTag(qint64 timestampMs)
+{
+    const qint64 effectiveTs =
+        timestampMs > 0 ? timestampMs : QDateTime::currentMSecsSinceEpoch();
+    return QDateTime::fromMSecsSinceEpoch(effectiveTs)
+        .toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
+}
+
+QString resolveSegmentCaptureFlatOutputRoot()
+{
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    const QString configuredRoot = configManager != nullptr
+        ? configManager->segmentCaptureExportConfig().outputRoot
+        : QStringLiteral("output");
+    const QString outputRoot = configuredRoot.trimmed().isEmpty()
+        ? QStringLiteral("output")
+        : configuredRoot;
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    return QFileInfo(outputRoot).isAbsolute() ? outputRoot : QDir(appDir).filePath(outputRoot);
+}
+
 QString buildSegmentCaptureExportGroupId(int pathId, int segmentIndex, quint64 requestId)
 {
     return QStringLiteral("path%1_seg%2_req%3")
@@ -471,12 +523,124 @@ QString resolveCxpCaptureFileTimestamp(
     if (captureTs <= 0) {
         captureTs = QDateTime::currentMSecsSinceEpoch();
     }
-    return QDateTime::fromMSecsSinceEpoch(captureTs).toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
+    return formatCxpCaptureTimestampTag(captureTs);
 }
 
-QString buildCxpCaptureFileName(const QString& sideTag, const QString& timestampTag)
+QString buildCxpCaptureFileName(const QString& cameraTag, const QString& timestampTag)
 {
-    return QStringLiteral("%1_%2.bmp").arg(sideTag, timestampTag);
+    return QStringLiteral("%1_%2.bmp").arg(cameraTag, timestampTag);
+}
+
+SegmentCaptureCxpExportMeta saveSegmentCxp2dImagesToFlatOutput(
+    const scan_tracking::vision::MultiCameraCaptureBundle& bundle)
+{
+    SegmentCaptureCxpExportMeta cxpExportMeta;
+    cxpExportMeta.captureFileTimestamp = resolveCxpCaptureFileTimestamp(bundle);
+
+    const QString outputRoot = resolveSegmentCaptureFlatOutputRoot();
+    if (!ensureDirectoryTreeExists(outputRoot)) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[SegmentCaptureExport] 创建 2D 输出目录失败：") << outputRoot;
+        return cxpExportMeta;
+    }
+
+    if (bundle.hikCameraAResult.success() && bundle.hikCameraAResult.frame.isValid()) {
+        const QString leftTag =
+            resolveCxpExportCameraTag(bundle.hikCameraAResult, QStringLiteral("left"));
+        const QString leftTimestamp = formatCxpCaptureTimestampTag(
+            bundle.hikCameraAResult.frame.timestampMs);
+        const QString leftFileName = buildCxpCaptureFileName(leftTag, leftTimestamp);
+        const QString leftPath = QDir(outputRoot).filePath(leftFileName);
+        const QString savedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+        const bool cxpLeftSaved = scan_tracking::vision::saveHikMonoFrameToBmp(
+            bundle.hikCameraAResult.frame, leftPath);
+        const qint64 savedFileBytes = cxpLeftSaved ? QFileInfo(leftPath).size() : 0;
+        const QString savedFileMd5 = cxpLeftSaved ? md5HexFromFile(leftPath) : QStringLiteral("(not-saved)");
+        cxpExportMeta.left = buildCxpImageMetaFromCapture(
+            bundle.hikCameraAResult, leftFileName, cxpLeftSaved, savedAt, savedFileBytes, savedFileMd5);
+        if (cxpLeftSaved) {
+            logSegmentCaptureCxpImageSaved(
+                QStringLiteral("左"), leftFileName, leftPath, cxpExportMeta.left);
+        } else {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("[SegmentCaptureExport] 左目 BMP 写入失败：") << leftPath
+                << QStringLiteral("frameId=") << cxpExportMeta.left.frameId
+                << QStringLiteral("pixelMd5=") << cxpExportMeta.left.pixelMd5;
+        }
+    }
+
+    if (bundle.hikCameraBResult.success() && bundle.hikCameraBResult.frame.isValid()) {
+        const QString rightTag =
+            resolveCxpExportCameraTag(bundle.hikCameraBResult, QStringLiteral("right"));
+        const QString rightTimestamp = formatCxpCaptureTimestampTag(
+            bundle.hikCameraBResult.frame.timestampMs);
+        const QString rightFileName = buildCxpCaptureFileName(rightTag, rightTimestamp);
+        const QString rightPath = QDir(outputRoot).filePath(rightFileName);
+        const QString savedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+        const bool cxpRightSaved = scan_tracking::vision::saveHikMonoFrameToBmp(
+            bundle.hikCameraBResult.frame, rightPath);
+        const qint64 savedFileBytes = cxpRightSaved ? QFileInfo(rightPath).size() : 0;
+        const QString savedFileMd5 = cxpRightSaved ? md5HexFromFile(rightPath) : QStringLiteral("(not-saved)");
+        cxpExportMeta.right = buildCxpImageMetaFromCapture(
+            bundle.hikCameraBResult, rightFileName, cxpRightSaved, savedAt, savedFileBytes, savedFileMd5);
+        if (cxpRightSaved) {
+            logSegmentCaptureCxpImageSaved(
+                QStringLiteral("右"), rightFileName, rightPath, cxpExportMeta.right);
+        } else {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("[SegmentCaptureExport] 右目 BMP 写入失败：") << rightPath
+                << QStringLiteral("frameId=") << cxpExportMeta.right.frameId
+                << QStringLiteral("pixelMd5=") << cxpExportMeta.right.pixelMd5;
+        }
+    }
+
+    return cxpExportMeta;
+}
+
+SegmentCaptureCxpExportMeta buildCxpExportMetaFromFlatOutput(
+    const scan_tracking::vision::MultiCameraCaptureBundle& bundle)
+{
+    SegmentCaptureCxpExportMeta cxpExportMeta;
+    cxpExportMeta.captureFileTimestamp = resolveCxpCaptureFileTimestamp(bundle);
+    const QString outputRoot = resolveSegmentCaptureFlatOutputRoot();
+
+    if (bundle.hikCameraAResult.success() && bundle.hikCameraAResult.frame.isValid()) {
+        const QString leftTag =
+            resolveCxpExportCameraTag(bundle.hikCameraAResult, QStringLiteral("left"));
+        const QString leftTimestamp = formatCxpCaptureTimestampTag(
+            bundle.hikCameraAResult.frame.timestampMs);
+        const QString leftFileName = buildCxpCaptureFileName(leftTag, leftTimestamp);
+        const QString leftPath = QDir(outputRoot).filePath(leftFileName);
+        const bool saved = QFileInfo::exists(leftPath);
+        const QString savedAt =
+            saved
+                ? QFileInfo(leftPath).lastModified().toString(Qt::ISODateWithMs)
+                : QString();
+        const qint64 savedFileBytes = saved ? QFileInfo(leftPath).size() : 0;
+        const QString savedFileMd5 = saved ? md5HexFromFile(leftPath) : QStringLiteral("(not-saved)");
+        cxpExportMeta.left = buildCxpImageMetaFromCapture(
+            bundle.hikCameraAResult, leftFileName, saved, savedAt, savedFileBytes, savedFileMd5);
+    }
+
+    if (bundle.hikCameraBResult.success() && bundle.hikCameraBResult.frame.isValid()) {
+        const QString rightTag =
+            resolveCxpExportCameraTag(bundle.hikCameraBResult, QStringLiteral("right"));
+        const QString rightTimestamp = formatCxpCaptureTimestampTag(
+            bundle.hikCameraBResult.frame.timestampMs);
+        const QString rightFileName = buildCxpCaptureFileName(rightTag, rightTimestamp);
+        const QString rightPath = QDir(outputRoot).filePath(rightFileName);
+        const bool saved = QFileInfo::exists(rightPath);
+        const QString savedAt =
+            saved
+                ? QFileInfo(rightPath).lastModified().toString(Qt::ISODateWithMs)
+                : QString();
+        const qint64 savedFileBytes = saved ? QFileInfo(rightPath).size() : 0;
+        const QString savedFileMd5 = saved ? md5HexFromFile(rightPath) : QStringLiteral("(not-saved)");
+        cxpExportMeta.right = buildCxpImageMetaFromCapture(
+            bundle.hikCameraBResult, rightFileName, saved, savedAt, savedFileBytes, savedFileMd5);
+    }
+
+    return cxpExportMeta;
 }
 
 QString buildSegmentCaptureExportMetaText(
@@ -502,6 +666,7 @@ QString buildSegmentCaptureExportMetaText(
     text += QStringLiteral("cxpLeftKey=") + bundle.request.hikCameraAKey + QStringLiteral("\n");
     text += QStringLiteral("cxpRightKey=") + bundle.request.hikCameraBKey + QStringLiteral("\n");
     text += QStringLiteral("cxpCaptureFileTimestamp=") + cxpExportMeta.captureFileTimestamp + QStringLiteral("\n");
+    text += QStringLiteral("cxp2dOutputRoot=") + resolveSegmentCaptureFlatOutputRoot() + QStringLiteral("\n");
     text += QStringLiteral("cxpLeftFileName=") + cxpExportMeta.left.fileName + QStringLiteral("\n");
     text += QStringLiteral("cxpRightFileName=") + cxpExportMeta.right.fileName + QStringLiteral("\n");
     text += QStringLiteral("lbInvoked=") + QString(bundle.lbPoseResult.invoked ? "true" : "false") + QStringLiteral("\n");
@@ -1510,7 +1675,11 @@ void StateMachine::processTrigger(const protocol::TriggerDefinition& trigger, co
         if (m_selfCheckSessionActive) {
             m_activeTask.scanSegmentTotal = segmentTotalForPath(kSelfCheckCacheBucketId);
         } else {
-            m_activeTask.scanSegmentTotal = cfgMgr ? cfgMgr->trackingConfig().scanSegmentTotal : 1;
+            const int pathId = resolvePathIdForIncomingSegment(m_activeTask.scanSegmentIndex);
+            const int pathTotal = segmentTotalForPath(pathId);
+            m_activeTask.scanSegmentTotal = pathTotal > 0
+                ? pathTotal
+                : (cfgMgr ? cfgMgr->trackingConfig().scanSegmentTotal : 1);
         }
     }
     m_activeTask.completionAnnounced = false;  // 重置完成宣告标志
@@ -1821,6 +1990,8 @@ void StateMachine::commitScanSegmentCaptureImmediate(
     m_progress = 100;
     publishIpcStatus();
 
+    exportSegmentCxp2dImages(segmentIndex, bundle);
+
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[SegmentCache] 原始点云已入内存（results/bundle 共享同一份点云），立即回写 PLC")
         << QStringLiteral(" [路径") << pathId << QStringLiteral("][段") << segmentIndex << QStringLiteral("]")
@@ -1830,6 +2001,30 @@ void StateMachine::commitScanSegmentCaptureImmediate(
 
     completeActiveTask(1);
     emit scanFinished(segmentIndex, 1, imageCount, cloudFrameCount);
+
+    maybeLatchFirstPathStepPause(pathId, segmentIndex);
+}
+
+void StateMachine::exportSegmentCxp2dImages(
+    int segmentIndex,
+    const scan_tracking::vision::MultiCameraCaptureBundle& bundle)
+{
+    if (segmentIndex <= 0) {
+        return;
+    }
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr || !configManager->segmentCaptureExportConfig().enabled) {
+        return;
+    }
+
+    const auto cxpExportMeta = saveSegmentCxp2dImagesToFlatOutput(bundle);
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[SegmentCaptureExport] 段号=") << segmentIndex
+        << QStringLiteral(" 2D输出目录=") << resolveSegmentCaptureFlatOutputRoot()
+        << QStringLiteral(" 左=")
+        << (cxpExportMeta.left.saved ? cxpExportMeta.left.fileName : QStringLiteral("(skip)"))
+        << QStringLiteral(" 右=")
+        << (cxpExportMeta.right.saved ? cxpExportMeta.right.fileName : QStringLiteral("(skip)"));
 }
 
 void StateMachine::commitBypassScanSegmentCapture(
@@ -1866,6 +2061,8 @@ void StateMachine::commitBypassScanSegmentCapture(
     m_progress = 100;
     publishIpcStatus();
 
+    exportSegmentCxp2dImages(segmentIndex, bundle);
+
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[算法旁路] 采集完成，点云已丢弃不入缓存")
         << QStringLiteral(" [路径") << pathId << QStringLiteral("][段") << segmentIndex << QStringLiteral("]")
@@ -1875,6 +2072,8 @@ void StateMachine::commitBypassScanSegmentCapture(
 
     completeActiveTask(1);
     emit scanFinished(segmentIndex, 1, imageCount, cloudFrameCount);
+
+    maybeLatchFirstPathStepPause(pathId, segmentIndex);
 }
 
 void StateMachine::registerRefinementJob()
@@ -2366,6 +2565,67 @@ QString StateMachine::multiPathCacheStatusText() const
         .arg(expectedTotal)
         .arg(pathParts.join(QLatin1Char(',')))
         .arg(m_currentPathId);
+}
+
+int StateMachine::firstEnabledScanPathId() const
+{
+    const QVector<int> pathIds = enabledScanPathIds();
+    if (pathIds.isEmpty()) {
+        return 1;
+    }
+    return pathIds.front();
+}
+
+int StateMachine::configuredFirstPathPauseAfterPoint() const
+{
+    const auto* configMgr = scan_tracking::common::ConfigManager::instance();
+    if (configMgr == nullptr) {
+        return 0;
+    }
+    return qMax(0, configMgr->flowControlConfig().firstPathPauseAfterPoint);
+}
+
+void StateMachine::clearFirstPathStepPauseLatch()
+{
+    m_firstPathStepPauseLatched = false;
+    m_firstPathStepPauseAtSegment = 0;
+}
+
+bool StateMachine::isFirstPathStepPauseBlocking(QString* errorMessage) const
+{
+    if (!m_firstPathStepPauseLatched) {
+        return false;
+    }
+
+    if (errorMessage != nullptr) {
+        *errorMessage = QStringLiteral(
+            "路径1联调暂停：已完成第 %1 点（CXP+梅卡已落盘）。"
+            "请将 config.ini [FlowControl] firstPathPauseAfterPoint 改为 0 跑完全流程，"
+            "或改为更大值后重启 IPC 再拍下一点；也可 Trig_ResultReset 后重扫。")
+                            .arg(m_firstPathStepPauseAtSegment);
+    }
+    return true;
+}
+
+void StateMachine::maybeLatchFirstPathStepPause(int pathId, int segmentIndex)
+{
+    const int pauseAfterPoint = configuredFirstPathPauseAfterPoint();
+    if (pauseAfterPoint <= 0) {
+        return;
+    }
+    if (pathId != firstEnabledScanPathId() || segmentIndex != pauseAfterPoint) {
+        return;
+    }
+
+    m_firstPathStepPauseLatched = true;
+    m_firstPathStepPauseAtSegment = segmentIndex;
+
+    qWarning(LOG_FLOW).noquote()
+        << QStringLiteral("[路径1联调] 已完成第") << segmentIndex
+        << QStringLiteral("点采集与 CXP 落盘，流程暂停。")
+        << QStringLiteral("后续 Trig_ScanSegment 将被拒绝，直至 firstPathPauseAfterPoint=0")
+        << QStringLiteral("或调大后重启 IPC，或执行 Trig_ResultReset。");
+    publishIpcStatus();
 }
 
 int StateMachine::resolvePathIdForIncomingSegment(int segmentIndex) const
@@ -3766,6 +4026,7 @@ void StateMachine::resetScanSegmentCache()
     // 重置路径上下文
     m_currentPathId = 1;
     m_currentPathSegments.clear();
+    clearFirstPathStepPauseLatch();
 
     if (totalCacheSize > 0) {
         qInfo(LOG_FLOW).noquote()
@@ -4333,9 +4594,9 @@ bool StateMachine::ensureSegmentCaptureExportSessionRoot()
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
     const QString configuredRoot = configManager != nullptr
         ? configManager->segmentCaptureExportConfig().outputRoot
-        : QStringLiteral("output/segment_capture");
+        : QStringLiteral("output");
     const QString outputRoot = configuredRoot.trimmed().isEmpty()
-        ? QStringLiteral("output/segment_capture")
+        ? QStringLiteral("output")
         : configuredRoot;
 
     const QString appDir = QCoreApplication::applicationDirPath();
@@ -4391,55 +4652,10 @@ void StateMachine::persistSegmentCaptureExportGroup(
         return;
     }
 
-    SegmentCaptureCxpExportMeta cxpExportMeta;
+    SegmentCaptureCxpExportMeta cxpExportMeta = buildCxpExportMetaFromFlatOutput(bundle);
     cxpExportMeta.exportGroupId =
         buildSegmentCaptureExportGroupId(pathId, segmentIndex, bundle.request.requestId);
     cxpExportMeta.sessionRoot = m_segmentCaptureExportSessionRoot;
-
-    const QString cxpCaptureTimestamp = resolveCxpCaptureFileTimestamp(bundle);
-    cxpExportMeta.captureFileTimestamp = cxpCaptureTimestamp;
-    const QString leftFileName = buildCxpCaptureFileName(QStringLiteral("left"), cxpCaptureTimestamp);
-    const QString rightFileName = buildCxpCaptureFileName(QStringLiteral("right"), cxpCaptureTimestamp);
-    if (bundle.hikCameraAResult.success() && bundle.hikCameraAResult.frame.isValid()) {
-        const QString leftPath = QDir(groupDir).filePath(leftFileName);
-        const QString savedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-        const bool cxpLeftSaved = scan_tracking::vision::saveHikMonoFrameToBmp(
-            bundle.hikCameraAResult.frame, leftPath);
-        const qint64 savedFileBytes = cxpLeftSaved ? QFileInfo(leftPath).size() : 0;
-        const QString savedFileMd5 = cxpLeftSaved ? md5HexFromFile(leftPath) : QStringLiteral("(not-saved)");
-        cxpExportMeta.left = buildCxpImageMetaFromCapture(
-            bundle.hikCameraAResult, leftFileName, cxpLeftSaved, savedAt, savedFileBytes, savedFileMd5);
-        if (cxpLeftSaved) {
-            logSegmentCaptureCxpImageSaved(
-                QStringLiteral("左"), cxpExportMeta.exportGroupId, leftPath, cxpExportMeta.left);
-        } else {
-            qWarning(LOG_FLOW).noquote()
-                << QStringLiteral("[SegmentCaptureExport] 左目 BMP 写入失败：") << leftPath
-                << QStringLiteral("group=") << cxpExportMeta.exportGroupId
-                << QStringLiteral("frameId=") << cxpExportMeta.left.frameId
-                << QStringLiteral("pixelMd5=") << cxpExportMeta.left.pixelMd5;
-        }
-    }
-    if (bundle.hikCameraBResult.success() && bundle.hikCameraBResult.frame.isValid()) {
-        const QString rightPath = QDir(groupDir).filePath(rightFileName);
-        const QString savedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-        const bool cxpRightSaved = scan_tracking::vision::saveHikMonoFrameToBmp(
-            bundle.hikCameraBResult.frame, rightPath);
-        const qint64 savedFileBytes = cxpRightSaved ? QFileInfo(rightPath).size() : 0;
-        const QString savedFileMd5 = cxpRightSaved ? md5HexFromFile(rightPath) : QStringLiteral("(not-saved)");
-        cxpExportMeta.right = buildCxpImageMetaFromCapture(
-            bundle.hikCameraBResult, rightFileName, cxpRightSaved, savedAt, savedFileBytes, savedFileMd5);
-        if (cxpRightSaved) {
-            logSegmentCaptureCxpImageSaved(
-                QStringLiteral("右"), cxpExportMeta.exportGroupId, rightPath, cxpExportMeta.right);
-        } else {
-            qWarning(LOG_FLOW).noquote()
-                << QStringLiteral("[SegmentCaptureExport] 右目 BMP 写入失败：") << rightPath
-                << QStringLiteral("group=") << cxpExportMeta.exportGroupId
-                << QStringLiteral("frameId=") << cxpExportMeta.right.frameId
-                << QStringLiteral("pixelMd5=") << cxpExportMeta.right.pixelMd5;
-        }
-    }
 
     const QString matrixPath = QDir(groupDir).filePath(QStringLiteral("matrix.txt"));
     if (!writeTextFileIfPossible(matrixPath, buildSegmentPoseStitchRtText(stitchRecord))) {
@@ -4462,36 +4678,20 @@ void StateMachine::persistSegmentCaptureExportGroup(
             << QStringLiteral("[SegmentCaptureExport] meta 写入失败：") << metaPath;
     }
 
-    bool rawSaved = false;
-    if (configManager->segmentCaptureExportConfig().saveRawPointCloud && rawPointCloud.isValid()) {
-        const QString rawPath = QDir(groupDir).filePath(QStringLiteral("pointcloud_raw.ply"));
-        rawSaved = scan_tracking::mech_eye::savePointCloudFrameToPly(rawPointCloud, rawPath);
-        if (!rawSaved) {
-            qWarning(LOG_FLOW).noquote()
-                << QStringLiteral("[SegmentCaptureExport] 原始点云写入失败：") << rawPath;
-        }
-    }
-
-    bool stitchedSaved = false;
-    if (stitchedPointCloud.isValid()) {
-        const QString stitchedPath = QDir(groupDir).filePath(QStringLiteral("pointcloud_stitched.ply"));
-        stitchedSaved =
-            scan_tracking::mech_eye::savePointCloudFrameToPly(stitchedPointCloud, stitchedPath);
-        if (!stitchedSaved) {
-            qWarning(LOG_FLOW).noquote()
-                << QStringLiteral("[SegmentCaptureExport] 拼接点云写入失败：") << stitchedPath;
-        }
-    }
+    // 调试模式下点云只参与算法流程，不再落盘；保留内存处理与后续释放。
+    const bool rawSaved = false;
+    const bool stitchedSaved = false;
 
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[SegmentCaptureExport] 分组已写入") << groupDir
         << QStringLiteral(" group=") << cxpExportMeta.exportGroupId
+        << QStringLiteral(" 2D输出=") << resolveSegmentCaptureFlatOutputRoot()
         << QStringLiteral(" CXP左=") << (cxpExportMeta.left.saved ? QStringLiteral("OK") : QStringLiteral("FAIL"))
         << QStringLiteral(" CXP右=") << (cxpExportMeta.right.saved ? QStringLiteral("OK") : QStringLiteral("FAIL"))
         << QStringLiteral(" 左pixelMd5=") << cxpExportMeta.left.pixelMd5
         << QStringLiteral(" 右pixelMd5=") << cxpExportMeta.right.pixelMd5
         << QStringLiteral(" 原始PLY=") << (rawSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"))
-        << QStringLiteral(" 拼接PLY=") << (stitchedSaved ? QStringLiteral("OK") : QStringLiteral("FAIL"));
+        << QStringLiteral(" 拼接PLY=") << (stitchedSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"));
 }
 
 /**
@@ -4687,6 +4887,12 @@ quint16 StateMachine::resolveScanSegmentIndex(const QVector<quint16>& commandBlo
  */
 bool StateMachine::validateScanSegmentRequest(const QVector<quint16>& commandBlock, QString* errorMessage)
 {
+    if (isFirstPathStepPauseBlocking(errorMessage)) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("拒绝 Trig_ScanSegment：") << (errorMessage != nullptr ? *errorMessage : QString());
+        return false;
+    }
+
     const int segmentIndex = resolveScanSegmentIndex(commandBlock);  // 获取分段索引（32位合并）
     if (segmentIndex < 1 || segmentIndex > kMaxScanSegmentIndex) {
         if (errorMessage != nullptr) {

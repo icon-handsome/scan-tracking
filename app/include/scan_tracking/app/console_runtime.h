@@ -15,6 +15,7 @@
 
 class QTimer;
 
+#include "scan_tracking/common/config_manager.h"
 #include "scan_tracking/livox_mid360/livox_mid360_service.h"
 #include "scan_tracking/orbbec_gemini/orbbec_gemini_service.h"
 #include "scan_tracking/tfmini_plus/tfmini_plus_service.h"
@@ -50,6 +51,12 @@ private:
 
     /* 按 startupStage 分级创建模块、连接信号、启动服务 */
     void initModules();
+
+    /* 在事件循环启动后初始化海康 C（避免与 MechEye SDK 同步初始化冲突） */
+    void initFlowModules(int startupStage, scan_tracking::common::VisionConfig visionConfig);
+
+    /* 视觉流水线 / 跟踪 / 状态机：再延迟一轮事件循环，避开 SDK 加载后的堆不稳定窗口 */
+    void initVisionFlowModules(int startupStage, scan_tracking::common::VisionConfig visionConfig);
 
     /* [Debug] 自动延时测试：读取 config.ini 并调度定时器 */
     void scheduleAutoLatencyBundleTest();

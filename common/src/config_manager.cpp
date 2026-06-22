@@ -442,6 +442,7 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("hikCxpCaptureTimeoutMs", 5000);
     settings.setValue("hikCxpExposureTimeUs", 50000);
     settings.setValue("hikCxpGain", 0.0);
+    settings.setValue("hikCxpTriggerMode", 1);
     settings.setValue("hikCxpSmokeOutputDir", "D:/CxpSmokeTest");
     settings.setValue("hikCxpCameraAName", "ch250_left");
     settings.setValue("hikCxpCameraAKey", "DA9122998");
@@ -459,6 +460,10 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("leftPattern", "");
     settings.setValue("rightPattern", "");
     settings.setValue("templateFile", QStringLiteral("third_party/LB/template_for_scanner_ori.txt"));
+    settings.setValue("angleToleranceDeg", 2.0);
+    settings.setValue("lengthTolerance", 0.5);
+    settings.setValue("minPercent", 0.5);
+    settings.setValue("cosTolerance", 0.015);
     settings.endGroup();
 
     // 首次生成 config.ini 时的 [LbnPose] 默认（与 150200 离线验收一致，生产宜再标定）
@@ -483,11 +488,12 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("heartbeatIntervalMs", 1000);
     settings.setValue("simulatedProcessingMs", 300);
     settings.setValue("algorithmBypassEnabled", false);
+    settings.setValue("firstPathPauseAfterPoint", 0);
     settings.endGroup();
 
     settings.beginGroup("SegmentCaptureExport");
     settings.setValue("enabled", true);
-    settings.setValue("outputRoot", QStringLiteral("output/segment_capture"));
+    settings.setValue("outputRoot", QStringLiteral("output"));
     settings.setValue("saveRawPointCloud", true);
     settings.endGroup();
 
@@ -672,6 +678,8 @@ void ConfigManager::load(const QString& filePath)
     m_visionConfig.hikCxpExposureTimeUs =
         static_cast<float>(settings.value("hikCxpExposureTimeUs", 50000).toDouble());
     m_visionConfig.hikCxpGain = static_cast<float>(settings.value("hikCxpGain", 0.0).toDouble());
+    m_visionConfig.hikCxpTriggerMode =
+        settings.value("hikCxpTriggerMode", 1).toUInt();
     m_visionConfig.hikCxpSmokeOutputDir =
         settings.value("hikCxpSmokeOutputDir", "D:/CxpSmokeTest").toString();
     m_visionConfig.hikCxpCameraA.logicalName =
@@ -709,6 +717,10 @@ void ConfigManager::load(const QString& filePath)
             QStringLiteral("third_party/LB/template_for_scanner_ori.txt"))
             .toString(),
         m_configFilePath);
+    const float legacyCosTolerance = settings.value("cosTolerance", 0.015).toFloat();
+    m_lbPoseConfig.angleToleranceDeg = settings.value("angleToleranceDeg", legacyCosTolerance).toFloat();
+    m_lbPoseConfig.lengthTolerance = settings.value("lengthTolerance", 0.5).toFloat();
+    m_lbPoseConfig.minPercent = settings.value("minPercent", 0.5).toFloat();
     settings.endGroup();
 
     // [LbnPose] 默认值与 testdata/test 150200 离线调通一致；上线前请多扫描验证，见 docs/station1/算法使用API.md
@@ -742,14 +754,23 @@ void ConfigManager::load(const QString& filePath)
     m_flowControlConfig.simulatedProcessingMs = settings.value("simulatedProcessingMs", 300).toInt();
     m_flowControlConfig.algorithmBypassEnabled =
         settings.value("algorithmBypassEnabled", false).toBool();
+    m_flowControlConfig.firstPathPauseAfterPoint =
+        qMax(0, settings.value("firstPathPauseAfterPoint", 0).toInt());
     m_flowControlConfig.scanCacheDirectory = settings.value("scanCacheDirectory").toString().trimmed();
     m_flowControlConfig.retainSegmentPly = settings.value("retainSegmentPly", true).toBool();
     settings.endGroup();
 
+    if (m_flowControlConfig.firstPathPauseAfterPoint > 0) {
+        qInfo(LOG_CONFIG).noquote()
+            << QStringLiteral("路径1联调步进已启用：firstPathPauseAfterPoint=")
+            << m_flowControlConfig.firstPathPauseAfterPoint
+            << QStringLiteral("（路径1第 N 点 CXP+梅卡落盘后暂停；改 0 或调大 N 后重启 IPC 再继续）");
+    }
+
     settings.beginGroup("SegmentCaptureExport");
     m_segmentCaptureExportConfig.enabled = settings.value("enabled", false).toBool();
     m_segmentCaptureExportConfig.outputRoot = resolveConfigRelativePath(
-        settings.value("outputRoot", QStringLiteral("output/segment_capture")).toString(),
+        settings.value("outputRoot", QStringLiteral("output")).toString(),
         m_configFilePath);
     m_segmentCaptureExportConfig.saveRawPointCloud =
         settings.value("saveRawPointCloud", true).toBool();

@@ -56,7 +56,7 @@ int main()
  
 	// 刚性距离角度约束：扫描仪上标记点相对距离和角度不变（类似几何哈希的二维数组查找表）
 	// 建表、查询、投票、识别
-	float cosTolerance = app_config.geo_hash.cos_tolerance;                          // TODO: 给偏差度数，不要给余弦偏差，因为余弦函数不是线性的
+	float angleToleranceDeg = app_config.geo_hash.angle_tolerance_deg;
 	float minPercent = app_config.geo_hash.min_percent;                              // 最低票数占比，占所有查询数量的百分比
 	FastGeoHash Geo_Hash(app_config.geo_hash.max_distance, app_config.geo_hash.min_distance);                  // 扫描头上标记点的最大间距 和  低于最小距离的点不进行特征计算和查询
 	int status  = Geo_Hash.read_template_pnts(app_config.paths.template_points.c_str());
@@ -109,7 +109,6 @@ int main()
 
 	//	int id_fit = Geo_Hash.query(frame_3d_points_t[ii],
 	//		otherCandidates,
-	//		cosTolerance,
 	//		minPercent);
 	//	if (id_fit > 0)
 	//	{
@@ -245,16 +244,16 @@ int main()
 	                                      max_z_range,
 	                                      max_reproj_err,
 	                                      max_ratio);
-	//for (int ii = 6; ii < 8; ii++)
+	for (int ii = 0; ii < 9; ii++)
 	{
-		res = Mark_Recon_3D.Get_3D_Recon_Marker(imgs1[9],
-		                                        imgs2[9]);
+		res = Mark_Recon_3D.Get_3D_Recon_Marker(imgs1[ii],
+		                                        imgs2[ii]);
 	    if (res != 0)
 	    {
 	    	return res;
 	    }
 		//system("pause");
-	}
+	
 	
 	// 输出结果
 	//std::cout << "三维重建标记点数量: " << Mark_Recon_3D.frame_3d_points.size() << std::endl;
@@ -269,7 +268,7 @@ int main()
 	// 4. 双目跟踪，输出位姿
 	// TODO: 多筛选两次，比较匹配误差，防止随机选点出现匹配失误的问题
 	res = Geo_Hash.Get_Track_Pose(Mark_Recon_3D.frame_3d_points,
-	                              cosTolerance,
+	                              angleToleranceDeg,
                                   minPercent);
 	if (res != 0)
 	{
@@ -284,7 +283,7 @@ int main()
 	//		      << Geo_Hash.filtered_frame_3d_points[i].y  << "," 
 	//			  << Geo_Hash.filtered_frame_3d_points[i].z << std::endl;
 	//}
-
+	}
 	return 0;
 }
 

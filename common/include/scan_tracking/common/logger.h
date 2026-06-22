@@ -9,7 +9,9 @@
 
 namespace scan_tracking::common {
 
-// 按自然日各写一个 txt：logs/scan_tracking_yyyy-MM-dd.txt；跨日自动切换文件，仅追加、不覆盖历史。
+// 双路落盘：
+// 1) 按自然日：logs/scan_tracking_yyyy-MM-dd.txt（跨日自动切换，仅追加）
+// 2) 按启动会话：logs/scan_tracking_run_yyyy-MM-dd_HH-mm-ss.txt（进程启动时创建，至退出关闭）
 class Logger {
 public:
     static void initialize(const QString& log_dir = QStringLiteral("logs"));
@@ -28,14 +30,17 @@ private:
     explicit Logger(const QString& log_dir);
     ~Logger();
 
-    void openLogFile(const QDate& target_date);
+    void openDailyLogFile(const QDate& target_date);
+    void openRunLogFile(const QDateTime& start_time);
+    void writeLogLineToFile(FILE* file, const std::string& line);
     void log(QtMsgType type, const QMessageLogContext& context, const QString& msg);
 
     static const char* getLogSeverity(QtMsgType type);
     static int getSeverityLevel(QtMsgType type);
 
     std::string log_dir_;
-    FILE* log_file_ = nullptr;
+    FILE* daily_log_file_ = nullptr;
+    FILE* run_log_file_ = nullptr;
     std::mutex mutex_;
     QDate current_date_;
     QtMsgType min_level_;

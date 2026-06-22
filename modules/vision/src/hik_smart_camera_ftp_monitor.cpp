@@ -4,10 +4,32 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QLoggingCategory>
 
+#include <filesystem>
+#include <system_error>
+
 Q_LOGGING_CATEGORY(hikFtpMonitorLog, "vision.hik_ftp_monitor")
 
 namespace scan_tracking {
 namespace vision {
+
+namespace {
+
+bool ensureDirectoryTreeExists(const QString& directoryPath)
+{
+    if (directoryPath.trimmed().isEmpty()) {
+        return false;
+    }
+
+    std::error_code ec;
+    const auto fsPath = std::filesystem::path(directoryPath.toStdWString());
+    std::filesystem::create_directories(fsPath, ec);
+    if (ec) {
+        return false;
+    }
+    return std::filesystem::is_directory(fsPath);
+}
+
+}  // namespace
 
 HikSmartCameraFtpMonitor::HikSmartCameraFtpMonitor(QObject* parent)
     : QObject(parent)
@@ -38,18 +60,23 @@ bool HikSmartCameraFtpMonitor::start(const QString& ftpDirectory)
     }
 
     // 检查目录是否存在；不存在则尝试创建（现场常缺 D:/HikCameraFTP）
-    QDir dir(ftpDirectory);
-    if (!dir.exists()) {
-        if (!QDir().mkpath(ftpDirectory)) {
+    // 启动期仅用 std::filesystem：MechEye/Hik SDK 加载后 Qt QDir I/O 可能触发堆损坏。
+    const auto fsPath = std::filesystem::path(ftpDirectory.toStdWString());
+    std::error_code existsEc;
+    if (!std::filesystem::exists(fsPath, existsEc) || existsEc) {
+        if (!ensureDirectoryTreeExists(ftpDirectory)) {
             qCritical(hikFtpMonitorLog) << QStringLiteral("FTP 目录不存在且创建失败：") << ftpDirectory;
             emit error(QStringLiteral("FTP 目录不存在且创建失败: %1").arg(ftpDirectory));
             return false;
         }
-        dir = QDir(ftpDirectory);
-        qInfo(hikFtpMonitorLog) << QStringLiteral("FTP 目录已自动创建：") << dir.absolutePath();
+        qInfo(hikFtpMonitorLog) << QStringLiteral("FTP 目录已自动创建：") << ftpDirectory;
     }
 
-    m_ftpDirectory = dir.absolutePath();
+    std::error_code absoluteEc;
+    const auto absolutePath = std::filesystem::absolute(fsPath, absoluteEc);
+    m_ftpDirectory = absoluteEc
+                         ? ftpDirectory
+                         : QString::fromStdWString(absolutePath.native());
     
     // 添加目录到监控
     if (!m_watcher->addPath(m_ftpDirectory)) {
