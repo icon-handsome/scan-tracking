@@ -51,6 +51,8 @@ struct VisionConfig {
     int mechCaptureTimeoutMs;
     int mechDepthRangeMin;
     int mechDepthRangeMax;
+    /// Nano Ultra 等型号：SDK 点云后处理 EdgeArtifactRemoval（边缘伪点去除）
+    bool mechEdgeArtifactRemovalEnabled = true;
     int hikConnectTimeoutMs;
     int hikCaptureTimeoutMs;
     float hikExposureTimeUs = 50000.0f;  ///< 海康 A/B 双目曝光（微秒），连接时写入相机
@@ -93,6 +95,7 @@ struct FlowControlConfig {
 struct SegmentCaptureExportConfig {
     bool enabled = false;
     QString outputRoot = QStringLiteral("output");
+    /// false 时不落盘任何 PLY（段级 raw/stitched、Trig_Inspection 融合点云）；矩阵与 2D 仍按 enabled 落盘
     bool saveRawPointCloud = true;
 };
 

@@ -651,6 +651,8 @@ void ConfigManager::load(const QString& filePath)
     m_visionConfig.mechCaptureTimeoutMs = settings.value("mechCaptureTimeoutMs", m_cameraConfig.scanTimeoutMs).toInt();
     m_visionConfig.mechDepthRangeMin = settings.value("mechDepthRangeMin", 100).toInt();
     m_visionConfig.mechDepthRangeMax = settings.value("mechDepthRangeMax", 2000).toInt();
+    m_visionConfig.mechEdgeArtifactRemovalEnabled =
+        settings.value("mechEdgeArtifactRemovalEnabled", true).toBool();
     m_visionConfig.hikConnectTimeoutMs = settings.value("hikConnectTimeoutMs", 3000).toInt();
     m_visionConfig.hikCaptureTimeoutMs = settings.value("hikCaptureTimeoutMs", 1000).toInt();
     m_visionConfig.hikExposureTimeUs =

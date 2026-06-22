@@ -4494,6 +4494,11 @@ void StateMachine::persistInspectionPoseStitchOutput(int pathId) const
 
 void StateMachine::persistLastPoseStitchArtifactToDisk() const
 {
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr || !configManager->segmentCaptureExportConfig().saveRawPointCloud) {
+        return;
+    }
+
     LastPoseStitchArtifact artifact;
     {
         std::lock_guard<std::mutex> lock(m_lastPoseStitchMutex);
@@ -4548,6 +4553,11 @@ void StateMachine::persistMergedInspectionPointCloudToDisk(
     int mergedSegmentCount,
     const scan_tracking::mech_eye::PointCloudFrame& mergedCloud) const
 {
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr || !configManager->segmentCaptureExportConfig().saveRawPointCloud) {
+        return;
+    }
+
     if (pathId <= 0 || mergedSegmentCount <= 0 || !mergedCloud.isValid()) {
         qWarning(LOG_FLOW).noquote()
             << QStringLiteral("[PoseStitchOutput] 跳过融合点云落盘：无效输入 pathId=") << pathId
@@ -4678,9 +4688,28 @@ void StateMachine::persistSegmentCaptureExportGroup(
             << QStringLiteral("[SegmentCaptureExport] meta 写入失败：") << metaPath;
     }
 
-    // 调试模式下点云只参与算法流程，不再落盘；保留内存处理与后续释放。
-    const bool rawSaved = false;
-    const bool stitchedSaved = false;
+    bool rawSaved = false;
+    bool stitchedSaved = false;
+    if (configManager->segmentCaptureExportConfig().saveRawPointCloud) {
+        if (rawPointCloud.isValid()) {
+            const QString rawPath = QDir(groupDir).filePath(QStringLiteral("pointcloud_raw.ply"));
+            rawSaved = scan_tracking::mech_eye::savePointCloudFrameToPly(rawPointCloud, rawPath);
+            if (!rawSaved) {
+                qWarning(LOG_FLOW).noquote()
+                    << QStringLiteral("[SegmentCaptureExport] 原始点云写入失败：") << rawPath;
+            }
+        }
+
+        if (stitchedPointCloud.isValid()) {
+            const QString stitchedPath = QDir(groupDir).filePath(QStringLiteral("pointcloud_stitched.ply"));
+            stitchedSaved =
+                scan_tracking::mech_eye::savePointCloudFrameToPly(stitchedPointCloud, stitchedPath);
+            if (!stitchedSaved) {
+                qWarning(LOG_FLOW).noquote()
+                    << QStringLiteral("[SegmentCaptureExport] 拼接点云写入失败：") << stitchedPath;
+            }
+        }
+    }
 
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[SegmentCaptureExport] 分组已写入") << groupDir

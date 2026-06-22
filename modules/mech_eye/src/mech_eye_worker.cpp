@@ -20,6 +20,8 @@
 #include "area_scan_3d_camera/Frame2D.h"
 #include "area_scan_3d_camera/Frame2DAnd3D.h"
 #include "area_scan_3d_camera/Frame3D.h"
+#include "area_scan_3d_camera/parameters/PointCloudProcessing.h"
+#include "area_scan_3d_camera/parameters/Scanning3D.h"
 #include "UserSet.h"
 
 Q_LOGGING_CATEGORY(LOG_MECHEYE_WORKER, "mech_eye.worker")
@@ -104,6 +106,32 @@ PointCloudFrame ConvertUntexturedPointCloudToFrame(
         *validPointCount = validCount;
     }
     return pointCloud;
+}
+
+void applyMech3DCaptureUserSet(mmind::eye::UserSet& userSet)
+{
+    const auto& visionCfg = common::ConfigManager::instance()->visionConfig();
+
+    const mmind::eye::Range<int> configuredRange(
+        visionCfg.mechDepthRangeMin, visionCfg.mechDepthRangeMax);
+    const auto depthStatus = userSet.setRangeValue(
+        mmind::eye::scanning3d_setting::DepthRange::name, configuredRange);
+    qInfo(LOG_MECHEYE_WORKER).noquote()
+        << QStringLiteral("[深度范围] 设置为 [") << configuredRange.min << QStringLiteral(",")
+        << configuredRange.max << QStringLiteral("] mm，成功=") << depthStatus.isOK();
+
+    const auto edgeStatus = userSet.setBoolValue(
+        mmind::eye::pointcloud_processing_setting::EdgeArtifactRemoval::name,
+        visionCfg.mechEdgeArtifactRemovalEnabled);
+    qInfo(LOG_MECHEYE_WORKER).noquote()
+        << QStringLiteral("[边缘伪点去除] EdgeArtifactRemoval=")
+        << visionCfg.mechEdgeArtifactRemovalEnabled
+        << QStringLiteral("，成功=") << edgeStatus.isOK();
+    if (!edgeStatus.isOK()) {
+        qWarning(LOG_MECHEYE_WORKER).noquote()
+            << QStringLiteral("[边缘伪点去除] 设置失败（当前型号可能不支持）: ")
+            << QString::fromStdString(edgeStatus.errorDescription);
+    }
 }
 
 GrayTextureFrame ConvertGrayTextureFrame(const mmind::eye::Frame2D& frame2d)
@@ -286,19 +314,7 @@ void MechEyeWorker::performCapture(const scan_tracking::mech_eye::CaptureRequest
         } else if (normalized.mode == CaptureMode::Capture3DOnly) {
             mmind::eye::Frame3D frame3D;
 
-            // ---- 采集前设置深度范围 ----
-            {
-                auto& userSet = m_impl->camera.currentUserSet();
-
-                // 从配置读取并设置深度范围
-                const auto& visionCfg = common::ConfigManager::instance()->visionConfig();
-                mmind::eye::Range<int> configuredRange(visionCfg.mechDepthRangeMin, visionCfg.mechDepthRangeMax);
-                auto setStatus = userSet.setRangeValue("DepthRange", configuredRange);
-                qInfo(LOG_MECHEYE_WORKER) << QStringLiteral("[深度范围] 设置为 [")
-                                          << configuredRange.min << QStringLiteral(",")
-                                          << configuredRange.max << QStringLiteral("] mm，成功=")
-                                          << setStatus.isOK();
-            }
+            applyMech3DCaptureUserSet(m_impl->camera.currentUserSet());
 
             // 先尝试 capture3D（不含相机侧法向量计算）
             status = m_impl->camera.capture3D(
@@ -319,6 +335,7 @@ void MechEyeWorker::performCapture(const scan_tracking::mech_eye::CaptureRequest
             }
         } else {
             mmind::eye::Frame2DAnd3D frame2DAnd3D;
+            applyMech3DCaptureUserSet(m_impl->camera.currentUserSet());
             status = m_impl->camera.capture2DAnd3D(
                 frame2DAnd3D,
                 static_cast<unsigned int>(normalized.timeoutMs));
@@ -660,6 +677,11 @@ void MechEyeWorker::printCameraParameters()
     std::string outlierRemoval;
     userSet.getEnumValue("PointCloudOutlierRemoval", outlierRemoval);
 
+    bool edgeArtifactRemoval = false;
+    userSet.getBoolValue(
+        mmind::eye::pointcloud_processing_setting::EdgeArtifactRemoval::name,
+        edgeArtifactRemoval);
+
     qInfo(LOG_MECHEYE_WORKER).noquote()
         << "=== MechEye 相机信息 ===\n"
         << "  型号:" << m_cameraInfo.model << "\n"
@@ -676,7 +698,8 @@ void MechEyeWorker::printCameraParameters()
         << "  深度范围:" << depthRange.min << " - " << depthRange.max << " mm\n"
         << "  表面平滑:" << QString::fromStdString(surfaceSmoothing) << "\n"
         << "  噪声去除:" << QString::fromStdString(noiseRemoval) << "\n"
-        << "  离群点去除:" << QString::fromStdString(outlierRemoval);
+        << "  离群点去除:" << QString::fromStdString(outlierRemoval) << "\n"
+        << "  边缘伪点去除:" << edgeArtifactRemoval;
 
     // 打印深度相机内参（Nano Ultra 没有独立 2D 纹理相机，只打印深度内参）
     const auto& depIntr = intrinsics.depth;
