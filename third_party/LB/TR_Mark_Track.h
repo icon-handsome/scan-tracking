@@ -152,6 +152,10 @@ public:
 		counts        = new int[L_BINS * L_BINS]();
 		offsets       = new int[L_BINS * L_BINS]();
 
+		Rt = (cv::Mat_<double>(4, 4) << 1.0, 0.0, 0.0, 0.0,
+			                           0.0, 1.0, 0.0, 0.0,
+			                           0.0, 0.0, 1.0, 0.0,
+			                           0.0, 0.0, 0.0, 1.0);
 		Rt_global = (cv::Mat_<double>(4, 4) << 1.0, 0.0, 0.0, 0.0,
 			                                   0.0, 1.0, 0.0, 0.0,
 			                                   0.0, 0.0, 1.0, 0.0,
@@ -172,6 +176,8 @@ public:
 	std::vector<cv::Point3f> template_pnts;             // ģ���
 	std::vector<cv::Point3f> filtered_frame_3d_points;  // �˲����3D��ǵ�
 	std::vector<int>         corres_template_points_ID; // �˲����Ӧ��ģ��3D��ID
+	std::vector<cv::Point3f> corres_template_points;    // 与 filtered_frame_3d_points 对应的模板点
+	cv::Mat                  Rt;                        // Opt Rt (Template to Vision)
 	cv::Mat                  Rt_global;                 // ȫ������ϵ�µ���λ��
 
 	// ���ò���

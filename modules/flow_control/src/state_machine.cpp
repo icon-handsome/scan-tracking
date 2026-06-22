@@ -21,6 +21,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QTextStream>
 #include <cmath>
 #include <cstdint>
@@ -249,7 +250,7 @@ bool ensureDirectoryTreeExists(const QString& directoryPath)
     return std::filesystem::is_directory(fsPath);
 }
 
-QString createPoseStitchRunRootDirectory()
+QString createPoseStitchRunRootDirectory(const QString& timestamp)
 {
     const QString appDir = QCoreApplication::applicationDirPath();
     if (appDir.isEmpty()) {
@@ -265,7 +266,7 @@ QString createPoseStitchRunRootDirectory()
         return {};
     }
 
-    const QString runRoot = outputBase + QStringLiteral("/run_") + poseStitchOutputTimestamp();
+    const QString runRoot = outputBase + QStringLiteral("/run_") + timestamp;
     const QString matrixDir = runRoot + QStringLiteral("/matrix");
     const QString pointcloudDir = runRoot + QStringLiteral("/pointcloud");
 
@@ -292,6 +293,237 @@ QString poseStitchPointCloudOutputDirectory(const QString& runRoot)
     return QDir(runRoot).filePath(QStringLiteral("pointcloud"));
 }
 
+QString segmentCaptureExportGroupDirectory(const QString& sessionRoot, int pathId, int segmentIndex)
+{
+    return QDir(sessionRoot).filePath(
+        QStringLiteral("path%1_seg%2").arg(pathId).arg(segmentIndex, 2, 10, QChar('0')));
+}
+
+bool writeTextFileIfPossible(const QString& absolutePath, const QString& text)
+{
+    QFile file(absolutePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        return false;
+    }
+    QTextStream stream(&file);
+    stream.setCodec("UTF-8");
+    stream << text;
+    return true;
+}
+
+struct SegmentCaptureCxpImageMeta {
+    bool attempted = false;
+    bool saved = false;
+    QString fileName;
+    QString cameraKey;
+    QString logicalName;
+    quint64 captureRequestId = 0;
+    quint64 frameId = 0;
+    qint64 captureTimestampMs = 0;
+    int width = 0;
+    int height = 0;
+    int stride = 0;
+    qint64 pixelByteCount = 0;
+    QString pixelMd5;
+    QString firstPixelHex;
+    QString centerPixelHex;
+    QString lastPixelHex;
+    QString savedAt;
+    qint64 savedFileBytes = 0;
+    QString savedFileMd5;
+};
+
+struct SegmentCaptureCxpExportMeta {
+    QString exportGroupId;
+    QString sessionRoot;
+    QString captureFileTimestamp;
+    SegmentCaptureCxpImageMeta left;
+    SegmentCaptureCxpImageMeta right;
+};
+
+QString md5HexFromBytes(const std::uint8_t* data, std::size_t size)
+{
+    if (data == nullptr || size == 0) {
+        return QStringLiteral("(empty)");
+    }
+    const QByteArray bytes(reinterpret_cast<const char*>(data), static_cast<int>(size));
+    return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Md5).toHex());
+}
+
+QString md5HexFromFile(const QString& absolutePath)
+{
+    QFile file(absolutePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return QStringLiteral("(unreadable)");
+    }
+    QCryptographicHash hash(QCryptographicHash::Md5);
+    if (!hash.addData(&file)) {
+        return QStringLiteral("(hash-failed)");
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+QString mono8SampleHex(const scan_tracking::vision::HikMonoFrame& frame, int index)
+{
+    if (!frame.isValid() || frame.pixels == nullptr) {
+        return QStringLiteral("na");
+    }
+    const auto& pixels = *frame.pixels;
+    if (index < 0 || static_cast<std::size_t>(index) >= pixels.size()) {
+        return QStringLiteral("na");
+    }
+    return QStringLiteral("0x%1").arg(pixels[static_cast<std::size_t>(index)], 2, 16, QChar('0'));
+}
+
+QString buildSegmentCaptureExportGroupId(int pathId, int segmentIndex, quint64 requestId)
+{
+    return QStringLiteral("path%1_seg%2_req%3")
+        .arg(pathId)
+        .arg(segmentIndex, 2, 10, QChar('0'))
+        .arg(requestId);
+}
+
+SegmentCaptureCxpImageMeta buildCxpImageMetaFromCapture(
+    const scan_tracking::vision::HikPoseCaptureResult& result,
+    const QString& fileName,
+    bool saved,
+    const QString& savedAt,
+    qint64 savedFileBytes,
+    const QString& savedFileMd5)
+{
+    SegmentCaptureCxpImageMeta meta;
+    meta.attempted = true;
+    meta.saved = saved;
+    meta.fileName = fileName;
+    meta.cameraKey = result.cameraKey;
+    meta.logicalName = result.logicalName;
+    meta.captureRequestId = result.requestId;
+    if (result.frame.isValid() && result.frame.pixels != nullptr) {
+        meta.frameId = result.frame.frameId;
+        meta.captureTimestampMs = result.frame.timestampMs;
+        meta.width = result.frame.width;
+        meta.height = result.frame.height;
+        meta.stride = result.frame.stride;
+        meta.pixelByteCount = static_cast<qint64>(result.frame.pixels->size());
+        meta.pixelMd5 = md5HexFromBytes(result.frame.pixels->data(), result.frame.pixels->size());
+        const int centerIndex = (result.frame.height / 2) * result.frame.stride + (result.frame.width / 2);
+        meta.firstPixelHex = mono8SampleHex(result.frame, 0);
+        meta.centerPixelHex = mono8SampleHex(result.frame, centerIndex);
+        meta.lastPixelHex =
+            mono8SampleHex(result.frame, static_cast<int>(result.frame.pixels->size()) - 1);
+    }
+    meta.savedAt = savedAt;
+    meta.savedFileBytes = savedFileBytes;
+    meta.savedFileMd5 = savedFileMd5;
+    return meta;
+}
+
+void appendCxpImageMetaLines(QString& text, const QString& prefix, const SegmentCaptureCxpImageMeta& meta)
+{
+    text += prefix + QStringLiteral(".attempted=") + (meta.attempted ? QStringLiteral("true") : QStringLiteral("false")) + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".saved=") + (meta.saved ? QStringLiteral("true") : QStringLiteral("false")) + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".fileName=") + meta.fileName + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".cameraKey=") + meta.cameraKey + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".logicalName=") + meta.logicalName + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".captureRequestId=") + QString::number(meta.captureRequestId) + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".frameId=") + QString::number(meta.frameId) + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".captureTimestampMs=") + QString::number(meta.captureTimestampMs) + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".width=") + QString::number(meta.width) + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".height=") + QString::number(meta.height) + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".stride=") + QString::number(meta.stride) + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".pixelByteCount=") + QString::number(meta.pixelByteCount) + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".pixelMd5=") + meta.pixelMd5 + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".firstPixel=") + meta.firstPixelHex + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".centerPixel=") + meta.centerPixelHex + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".lastPixel=") + meta.lastPixelHex + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".savedAt=") + meta.savedAt + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".savedFileBytes=") + QString::number(meta.savedFileBytes) + QStringLiteral("\n");
+    text += prefix + QStringLiteral(".savedFileMd5=") + meta.savedFileMd5 + QStringLiteral("\n");
+}
+
+void logSegmentCaptureCxpImageSaved(
+    const QString& sideLabel,
+    const QString& exportGroupId,
+    const QString& absolutePath,
+    const SegmentCaptureCxpImageMeta& meta)
+{
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[SegmentCaptureExport] CXP") << sideLabel << QStringLiteral("存图")
+        << QStringLiteral("group=") << exportGroupId
+        << QStringLiteral("path=") << absolutePath
+        << QStringLiteral("frameId=") << meta.frameId
+        << QStringLiteral("captureReqId=") << meta.captureRequestId
+        << QStringLiteral("captureTsMs=") << meta.captureTimestampMs
+        << QStringLiteral("savedAt=") << meta.savedAt
+        << QStringLiteral("pixelMd5=") << meta.pixelMd5
+        << QStringLiteral("savedFileBytes=") << meta.savedFileBytes
+        << QStringLiteral("savedFileMd5=") << meta.savedFileMd5
+        << QStringLiteral("first/center/last=") << meta.firstPixelHex << meta.centerPixelHex
+        << meta.lastPixelHex;
+}
+
+QString resolveCxpCaptureFileTimestamp(
+    const scan_tracking::vision::MultiCameraCaptureBundle& bundle)
+{
+    const qint64 leftTs = bundle.hikCameraAResult.frame.timestampMs;
+    const qint64 rightTs = bundle.hikCameraBResult.frame.timestampMs;
+    qint64 captureTs = leftTs > 0 ? leftTs : rightTs;
+    if (captureTs <= 0) {
+        captureTs = QDateTime::currentMSecsSinceEpoch();
+    }
+    return QDateTime::fromMSecsSinceEpoch(captureTs).toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
+}
+
+QString buildCxpCaptureFileName(const QString& sideTag, const QString& timestampTag)
+{
+    return QStringLiteral("%1_%2.bmp").arg(sideTag, timestampTag);
+}
+
+QString buildSegmentCaptureExportMetaText(
+    int pathId,
+    int segmentIndex,
+    const scan_tracking::vision::MultiCameraCaptureBundle& bundle,
+    const scan_tracking::mech_eye::PointCloudFrame& rawPointCloud,
+    const scan_tracking::mech_eye::PointCloudFrame& stitchedPointCloud,
+    const StateMachine::SegmentPoseStitchRecord& stitchRecord,
+    const SegmentCaptureCxpExportMeta& cxpExportMeta)
+{
+    QString text;
+    text += QStringLiteral("# Segment capture export metadata\n");
+    text += QStringLiteral("generatedAt=") + QDateTime::currentDateTime().toString(Qt::ISODateWithMs) + QStringLiteral("\n");
+    text += QStringLiteral("exportGroupId=") + cxpExportMeta.exportGroupId + QStringLiteral("\n");
+    text += QStringLiteral("sessionRoot=") + cxpExportMeta.sessionRoot + QStringLiteral("\n");
+    text += QStringLiteral("pathId=") + QString::number(pathId) + QStringLiteral("\n");
+    text += QStringLiteral("segmentIndex=") + QString::number(segmentIndex) + QStringLiteral("\n");
+    text += QStringLiteral("taskId=") + QString::number(bundle.request.taskId) + QStringLiteral("\n");
+    text += QStringLiteral("requestId=") + QString::number(bundle.request.requestId) + QStringLiteral("\n");
+    text += QStringLiteral("bundleSegmentIndex=") + QString::number(bundle.request.segmentIndex) + QStringLiteral("\n");
+    text += QStringLiteral("needMechEye2D=") + QString(bundle.request.needMechEye2D ? "true" : "false") + QStringLiteral("\n");
+    text += QStringLiteral("cxpLeftKey=") + bundle.request.hikCameraAKey + QStringLiteral("\n");
+    text += QStringLiteral("cxpRightKey=") + bundle.request.hikCameraBKey + QStringLiteral("\n");
+    text += QStringLiteral("cxpCaptureFileTimestamp=") + cxpExportMeta.captureFileTimestamp + QStringLiteral("\n");
+    text += QStringLiteral("cxpLeftFileName=") + cxpExportMeta.left.fileName + QStringLiteral("\n");
+    text += QStringLiteral("cxpRightFileName=") + cxpExportMeta.right.fileName + QStringLiteral("\n");
+    text += QStringLiteral("lbInvoked=") + QString(bundle.lbPoseResult.invoked ? "true" : "false") + QStringLiteral("\n");
+    text += QStringLiteral("lbSuccess=") + QString(bundle.lbPoseResult.success ? "true" : "false") + QStringLiteral("\n");
+    text += QStringLiteral("lbFramePointCount=") + QString::number(bundle.lbPoseResult.framePointCount) + QStringLiteral("\n");
+    text += QStringLiteral("lbMessage=") + bundle.lbPoseResult.message + QStringLiteral("\n");
+    text += QStringLiteral("lbTrackingValid=") + QString(stitchRecord.lbTrackingValid ? "true" : "false") + QStringLiteral("\n");
+    text += QStringLiteral("rawPointCount=") + QString::number(rawPointCloud.pointCount) + QStringLiteral("\n");
+    text += QStringLiteral("stitchedPointCount=") + QString::number(stitchedPointCloud.pointCount) + QStringLiteral("\n");
+    text += QStringLiteral("\n# CXP image fingerprints (compare pixelMd5 / savedFileMd5 across segments)\n");
+    appendCxpImageMetaLines(text, QStringLiteral("cxpLeft"), cxpExportMeta.left);
+    appendCxpImageMetaLines(text, QStringLiteral("cxpRight"), cxpExportMeta.right);
+    if (!bundle.lbPoseResult.diagnosticText.trimmed().isEmpty()) {
+        text += QStringLiteral("\n");
+        text += bundle.lbPoseResult.diagnosticText;
+        if (!text.endsWith(QChar('\n'))) {
+            text += QStringLiteral("\n");
+        }
+    }
+    return text;
+}
+
 QString buildPoseStitchRtText(
     int pathId,
     int segmentIndex,
@@ -306,16 +538,71 @@ QString buildPoseStitchRtText(
     text += QStringLiteral("# generatedAt=") + QDateTime::currentDateTime().toString(Qt::ISODateWithMs) + QStringLiteral("\n");
     text += QStringLiteral("pathId=") + QString::number(pathId) + QStringLiteral("\n");
     text += QStringLiteral("segmentIndex=") + QString::number(segmentIndex) + QStringLiteral("\n");
-    text += QStringLiteral("formula=combined = T0' x T ; p' = p x combined\n");
+    text += QStringLiteral("formula=p' = p x T0 ; LB成功时 T0=Rt_global，否则 T0=T0'(LBN链)\n");
     text += QStringLiteral("lbTrackingValid=") + QString(lbValid ? "true" : "false") + QStringLiteral("\n\n");
-    text += formatRowMajorMatrixBlock(QStringLiteral("T0 (base calibration)"), baseCalibrationT0);
+    text += formatRowMajorMatrixBlock(QStringLiteral("T0 (JSON fallback / base)"), baseCalibrationT0);
     text += QStringLiteral("\n");
-    text += formatRowMajorMatrixBlock(QStringLiteral("T0' (calibration snapshot)"), calibrationT0Prime);
+    text += formatRowMajorMatrixBlock(QStringLiteral("T0 applied (Rt_global or T0')"), calibrationT0Prime);
     text += QStringLiteral("\n");
-    text += formatRowMajorMatrixBlock(QStringLiteral("T (LB stereo tracking)"), stereoTrackingT);
+    text += formatRowMajorMatrixBlock(QStringLiteral("T (legacy slot, identity)"), stereoTrackingT);
     text += QStringLiteral("\n");
-    text += formatRowMajorMatrixBlock(QStringLiteral("combined output Rt = T0' x T"), combinedOutputRt);
+    text += formatRowMajorMatrixBlock(QStringLiteral("combined output Rt (= T0 applied)"), combinedOutputRt);
     return text;
+}
+
+QString buildSegmentPoseStitchRtText(const StateMachine::SegmentPoseStitchRecord& record)
+{
+    QString text;
+    text += QStringLiteral("# Segment pose stitch matrix (row-major 4x4)\n");
+    text += QStringLiteral("# generatedAt=") + QDateTime::currentDateTime().toString(Qt::ISODateWithMs) + QStringLiteral("\n");
+    text += QStringLiteral("pathId=") + QString::number(record.pathId) + QStringLiteral("\n");
+    text += QStringLiteral("segmentIndex=") + QString::number(record.segmentIndex) + QStringLiteral("\n");
+    text += QStringLiteral("formula=p' = p x T0 ; LB成功时 T0=Rt_global，否则 T0=T0'(LBN链)\n");
+    text += QStringLiteral("lbTrackingValid=") + QString(record.lbTrackingValid ? "true" : "false") + QStringLiteral("\n");
+    text += QStringLiteral("lbRtGlobalValid=") + QString(record.lbRtGlobalValid ? "true" : "false") + QStringLiteral("\n\n");
+    text += formatRowMajorMatrixBlock(QStringLiteral("T0 (JSON fallback / base)"), record.baseCalibrationT0);
+    text += QStringLiteral("\n");
+    text += formatRowMajorMatrixBlock(QStringLiteral("T0' (LBN chain)"), record.t0PrimeLbn);
+    text += QStringLiteral("\n");
+    if (record.lbRtGlobalValid) {
+        text += formatRowMajorMatrixBlock(QStringLiteral("Rt_global (LB)"), record.lbRtGlobal);
+    } else {
+        text += QStringLiteral("Rt_global (LB): unavailable\n");
+    }
+    text += QStringLiteral("\n");
+    text += formatRowMajorMatrixBlock(QStringLiteral("T0 applied (used for stitch)"), record.appliedT0);
+    text += QStringLiteral("\n");
+    text += formatRowMajorMatrixBlock(QStringLiteral("T (legacy slot, identity)"), record.stereoTrackingT);
+    text += QStringLiteral("\n");
+    text += formatRowMajorMatrixBlock(QStringLiteral("combined output Rt (= T0 applied)"), record.combinedOutputRt);
+    return text;
+}
+
+QString buildFinalPoseStitchRtText(
+    int pathId,
+    int finalSegmentIndex,
+    const StateMachine::SegmentPoseStitchRecord& record)
+{
+    QString text;
+    text += QStringLiteral("# Path final pose stitch matrix (row-major 4x4)\n");
+    text += QStringLiteral("# generatedAt=") + QDateTime::currentDateTime().toString(Qt::ISODateWithMs) + QStringLiteral("\n");
+    text += QStringLiteral("pathId=") + QString::number(pathId) + QStringLiteral("\n");
+    text += QStringLiteral("finalSegmentIndex=") + QString::number(finalSegmentIndex) + QStringLiteral("\n");
+    text += QStringLiteral("note=最终矩阵取自该路径最后一个有效扫描段的 T0 applied\n\n");
+    text += buildSegmentPoseStitchRtText(record);
+    return text;
+}
+
+bool writeTextFile(const QString& filePath, const QString& content)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        return false;
+    }
+    QTextStream stream(&file);
+    stream.setCodec("UTF-8");
+    stream << content;
+    return true;
 }
 
 QVector<int> enabledScanPathIds()
@@ -703,57 +990,66 @@ void StateMachine::start()
  */
 void StateMachine::stop()
 {
-    if (m_stopped.exchange(true)) {
-        return;
+    const bool firstStop = !m_stopped.exchange(true);
+
+    if (firstStop) {
+        // 先断开外部信号并释放 std::function，避免退出阶段 processEvents 触发已失效回调
+        {
+            tracking::InspectionResultNotifier cleared;
+            m_inspectionResultPublisher.swap(cleared);
+        }
+
+        if (m_modbus != nullptr) {
+            disconnect(m_modbus, nullptr, this, nullptr);
+        }
+        if (m_mechEye != nullptr) {
+            disconnect(m_mechEye, nullptr, this, nullptr);
+        }
+        if (m_visionPipeline != nullptr) {
+            disconnect(m_visionPipeline, nullptr, this, nullptr);
+        }
+
+        if (m_pollTimer != nullptr) {
+            m_pollTimer->stop();
+        }
+        if (m_heartbeatTimer != nullptr) {
+            m_heartbeatTimer->stop();
+        }
+        if (m_timeoutTimer != nullptr) {
+            m_timeoutTimer->stop();
+        }
+
+        // 尽早清零 IPC→PLC 结果区，避免 refinement join 期间 PLC 仍读到旧 Ack/Res
+        resetPlcOutputRegisters();
+
+        m_isPollingPlc = false;
+        clearActiveTask();
     }
 
-    // 先断开外部信号并释放 std::function，避免退出阶段 processEvents 触发已失效回调
-    {
-        tracking::InspectionResultNotifier cleared;
-        m_inspectionResultPublisher.swap(cleared);
+    if (firstStop) {
+        joinAllBackgroundRefinementJobs(kShutdownRefinementJoinTimeoutMs);
+        if (pendingRefinementJobCount() != 0) {
+            reconcilePendingRefinementJobCounter("stop");
+        }
     }
 
-    if (m_modbus != nullptr) {
-        disconnect(m_modbus, nullptr, this, nullptr);
-    }
-    if (m_mechEye != nullptr) {
-        disconnect(m_mechEye, nullptr, this, nullptr);
-    }
-    if (m_visionPipeline != nullptr) {
-        disconnect(m_visionPipeline, nullptr, this, nullptr);
+    if (firstStop) {
+        resetScanSegmentCache();
+
+        m_consecutiveModbusFailures = 0;
+        m_alarmLevel = 0;
+        m_alarmCode = 0;
+        m_warnCode = 0;
+        m_progress = 0;
+        m_dataValid = false;
+        m_heartbeatCounter = 0;
+        m_ipcState = protocol::IpcState::Uninitialized;
+        m_currentStage = protocol::Stage::Idle;
+        setState(AppState::Init);
     }
 
-    if (m_pollTimer != nullptr) {
-        m_pollTimer->stop();
-    }
-    if (m_heartbeatTimer != nullptr) {
-        m_heartbeatTimer->stop();
-    }
-    if (m_timeoutTimer != nullptr) {
-        m_timeoutTimer->stop();
-    }
-
-    m_isPollingPlc = false;
-    clearActiveTask();
-
-    joinAllBackgroundRefinementJobs(kShutdownRefinementJoinTimeoutMs);
-    if (pendingRefinementJobCount() != 0) {
-        reconcilePendingRefinementJobCounter("stop");
-    }
-
-    resetScanSegmentCache();
-
-    m_consecutiveModbusFailures = 0;
-    m_alarmLevel = 0;
-    m_alarmCode = 0;
-    m_warnCode = 0;
-    m_progress = 0;
-    m_dataValid = false;
-    m_heartbeatCounter = 0;
-    m_ipcState = protocol::IpcState::Uninitialized;
-    m_currentStage = protocol::Stage::Idle;
+    // HMI stop 后再退出进程时仍会走到此处，确保结果区再次清零
     resetPlcOutputRegisters();
-    setState(AppState::Init);
 }
 
 /**
@@ -2142,6 +2438,7 @@ void StateMachine::clearPathSegmentCache(int pathId)
         m_pathSegmentCaptureResults.remove(pathId);
     }
     m_pathSegmentCalibrationMatrices.remove(pathId);
+    m_pathSegmentPoseStitchRecords.remove(pathId);
     if (m_currentPathId == pathId) {
         m_currentPathSegments.clear();
     }
@@ -2350,6 +2647,11 @@ bool StateMachine::loadMergedPointCloudForInspection(
     mergedCloud.pointCount = mergedPointCount;
     mergedCloud.width = mergedPointCount;
     mergedCloud.height = 1;
+
+    if (m_poseStitchRunRootDirectory.isEmpty()) {
+        ensurePoseStitchRunRootDirectory();
+    }
+    persistMergedInspectionPointCloudToDisk(inspectPathId, mergedSegmentCount, mergedCloud);
 
     *outCloud = std::move(mergedCloud);
     if (totalPointCount != nullptr) {
@@ -3472,6 +3774,7 @@ void StateMachine::resetScanSegmentCache()
     }
 
     m_pathSegmentCalibrationMatrices.clear();
+    m_pathSegmentPoseStitchRecords.clear();
     m_currentCalibrationMatrix = m_baseCalibrationMatrix;
     }
 
@@ -3508,7 +3811,7 @@ void StateMachine::reloadCalibrationMatricesFromConfig()
         m_currentCalibrationMatrix = t0;
     }
 
-    qInfo(LOG_FLOW).noquote() << QStringLiteral("已从 scan_paths_config 加载标定矩阵 T0");
+    qInfo(LOG_FLOW).noquote() << QStringLiteral("已从 scan_paths_config 加载 JSON T0（LB 失败时的回退基准）");
 }
 
 bool StateMachine::resolveNeedRotationForSegment(int pathId, int segmentIndex) const
@@ -3588,8 +3891,13 @@ void StateMachine::applySegmentPoseStitching(int pathId, int segmentIndex)
 
     scan_tracking::mech_eye::PointCloudFrame inputCloud;
     std::array<float, 16> calibrationMatrix = m_baseCalibrationMatrix;
-    std::array<float, 16> stereoMatrix = identityMatrix4x4();
+    std::array<float, 16> t0PrimeLbn = m_currentCalibrationMatrix;
+    std::array<float, 16> lbRtGlobal = identityMatrix4x4();
+    const std::array<float, 16> stereoMatrix = identityMatrix4x4();
     bool lbValid = false;
+    bool lbRtGlobalValid = false;
+    bool rtGlobalAsT0 = false;
+    QString lbFallbackNote;
 
     {
         std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
@@ -3607,12 +3915,8 @@ void StateMachine::applySegmentPoseStitching(int pathId, int segmentIndex)
         if (pathCalibrationIt != m_pathSegmentCalibrationMatrices.cend()) {
             const auto segmentCalibrationIt = pathCalibrationIt->constFind(segmentIndex);
             if (segmentCalibrationIt != pathCalibrationIt->cend()) {
-                calibrationMatrix = segmentCalibrationIt.value();
-            } else {
-                calibrationMatrix = m_currentCalibrationMatrix;
+                t0PrimeLbn = segmentCalibrationIt.value();
             }
-        } else {
-            calibrationMatrix = m_currentCalibrationMatrix;
         }
 
         const auto bundlePathIt = m_pathSegmentCaptureBundles.constFind(pathId);
@@ -3621,17 +3925,28 @@ void StateMachine::applySegmentPoseStitching(int pathId, int segmentIndex)
             if (bundleSegmentIt != bundlePathIt->cend()) {
                 const auto& lb = bundleSegmentIt->lbPoseResult;
                 if (lb.success && lb.poseMatrix.valid) {
-                    stereoMatrix = lb.poseMatrix.values;
+                    lbRtGlobal = lb.poseMatrix.values;
+                    lbRtGlobalValid = true;
+                    calibrationMatrix = lbRtGlobal;
                     lbValid = true;
+                    rtGlobalAsT0 = true;
+                    m_pathSegmentCalibrationMatrices[pathId][segmentIndex] = calibrationMatrix;
+                } else if (lb.invoked) {
+                    lbFallbackNote = lb.message;
                 }
             }
+        }
+
+        if (!rtGlobalAsT0) {
+            calibrationMatrix = t0PrimeLbn;
         }
     }
 
     if (!lbValid) {
         qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("[PoseStitch] LB 位姿无效，拼接使用单位阵 T，路径=") << pathId
-            << QStringLiteral(" 段号=") << segmentIndex;
+            << QStringLiteral("[PoseStitch] LB 无效，拼接回退 T0'（JSON/LBN），路径=") << pathId
+            << QStringLiteral(" 段号=") << segmentIndex
+            << (lbFallbackNote.isEmpty() ? QString() : QStringLiteral(" 说明=") + lbFallbackNote);
     }
 
     scan_tracking::mech_eye::PointCloudFrame stitchedCloud;
@@ -3665,15 +3980,26 @@ void StateMachine::applySegmentPoseStitching(int pathId, int segmentIndex)
     }
 
     qInfo(LOG_FLOW).noquote()
-        << QStringLiteral("[PoseStitch] 点云已拼接 T0'×T")
+        << QStringLiteral("[PoseStitch] 点云已拼接 T0")
+        << (rtGlobalAsT0 ? QStringLiteral("(Rt_global)") : QStringLiteral("(T0' fallback)"))
         << QStringLiteral(" 路径=") << pathId
         << QStringLiteral(" 段号=") << segmentIndex
         << QStringLiteral(" 点数=") << stitchedCloud.pointCount
         << QStringLiteral(" LB有效=") << lbValid
         << QStringLiteral(" 说明=") << stitchMessage;
 
-    const auto combinedOutputRt =
-        scan_tracking::mech_eye::multiplyRowMajor4x4(calibrationMatrix, stereoMatrix);
+    const auto combinedOutputRt = calibrationMatrix;
+    recordSegmentPoseStitch(
+        pathId,
+        segmentIndex,
+        lbValid,
+        lbRtGlobalValid,
+        m_baseCalibrationMatrix,
+        t0PrimeLbn,
+        lbRtGlobal,
+        calibrationMatrix,
+        stereoMatrix,
+        combinedOutputRt);
     updateLastPoseStitchArtifact(
         pathId,
         segmentIndex,
@@ -3683,6 +4009,62 @@ void StateMachine::applySegmentPoseStitching(int pathId, int segmentIndex)
         stereoMatrix,
         combinedOutputRt,
         stitchedCloud);
+
+    SegmentPoseStitchRecord stitchRecord;
+    stitchRecord.valid = true;
+    stitchRecord.lbTrackingValid = lbValid;
+    stitchRecord.lbRtGlobalValid = lbRtGlobalValid;
+    stitchRecord.pathId = pathId;
+    stitchRecord.segmentIndex = segmentIndex;
+    stitchRecord.baseCalibrationT0 = m_baseCalibrationMatrix;
+    stitchRecord.t0PrimeLbn = t0PrimeLbn;
+    stitchRecord.lbRtGlobal = lbRtGlobal;
+    stitchRecord.appliedT0 = calibrationMatrix;
+    stitchRecord.stereoTrackingT = stereoMatrix;
+    stitchRecord.combinedOutputRt = combinedOutputRt;
+
+    scan_tracking::vision::MultiCameraCaptureBundle bundleSnapshot;
+    {
+        std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
+        const auto pathIt = m_pathSegmentCaptureBundles.constFind(pathId);
+        if (pathIt != m_pathSegmentCaptureBundles.cend()) {
+            const auto segmentIt = pathIt->constFind(segmentIndex);
+            if (segmentIt != pathIt->cend()) {
+                bundleSnapshot = segmentIt.value();
+            }
+        }
+    }
+    persistSegmentCaptureExportGroup(
+        pathId, segmentIndex, bundleSnapshot, inputCloud, stitchedCloud, stitchRecord);
+}
+
+void StateMachine::recordSegmentPoseStitch(
+    int pathId,
+    int segmentIndex,
+    bool lbTrackingValid,
+    bool lbRtGlobalValid,
+    const std::array<float, 16>& baseCalibrationT0,
+    const std::array<float, 16>& t0PrimeLbn,
+    const std::array<float, 16>& lbRtGlobal,
+    const std::array<float, 16>& appliedT0,
+    const std::array<float, 16>& stereoTrackingT,
+    const std::array<float, 16>& combinedOutputRt)
+{
+    SegmentPoseStitchRecord record;
+    record.valid = true;
+    record.lbTrackingValid = lbTrackingValid;
+    record.lbRtGlobalValid = lbRtGlobalValid;
+    record.pathId = pathId;
+    record.segmentIndex = segmentIndex;
+    record.baseCalibrationT0 = baseCalibrationT0;
+    record.t0PrimeLbn = t0PrimeLbn;
+    record.lbRtGlobal = lbRtGlobal;
+    record.appliedT0 = appliedT0;
+    record.stereoTrackingT = stereoTrackingT;
+    record.combinedOutputRt = combinedOutputRt;
+
+    std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
+    m_pathSegmentPoseStitchRecords[pathId][segmentIndex] = record;
 }
 
 void StateMachine::updateLastPoseStitchArtifact(
@@ -3718,6 +4100,9 @@ void StateMachine::initializePoseStitchRunOutputDirectory()
     // 启动阶段不做任何目录 I/O：MechEye/Hik/LB 等 SDK 加载后，Qt QDir::mkpath 可能触发堆损坏。
     // run_* 子目录在 Trig_Inspection 落盘前由 ensurePoseStitchRunRootDirectory() 创建。
     m_poseStitchRunRootDirectory.clear();
+    m_poseStitchOutputTimestamp.clear();
+    m_segmentCaptureExportSessionRoot.clear();
+    m_segmentCaptureExportSessionTimestamp.clear();
 }
 
 bool StateMachine::ensurePoseStitchRunRootDirectory()
@@ -3726,16 +4111,124 @@ bool StateMachine::ensurePoseStitchRunRootDirectory()
         return true;
     }
 
-    m_poseStitchRunRootDirectory = createPoseStitchRunRootDirectory();
+    m_poseStitchOutputTimestamp = poseStitchOutputTimestamp();
+    m_poseStitchRunRootDirectory = createPoseStitchRunRootDirectory(m_poseStitchOutputTimestamp);
     if (m_poseStitchRunRootDirectory.isEmpty()) {
         qWarning(LOG_FLOW).noquote()
             << QStringLiteral("[PoseStitchOutput] 无法创建本次运行输出目录");
+        m_poseStitchOutputTimestamp.clear();
         return false;
     }
 
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[PoseStitchOutput] 本次运行输出目录=") << m_poseStitchRunRootDirectory;
     return true;
+}
+
+void StateMachine::persistInspectionPoseStitchOutput(int pathId) const
+{
+    if (pathId <= 0) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[PoseStitchOutput] 跳过落盘：无效 pathId=") << pathId;
+        return;
+    }
+
+    if (m_poseStitchRunRootDirectory.isEmpty()) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[PoseStitchOutput] 跳过落盘：运行输出目录未就绪");
+        return;
+    }
+
+    const QString timestamp = m_poseStitchOutputTimestamp.isEmpty()
+        ? poseStitchOutputTimestamp()
+        : m_poseStitchOutputTimestamp;
+    const QString rtDirectory = poseStitchMatrixOutputDirectory(m_poseStitchRunRootDirectory);
+
+    QMap<int, SegmentPoseStitchRecord> segmentRecords;
+    {
+        std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
+        const auto pathIt = m_pathSegmentPoseStitchRecords.constFind(pathId);
+        if (pathIt == m_pathSegmentPoseStitchRecords.cend() || pathIt->isEmpty()) {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("[PoseStitchOutput] 路径") << pathId
+                << QStringLiteral(" 无段位姿矩阵记录，仅尝试落盘末段点云");
+            persistLastPoseStitchArtifactToDisk();
+            return;
+        }
+        segmentRecords = pathIt.value();
+    }
+
+    QList<int> segmentIndices = segmentRecords.keys();
+    std::sort(segmentIndices.begin(), segmentIndices.end());
+
+    QString summaryText;
+    summaryText += QStringLiteral("# Path pose stitch matrix summary (row-major 4x4)\n");
+    summaryText += QStringLiteral("# generatedAt=")
+        + QDateTime::currentDateTime().toString(Qt::ISODateWithMs) + QStringLiteral("\n");
+    summaryText += QStringLiteral("pathId=") + QString::number(pathId) + QStringLiteral("\n");
+    summaryText += QStringLiteral("segmentCount=") + QString::number(segmentIndices.size()) + QStringLiteral("\n\n");
+
+    int writtenSegmentCount = 0;
+    for (int segmentIndex : segmentIndices) {
+        const SegmentPoseStitchRecord& record = segmentRecords[segmentIndex];
+        if (!record.valid) {
+            continue;
+        }
+
+        const QString baseName = QStringLiteral("%1_path%2_seg%3")
+                                     .arg(timestamp)
+                                     .arg(pathId)
+                                     .arg(segmentIndex);
+        const QString rtFilePath = QDir(rtDirectory).filePath(baseName + QStringLiteral("_Rt.txt"));
+        if (writeTextFile(rtFilePath, buildSegmentPoseStitchRtText(record))) {
+            ++writtenSegmentCount;
+            qInfo(LOG_FLOW).noquote()
+                << QStringLiteral("[PoseStitchOutput] 段矩阵已写入") << rtFilePath;
+        } else {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("[PoseStitchOutput] 段矩阵写入失败：") << rtFilePath;
+        }
+
+        summaryText += QStringLiteral("=== segment ") + QString::number(segmentIndex) + QStringLiteral(" ===\n");
+        summaryText += buildSegmentPoseStitchRtText(record);
+        summaryText += QStringLiteral("\n");
+    }
+
+    const int finalSegmentIndex = segmentIndices.isEmpty() ? 0 : segmentIndices.last();
+    if (finalSegmentIndex > 0 && segmentRecords.contains(finalSegmentIndex)
+        && segmentRecords[finalSegmentIndex].valid) {
+        const SegmentPoseStitchRecord& finalRecord = segmentRecords[finalSegmentIndex];
+        const QString finalFilePath = QDir(rtDirectory).filePath(
+            QStringLiteral("%1_path%2_final_Rt.txt").arg(timestamp).arg(pathId));
+        if (writeTextFile(
+                finalFilePath,
+                buildFinalPoseStitchRtText(pathId, finalSegmentIndex, finalRecord))) {
+            qInfo(LOG_FLOW).noquote()
+                << QStringLiteral("[PoseStitchOutput] 最终矩阵已写入") << finalFilePath
+                << QStringLiteral(" (finalSegmentIndex=") << finalSegmentIndex << QStringLiteral(")");
+        } else {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("[PoseStitchOutput] 最终矩阵写入失败：") << finalFilePath;
+        }
+
+        summaryText += QStringLiteral("=== final (segment ") + QString::number(finalSegmentIndex)
+            + QStringLiteral(") ===\n");
+        summaryText += buildFinalPoseStitchRtText(pathId, finalSegmentIndex, finalRecord);
+        summaryText += QStringLiteral("\n");
+    }
+
+    const QString summaryFilePath = QDir(rtDirectory).filePath(
+        QStringLiteral("%1_path%2_all_matrices.txt").arg(timestamp).arg(pathId));
+    if (writeTextFile(summaryFilePath, summaryText)) {
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[PoseStitchOutput] 汇总矩阵已写入") << summaryFilePath
+            << QStringLiteral(" 段数=") << writtenSegmentCount;
+    } else {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[PoseStitchOutput] 汇总矩阵写入失败：") << summaryFilePath;
+    }
+
+    persistLastPoseStitchArtifactToDisk();
 }
 
 void StateMachine::persistLastPoseStitchArtifactToDisk() const
@@ -3766,36 +4259,16 @@ void StateMachine::persistLastPoseStitchArtifactToDisk() const
         return;
     }
 
-    const QString timestamp = poseStitchOutputTimestamp();
+    const QString timestamp = m_poseStitchOutputTimestamp.isEmpty()
+        ? poseStitchOutputTimestamp()
+        : m_poseStitchOutputTimestamp;
     const QString baseName = QStringLiteral("%1_path%2_seg%3")
                                  .arg(timestamp)
                                  .arg(artifact.pathId)
                                  .arg(artifact.segmentIndex);
 
-    const QString rtDirectory = poseStitchMatrixOutputDirectory(m_poseStitchRunRootDirectory);
     const QString cloudDirectory = poseStitchPointCloudOutputDirectory(m_poseStitchRunRootDirectory);
-    const QString rtFilePath = QDir(rtDirectory).filePath(baseName + QStringLiteral("_Rt.txt"));
     const QString plyFilePath = QDir(cloudDirectory).filePath(baseName + QStringLiteral("_stitched.ply"));
-
-    QFile rtFile(rtFilePath);
-    if (!rtFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("[PoseStitchOutput] 写入矩阵失败：") << rtFilePath;
-    } else {
-        QTextStream stream(&rtFile);
-        stream.setCodec("UTF-8");
-        stream << buildPoseStitchRtText(
-            artifact.pathId,
-            artifact.segmentIndex,
-            artifact.baseCalibrationT0,
-            artifact.calibrationT0Prime,
-            artifact.stereoTrackingT,
-            artifact.combinedOutputRt,
-            artifact.lbTrackingValid);
-        rtFile.close();
-        qInfo(LOG_FLOW).noquote()
-            << QStringLiteral("[PoseStitchOutput] 矩阵已写入") << rtFilePath;
-    }
 
     if (!scan_tracking::mech_eye::savePointCloudFrameToPly(artifact.stitchedPointCloud, plyFilePath)) {
         qWarning(LOG_FLOW).noquote()
@@ -3807,6 +4280,218 @@ void StateMachine::persistLastPoseStitchArtifactToDisk() const
     }
 
     scan_tracking::mech_eye::releasePointCloudFrameBuffers(&artifact.stitchedPointCloud);
+}
+
+void StateMachine::persistMergedInspectionPointCloudToDisk(
+    int pathId,
+    int mergedSegmentCount,
+    const scan_tracking::mech_eye::PointCloudFrame& mergedCloud) const
+{
+    if (pathId <= 0 || mergedSegmentCount <= 0 || !mergedCloud.isValid()) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[PoseStitchOutput] 跳过融合点云落盘：无效输入 pathId=") << pathId
+            << QStringLiteral(" 段数=") << mergedSegmentCount;
+        return;
+    }
+
+    if (m_poseStitchRunRootDirectory.isEmpty()) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[PoseStitchOutput] 跳过融合点云落盘：运行输出目录未就绪");
+        return;
+    }
+
+    const QString timestamp = m_poseStitchOutputTimestamp.isEmpty()
+        ? poseStitchOutputTimestamp()
+        : m_poseStitchOutputTimestamp;
+    const QString baseName = QStringLiteral("%1_path%2_merged_%3segs")
+                                 .arg(timestamp)
+                                 .arg(pathId)
+                                 .arg(mergedSegmentCount);
+
+    const QString cloudDirectory = poseStitchPointCloudOutputDirectory(m_poseStitchRunRootDirectory);
+    const QString plyFilePath =
+        QDir(cloudDirectory).filePath(baseName + QStringLiteral("_inspection.ply"));
+
+    if (!scan_tracking::mech_eye::savePointCloudFrameToPly(mergedCloud, plyFilePath)) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[PoseStitchOutput] 写入检测融合点云失败：") << plyFilePath;
+        return;
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[PoseStitchOutput] 检测融合点云已写入") << plyFilePath
+        << QStringLiteral(" 点数=") << mergedCloud.pointCount
+        << QStringLiteral(" 参与段数=") << mergedSegmentCount;
+}
+
+bool StateMachine::ensureSegmentCaptureExportSessionRoot()
+{
+    if (!m_segmentCaptureExportSessionRoot.isEmpty()) {
+        return true;
+    }
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    const QString configuredRoot = configManager != nullptr
+        ? configManager->segmentCaptureExportConfig().outputRoot
+        : QStringLiteral("output/segment_capture");
+    const QString outputRoot = configuredRoot.trimmed().isEmpty()
+        ? QStringLiteral("output/segment_capture")
+        : configuredRoot;
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QString baseDir = QFileInfo(outputRoot).isAbsolute()
+        ? outputRoot
+        : QDir(appDir).filePath(outputRoot);
+    if (!ensureDirectoryTreeExists(baseDir)) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[SegmentCaptureExport] 创建输出根目录失败：") << baseDir;
+        return false;
+    }
+
+    m_segmentCaptureExportSessionTimestamp = poseStitchOutputTimestamp();
+    const QString sessionRoot = QDir(baseDir).filePath(
+        QStringLiteral("session_") + m_segmentCaptureExportSessionTimestamp);
+    if (!ensureDirectoryTreeExists(sessionRoot)) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[SegmentCaptureExport] 创建会话目录失败：") << sessionRoot;
+        m_segmentCaptureExportSessionTimestamp.clear();
+        return false;
+    }
+
+    m_segmentCaptureExportSessionRoot = sessionRoot;
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[SegmentCaptureExport] 会话输出目录=") << m_segmentCaptureExportSessionRoot;
+    return true;
+}
+
+void StateMachine::persistSegmentCaptureExportGroup(
+    int pathId,
+    int segmentIndex,
+    const scan_tracking::vision::MultiCameraCaptureBundle& bundle,
+    const scan_tracking::mech_eye::PointCloudFrame& rawPointCloud,
+    const scan_tracking::mech_eye::PointCloudFrame& stitchedPointCloud,
+    const SegmentPoseStitchRecord& stitchRecord)
+{
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr || !configManager->segmentCaptureExportConfig().enabled) {
+        return;
+    }
+    if (pathId <= 0 || segmentIndex <= 0) {
+        return;
+    }
+    if (!ensureSegmentCaptureExportSessionRoot()) {
+        return;
+    }
+
+    const QString groupDir =
+        segmentCaptureExportGroupDirectory(m_segmentCaptureExportSessionRoot, pathId, segmentIndex);
+    if (!ensureDirectoryTreeExists(groupDir)) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[SegmentCaptureExport] 创建分组目录失败：") << groupDir;
+        return;
+    }
+
+    SegmentCaptureCxpExportMeta cxpExportMeta;
+    cxpExportMeta.exportGroupId =
+        buildSegmentCaptureExportGroupId(pathId, segmentIndex, bundle.request.requestId);
+    cxpExportMeta.sessionRoot = m_segmentCaptureExportSessionRoot;
+
+    const QString cxpCaptureTimestamp = resolveCxpCaptureFileTimestamp(bundle);
+    cxpExportMeta.captureFileTimestamp = cxpCaptureTimestamp;
+    const QString leftFileName = buildCxpCaptureFileName(QStringLiteral("left"), cxpCaptureTimestamp);
+    const QString rightFileName = buildCxpCaptureFileName(QStringLiteral("right"), cxpCaptureTimestamp);
+    if (bundle.hikCameraAResult.success() && bundle.hikCameraAResult.frame.isValid()) {
+        const QString leftPath = QDir(groupDir).filePath(leftFileName);
+        const QString savedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+        const bool cxpLeftSaved = scan_tracking::vision::saveHikMonoFrameToBmp(
+            bundle.hikCameraAResult.frame, leftPath);
+        const qint64 savedFileBytes = cxpLeftSaved ? QFileInfo(leftPath).size() : 0;
+        const QString savedFileMd5 = cxpLeftSaved ? md5HexFromFile(leftPath) : QStringLiteral("(not-saved)");
+        cxpExportMeta.left = buildCxpImageMetaFromCapture(
+            bundle.hikCameraAResult, leftFileName, cxpLeftSaved, savedAt, savedFileBytes, savedFileMd5);
+        if (cxpLeftSaved) {
+            logSegmentCaptureCxpImageSaved(
+                QStringLiteral("左"), cxpExportMeta.exportGroupId, leftPath, cxpExportMeta.left);
+        } else {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("[SegmentCaptureExport] 左目 BMP 写入失败：") << leftPath
+                << QStringLiteral("group=") << cxpExportMeta.exportGroupId
+                << QStringLiteral("frameId=") << cxpExportMeta.left.frameId
+                << QStringLiteral("pixelMd5=") << cxpExportMeta.left.pixelMd5;
+        }
+    }
+    if (bundle.hikCameraBResult.success() && bundle.hikCameraBResult.frame.isValid()) {
+        const QString rightPath = QDir(groupDir).filePath(rightFileName);
+        const QString savedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+        const bool cxpRightSaved = scan_tracking::vision::saveHikMonoFrameToBmp(
+            bundle.hikCameraBResult.frame, rightPath);
+        const qint64 savedFileBytes = cxpRightSaved ? QFileInfo(rightPath).size() : 0;
+        const QString savedFileMd5 = cxpRightSaved ? md5HexFromFile(rightPath) : QStringLiteral("(not-saved)");
+        cxpExportMeta.right = buildCxpImageMetaFromCapture(
+            bundle.hikCameraBResult, rightFileName, cxpRightSaved, savedAt, savedFileBytes, savedFileMd5);
+        if (cxpRightSaved) {
+            logSegmentCaptureCxpImageSaved(
+                QStringLiteral("右"), cxpExportMeta.exportGroupId, rightPath, cxpExportMeta.right);
+        } else {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("[SegmentCaptureExport] 右目 BMP 写入失败：") << rightPath
+                << QStringLiteral("group=") << cxpExportMeta.exportGroupId
+                << QStringLiteral("frameId=") << cxpExportMeta.right.frameId
+                << QStringLiteral("pixelMd5=") << cxpExportMeta.right.pixelMd5;
+        }
+    }
+
+    const QString matrixPath = QDir(groupDir).filePath(QStringLiteral("matrix.txt"));
+    if (!writeTextFileIfPossible(matrixPath, buildSegmentPoseStitchRtText(stitchRecord))) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[SegmentCaptureExport] 矩阵写入失败：") << matrixPath;
+    }
+
+    const QString metaPath = QDir(groupDir).filePath(QStringLiteral("meta.txt"));
+    if (!writeTextFileIfPossible(
+            metaPath,
+            buildSegmentCaptureExportMetaText(
+                pathId,
+                segmentIndex,
+                bundle,
+                rawPointCloud,
+                stitchedPointCloud,
+                stitchRecord,
+                cxpExportMeta))) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[SegmentCaptureExport] meta 写入失败：") << metaPath;
+    }
+
+    bool rawSaved = false;
+    if (configManager->segmentCaptureExportConfig().saveRawPointCloud && rawPointCloud.isValid()) {
+        const QString rawPath = QDir(groupDir).filePath(QStringLiteral("pointcloud_raw.ply"));
+        rawSaved = scan_tracking::mech_eye::savePointCloudFrameToPly(rawPointCloud, rawPath);
+        if (!rawSaved) {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("[SegmentCaptureExport] 原始点云写入失败：") << rawPath;
+        }
+    }
+
+    bool stitchedSaved = false;
+    if (stitchedPointCloud.isValid()) {
+        const QString stitchedPath = QDir(groupDir).filePath(QStringLiteral("pointcloud_stitched.ply"));
+        stitchedSaved =
+            scan_tracking::mech_eye::savePointCloudFrameToPly(stitchedPointCloud, stitchedPath);
+        if (!stitchedSaved) {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("[SegmentCaptureExport] 拼接点云写入失败：") << stitchedPath;
+        }
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[SegmentCaptureExport] 分组已写入") << groupDir
+        << QStringLiteral(" group=") << cxpExportMeta.exportGroupId
+        << QStringLiteral(" CXP左=") << (cxpExportMeta.left.saved ? QStringLiteral("OK") : QStringLiteral("FAIL"))
+        << QStringLiteral(" CXP右=") << (cxpExportMeta.right.saved ? QStringLiteral("OK") : QStringLiteral("FAIL"))
+        << QStringLiteral(" 左pixelMd5=") << cxpExportMeta.left.pixelMd5
+        << QStringLiteral(" 右pixelMd5=") << cxpExportMeta.right.pixelMd5
+        << QStringLiteral(" 原始PLY=") << (rawSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"))
+        << QStringLiteral(" 拼接PLY=") << (stitchedSaved ? QStringLiteral("OK") : QStringLiteral("FAIL"));
 }
 
 /**

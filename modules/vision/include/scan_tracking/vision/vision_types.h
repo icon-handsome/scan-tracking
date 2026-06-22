@@ -155,6 +155,7 @@ struct LbPoseResult {
     int rightImageHeight = 0;   ///< 右目输入图高
     int framePointCount = 0;    ///< 重建得到的标记点数量
     PoseMatrix4x4 poseMatrix;   ///< 4×4 Rt 位姿矩阵
+    QString diagnosticText;     ///< LB 诊断明细（标记点/矩阵/时间戳），写入 meta.txt 与日志
 };
 
 /// LBN（转盘段）位姿检测结果，由 runLbnPoseDetection 填充

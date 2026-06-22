@@ -45,7 +45,7 @@ public:
     bool writeRegister(int startAddress, quint16 value);
     bool writeRegisters(int startAddress, const QVector<quint16>& values);
 
-    /// 程序退出时将 IPC 结果区（40101-40184）全部清零
+    /// 将 IPC 写入 PLC 的结果区（40101-40184：Ack/Res/状态/坐标/检测/下料区等）全部清零
     bool resetIpcResultBlock();
 
 signals:

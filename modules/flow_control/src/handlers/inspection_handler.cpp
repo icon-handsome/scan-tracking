@@ -52,7 +52,7 @@ void StateMachine::executeInspectionTask()
 
     QString loadError;
     ensurePoseStitchRunRootDirectory();
-    persistLastPoseStitchArtifactToDisk();
+    persistInspectionPoseStitchOutput(m_activeTask.inspectionPathId);
 
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
     const auto inspectionType = configManager != nullptr

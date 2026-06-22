@@ -280,6 +280,33 @@ public:
         float rz = 0.0f;
     };
 
+    struct LastPoseStitchArtifact {
+        bool valid = false;
+        bool lbTrackingValid = false;
+        int pathId = 0;
+        int segmentIndex = 0;
+        std::array<float, 16> baseCalibrationT0{};
+        std::array<float, 16> calibrationT0Prime{};
+        std::array<float, 16> stereoTrackingT{};
+        std::array<float, 16> combinedOutputRt{};
+        scan_tracking::mech_eye::PointCloudFrame stitchedPointCloud;
+    };
+
+    /// 每段位姿拼接矩阵快照（供 Trig_Inspection 落盘给算法反馈）
+    struct SegmentPoseStitchRecord {
+        bool valid = false;
+        bool lbTrackingValid = false;
+        bool lbRtGlobalValid = false;
+        int pathId = 0;
+        int segmentIndex = 0;
+        std::array<float, 16> baseCalibrationT0{};
+        std::array<float, 16> t0PrimeLbn{};
+        std::array<float, 16> lbRtGlobal{};
+        std::array<float, 16> appliedT0{};
+        std::array<float, 16> stereoTrackingT{};
+        std::array<float, 16> combinedOutputRt{};
+    };
+
 private:
     // 检测结果汇总结构体 
     struct InspectionSummary {
@@ -467,33 +494,50 @@ private:
         bool needRotation,
         const scan_tracking::vision::MultiCameraCaptureBundle& bundle);
 
-    // 将段点云变换到统一坐标系：p' = p × (T0' × T)，写回内存缓存
+    // 将段点云变换到统一坐标系：LB 成功时 p' = p × T0（T0=Rt_global）；否则 p' = p × T0'（LBN 链）
     void applySegmentPoseStitching(int pathId, int segmentIndex);
-
-    struct LastPoseStitchArtifact {
-        bool valid = false;
-        bool lbTrackingValid = false;
-        int pathId = 0;
-        int segmentIndex = 0;
-        std::array<float, 16> baseCalibrationT0{};
-        std::array<float, 16> calibrationT0Prime{};
-        std::array<float, 16> stereoTrackingT{};
-        std::array<float, 16> combinedOutputRt{};
-        scan_tracking::mech_eye::PointCloudFrame stitchedPointCloud;
-    };
 
     void updateLastPoseStitchArtifact(
         int pathId,     
         int segmentIndex,       
         bool lbTrackingValid,
         const std::array<float, 16>& baseCalibrationT0,   // 基准 T0    
-        const std::array<float, 16>& calibrationT0Prime,  // T0'
-        const std::array<float, 16>& stereoTrackingT,     // T_N
-        const std::array<float, 16>& combinedOutputRt,    // T0' × T_N
+        const std::array<float, 16>& calibrationT0Prime,  // T0 或 T0'（LB 成功时为 Rt_global）
+        const std::array<float, 16>& stereoTrackingT,     // 恒为单位阵（Rt_global 已作为 T0）
+        const std::array<float, 16>& combinedOutputRt,    // 与 calibrationT0Prime 相同（T 为单位阵）
         const scan_tracking::mech_eye::PointCloudFrame& stitchedPointCloud);
 
-    /// 将最后一次拼接结果写到 exe/output/run_*/matrix 与 pointcloud（Trig_Inspection 时落盘一次）
+    void recordSegmentPoseStitch(
+        int pathId,
+        int segmentIndex,
+        bool lbTrackingValid,
+        bool lbRtGlobalValid,
+        const std::array<float, 16>& baseCalibrationT0,
+        const std::array<float, 16>& t0PrimeLbn,
+        const std::array<float, 16>& lbRtGlobal,
+        const std::array<float, 16>& appliedT0,
+        const std::array<float, 16>& stereoTrackingT,
+        const std::array<float, 16>& combinedOutputRt);
+
+    /// Trig_Inspection 前落盘：各段矩阵 + 最终矩阵 + 末段拼接点云
+    void persistInspectionPoseStitchOutput(int pathId) const;
+
     void persistLastPoseStitchArtifactToDisk() const;
+
+    /// 综合检测合并点云落盘（path1_merged_Nsegs_inspection.ply）
+    void persistMergedInspectionPointCloudToDisk(
+        int pathId,
+        int mergedSegmentCount,
+        const scan_tracking::mech_eye::PointCloudFrame& mergedCloud) const;
+
+    bool ensureSegmentCaptureExportSessionRoot();
+    void persistSegmentCaptureExportGroup(
+        int pathId,
+        int segmentIndex,
+        const scan_tracking::vision::MultiCameraCaptureBundle& bundle,
+        const scan_tracking::mech_eye::PointCloudFrame& rawPointCloud,
+        const scan_tracking::mech_eye::PointCloudFrame& stitchedPointCloud,
+        const SegmentPoseStitchRecord& stitchRecord);
 
     void initializePoseStitchRunOutputDirectory();
     bool ensurePoseStitchRunRootDirectory();
@@ -634,9 +678,13 @@ private:
     std::array<float, 16> m_baseCalibrationMatrix{};       // 基准 T0（来自 scan_paths_config.json）
     std::array<float, 16> m_currentCalibrationMatrix{};    // 当前 T0' / T0''（转动点由 LBN 链式更新）
     QMap<int, QMap<int, std::array<float, 16>>> m_pathSegmentCalibrationMatrices;  // 每路径每段 T0' 快照
+    QMap<int, QMap<int, SegmentPoseStitchRecord>> m_pathSegmentPoseStitchRecords;
     LastPoseStitchArtifact m_lastPoseStitchArtifact;
     mutable std::mutex m_lastPoseStitchMutex;
     QString m_poseStitchRunRootDirectory;
+    QString m_poseStitchOutputTimestamp;
+    QString m_segmentCaptureExportSessionRoot;
+    QString m_segmentCaptureExportSessionTimestamp;
 
     /// 综合检测结果推送（与 TrackingService::InspectionResultNotifier 共用同一回调）
     std::function<void(const tracking::InspectionResult&)> m_inspectionResultPublisher;

@@ -183,6 +183,10 @@ const ModbusConfig& ConfigManager::modbusConfig() const { return m_modbusConfig;
 const CameraConfig& ConfigManager::cameraConfig() const { return m_cameraConfig; }
 const VisionConfig& ConfigManager::visionConfig() const { return m_visionConfig; }
 const FlowControlConfig& ConfigManager::flowControlConfig() const { return m_flowControlConfig; }
+const SegmentCaptureExportConfig& ConfigManager::segmentCaptureExportConfig() const
+{
+    return m_segmentCaptureExportConfig;
+}
 const TrackingConfig& ConfigManager::trackingConfig() const { return m_trackingConfig; }
 const BevelConfig& ConfigManager::bevelConfig() const { return m_bevelConfig; }
 
@@ -439,22 +443,22 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("hikCxpExposureTimeUs", 50000);
     settings.setValue("hikCxpGain", 0.0);
     settings.setValue("hikCxpSmokeOutputDir", "D:/CxpSmokeTest");
-    settings.setValue("hikCxpCameraAName", "ch250_a");
-    settings.setValue("hikCxpCameraAKey", "DA9122997");
-    settings.setValue("hikCxpCameraASerial", "DA9122997");
-    settings.setValue("hikCxpCameraBName", "ch250_b");
-    settings.setValue("hikCxpCameraBKey", "DA9122998");
-    settings.setValue("hikCxpCameraBSerial", "DA9122998");
+    settings.setValue("hikCxpCameraAName", "ch250_left");
+    settings.setValue("hikCxpCameraAKey", "DA9122998");
+    settings.setValue("hikCxpCameraASerial", "DA9122998");
+    settings.setValue("hikCxpCameraBName", "ch250_right");
+    settings.setValue("hikCxpCameraBKey", "DA9122997");
+    settings.setValue("hikCxpCameraBSerial", "DA9122997");
     settings.endGroup();
 
     settings.beginGroup("LbPose");
     settings.setValue(
         "trackConfigFile",
         QStringLiteral("third_party/LB/track_config.ini"));
-    settings.setValue("dataRoot", QStringLiteral("third_party/LB/data"));
+    settings.setValue("dataRoot", QStringLiteral("data/LB"));
     settings.setValue("leftPattern", "");
     settings.setValue("rightPattern", "");
-    settings.setValue("templateFile", "");
+    settings.setValue("templateFile", QStringLiteral("third_party/LB/template_for_scanner_ori.txt"));
     settings.endGroup();
 
     // 首次生成 config.ini 时的 [LbnPose] 默认（与 150200 离线验收一致，生产宜再标定）
@@ -479,6 +483,12 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("heartbeatIntervalMs", 1000);
     settings.setValue("simulatedProcessingMs", 300);
     settings.setValue("algorithmBypassEnabled", false);
+    settings.endGroup();
+
+    settings.beginGroup("SegmentCaptureExport");
+    settings.setValue("enabled", true);
+    settings.setValue("outputRoot", QStringLiteral("output/segment_capture"));
+    settings.setValue("saveRawPointCloud", true);
     settings.endGroup();
 
     settings.beginGroup("Tracking");
@@ -665,17 +675,17 @@ void ConfigManager::load(const QString& filePath)
     m_visionConfig.hikCxpSmokeOutputDir =
         settings.value("hikCxpSmokeOutputDir", "D:/CxpSmokeTest").toString();
     m_visionConfig.hikCxpCameraA.logicalName =
-        settings.value("hikCxpCameraAName", "ch250_a").toString();
+        settings.value("hikCxpCameraAName", "ch250_left").toString();
     m_visionConfig.hikCxpCameraA.cameraKey =
-        settings.value("hikCxpCameraAKey", "DA9122997").toString();
+        settings.value("hikCxpCameraAKey", "DA9122998").toString();
     m_visionConfig.hikCxpCameraA.serialNumber =
-        settings.value("hikCxpCameraASerial", "DA9122997").toString();
+        settings.value("hikCxpCameraASerial", "DA9122998").toString();
     m_visionConfig.hikCxpCameraB.logicalName =
-        settings.value("hikCxpCameraBName", "ch250_b").toString();
+        settings.value("hikCxpCameraBName", "ch250_right").toString();
     m_visionConfig.hikCxpCameraB.cameraKey =
-        settings.value("hikCxpCameraBKey", "DA9122998").toString();
+        settings.value("hikCxpCameraBKey", "DA9122997").toString();
     m_visionConfig.hikCxpCameraB.serialNumber =
-        settings.value("hikCxpCameraBSerial", "DA9122998").toString();
+        settings.value("hikCxpCameraBSerial", "DA9122997").toString();
     settings.endGroup();
 
     settings.beginGroup("LbPose");
@@ -688,13 +698,16 @@ void ConfigManager::load(const QString& filePath)
     m_lbPoseConfig.dataRoot = resolveConfigRelativePath(
         settings.value(
             "dataRoot",
-            QStringLiteral("third_party/LB/data"))
+            QStringLiteral("data/LB"))
             .toString(),
         m_configFilePath);
     m_lbPoseConfig.leftPattern = settings.value("leftPattern", "").toString();
     m_lbPoseConfig.rightPattern = settings.value("rightPattern", "").toString();
     m_lbPoseConfig.templateFile = resolveConfigRelativePath(
-        settings.value("templateFile", "").toString(),
+        settings.value(
+            "templateFile",
+            QStringLiteral("third_party/LB/template_for_scanner_ori.txt"))
+            .toString(),
         m_configFilePath);
     settings.endGroup();
 
@@ -731,6 +744,15 @@ void ConfigManager::load(const QString& filePath)
         settings.value("algorithmBypassEnabled", false).toBool();
     m_flowControlConfig.scanCacheDirectory = settings.value("scanCacheDirectory").toString().trimmed();
     m_flowControlConfig.retainSegmentPly = settings.value("retainSegmentPly", true).toBool();
+    settings.endGroup();
+
+    settings.beginGroup("SegmentCaptureExport");
+    m_segmentCaptureExportConfig.enabled = settings.value("enabled", false).toBool();
+    m_segmentCaptureExportConfig.outputRoot = resolveConfigRelativePath(
+        settings.value("outputRoot", QStringLiteral("output/segment_capture")).toString(),
+        m_configFilePath);
+    m_segmentCaptureExportConfig.saveRawPointCloud =
+        settings.value("saveRawPointCloud", true).toBool();
     settings.endGroup();
 
     settings.beginGroup("PointCloudProcessing");

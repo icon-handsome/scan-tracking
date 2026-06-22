@@ -118,7 +118,7 @@ bevel::BevelMeasurementResult solveBevelFromRawCloud(
 
 # LB 双目位姿算法（third_party/LB）集成说明
 
-封头段（非转动点位）由 CXP 双目驱动 LB 算法，输出位姿矩阵 `T_N`（`Rt_global`），与 LBN 维护的 `T0'` 相乘做点云拼接。
+封头段（非转动点位）由 CXP 双目驱动 LB 算法，输出 `Rt_global`；IPC 将其作为 **T0** 直接变换梅卡点云（`p' = p × T0`），不再与 JSON `T0'` 及段位姿 `T` 做 `T0'×T` 组合。
 
 ## 目录与构建
 
@@ -145,8 +145,8 @@ templateFile=third_party/LB/data/template-3D-ALL-Shift-Cut-Cut.txt
 ## 主流程
 
 - 转盘段（`needMechEye2D=true`）：仅 LBN，跳过 LB
-- 封头段：CXP 双目 → `runLbPoseDetection()` → `bundle.lbPoseResult.poseMatrix`
-- 状态机：`applySegmentPoseStitching()` 使用 `T0' × T_N`
+- 封头段：CXP 双目 → `runLbPoseDetection()` → `bundle.lbPoseResult.poseMatrix`（Rt_global）
+- 状态机：`applySegmentPoseStitching()` — LB 成功时 `T0 = Rt_global`；失败时回退 LBN 链 `T0'`
 
 ## HMI
 

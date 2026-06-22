@@ -337,10 +337,17 @@ void VisionPipelineService::finishBundleIfReady()
         // 转盘段（needMechEye2D）仅 LBN 标定；封头段用 CXP 双目跑 LB
         const bool runLb = hikReady && !bundle.request.needMechEye2D;
         if (runLb) {
-            qInfo() << QStringLiteral("[LB位姿] 开始检测，左目=") << bundle.hikCameraAResult.frame.width << QStringLiteral("x")
+            qInfo() << QStringLiteral("[LB位姿] 开始检测，左目(CameraA)=")
+                    << bundle.request.hikCameraAKey
+                    << bundle.hikCameraAResult.frame.width << QStringLiteral("x")
                     << bundle.hikCameraAResult.frame.height
-                    << QStringLiteral(" 右目=") << bundle.hikCameraBResult.frame.width << QStringLiteral("x")
-                    << bundle.hikCameraBResult.frame.height;
+                    << QStringLiteral(" frameId=") << bundle.hikCameraAResult.frame.frameId
+                    << QStringLiteral(" timestampMs=") << bundle.hikCameraAResult.frame.timestampMs
+                    << QStringLiteral(" 右目(CameraB)=") << bundle.request.hikCameraBKey
+                    << bundle.hikCameraBResult.frame.width << QStringLiteral("x")
+                    << bundle.hikCameraBResult.frame.height
+                    << QStringLiteral(" frameId=") << bundle.hikCameraBResult.frame.frameId
+                    << QStringLiteral(" timestampMs=") << bundle.hikCameraBResult.frame.timestampMs;
 
             completedBundle.lbPoseResult = runLbPoseDetection(
                 completedBundle.hikCameraAResult.frame,

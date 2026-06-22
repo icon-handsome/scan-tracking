@@ -4,7 +4,9 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QLoggingCategory>
 
 #include <opencv2/opencv.hpp>
 
@@ -14,6 +16,8 @@
 
 namespace scan_tracking {
 namespace vision {
+
+Q_LOGGING_CATEGORY(LOG_LB_POSE, "vision.lb_pose")
 
 namespace {
 
@@ -101,24 +105,145 @@ PoseMatrix4x4 toPoseMatrix(const cv::Mat& rt, const QString& sourceCameraKey, qu
     return pose;
 }
 
+QString resolveLbTemplatePath(
+    const scan_tracking::common::LbPoseConfig& config,
+    const AppConfig& trackConfig)
+{
+    QStringList candidates;
+    const auto addCandidate = [&candidates](const QString& path) {
+        const QString trimmed = path.trimmed();
+        if (trimmed.isEmpty()) {
+            return;
+        }
+        const QString native = QDir::toNativeSeparators(QFileInfo(trimmed).absoluteFilePath());
+        if (!candidates.contains(native)) {
+            candidates.push_back(native);
+        }
+    };
+
+    addCandidate(config.templateFile);
+    addCandidate(QString::fromLocal8Bit(trackConfig.paths.template_points.c_str()));
+
+    const QString exeDir = QCoreApplication::applicationDirPath();
+    addCandidate(QDir(exeDir).filePath(QStringLiteral("third_party/LB/template_for_scanner_ori.txt")));
+    addCandidate(QDir(exeDir).filePath(QStringLiteral("data/LB/template_for_scanner_ori.txt")));
+
+    const QString dataRoot = config.dataRoot.trimmed();
+    if (!dataRoot.isEmpty()) {
+        addCandidate(QDir(dataRoot).filePath(QStringLiteral("template_for_scanner_ori.txt")));
+    }
+
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) {
+            return candidate;
+        }
+    }
+    return candidates.isEmpty() ? QString() : candidates.front();
+}
+
 QString buildTemplatePath(
     const scan_tracking::common::LbPoseConfig& config,
     const AppConfig& trackConfig)
 {
-    if (!config.templateFile.trimmed().isEmpty()) {
-        return config.templateFile.trimmed();
+    return resolveLbTemplatePath(config, trackConfig);
+}
+
+QString formatPoint3fCsv(const cv::Point3f& point)
+{
+    return QStringLiteral("%1,%2,%3")
+        .arg(static_cast<double>(point.x), 0, 'f', 6)
+        .arg(static_cast<double>(point.y), 0, 'f', 6)
+        .arg(static_cast<double>(point.z), 0, 'f', 6);
+}
+
+QString formatPoint2fCsvZeroZ(const cv::Point2f& point)
+{
+    return QStringLiteral("%1,%2,0.0")
+        .arg(static_cast<double>(point.x), 0, 'f', 6)
+        .arg(static_cast<double>(point.y), 0, 'f', 6);
+}
+
+QString formatPoint3fSpace(const cv::Point3f& point)
+{
+    return QStringLiteral("%1 %2 %3")
+        .arg(static_cast<double>(point.x), 0, 'f', 8)
+        .arg(static_cast<double>(point.y), 0, 'f', 8)
+        .arg(static_cast<double>(point.z), 0, 'f', 8);
+}
+
+QString formatCvMat4x8Block(const QString& title, const cv::Mat& matrix)
+{
+    QString text = title + QStringLiteral("\n");
+    if (matrix.empty() || matrix.rows != 4 || matrix.cols != 4 || matrix.type() != CV_64F) {
+        text += QStringLiteral("(invalid matrix)\n");
+        return text;
+    }
+    for (int row = 0; row < 4; ++row) {
+        for (int col = 0; col < 4; ++col) {
+            text += QStringLiteral("%1 ").arg(matrix.at<double>(row, col), 8, 'f', 8);
+        }
+        text += QStringLiteral("\n");
+    }
+    return text;
+}
+
+QString buildLbDiagnosticText(
+    const HikMonoFrame& leftFrame,
+    const HikMonoFrame& rightFrame,
+    const TR_INSPECT_3D_Recon_Marker& recon,
+    const FastGeoHash& geoHash)
+{
+    QString text;
+    text += QStringLiteral("# LB pose detection diagnostic\n");
+    text += QStringLiteral("cxpLeft.frameId=") + QString::number(leftFrame.frameId) + QStringLiteral("\n");
+    text += QStringLiteral("cxpLeft.timestampMs=") + QString::number(leftFrame.timestampMs) + QStringLiteral("\n");
+    text += QStringLiteral("cxpLeft.sourceCameraKey=") + leftFrame.sourceCameraKey + QStringLiteral("\n");
+    text += QStringLiteral("cxpRight.frameId=") + QString::number(rightFrame.frameId) + QStringLiteral("\n");
+    text += QStringLiteral("cxpRight.timestampMs=") + QString::number(rightFrame.timestampMs) + QStringLiteral("\n");
+    text += QStringLiteral("cxpRight.sourceCameraKey=") + rightFrame.sourceCameraKey + QStringLiteral("\n");
+
+    text += QStringLiteral("\n三维重建标记点数量: ")
+        + QString::number(recon.frame_3d_points.size()) + QStringLiteral("\n");
+    for (const cv::Point3f& point : recon.frame_3d_points) {
+        text += formatPoint3fCsv(point) + QStringLiteral("\n");
     }
 
-    const QString fromTrack =
-        QString::fromLocal8Bit(trackConfig.paths.template_points.c_str()).trimmed();
-    if (!fromTrack.isEmpty()) {
-        return fromTrack;
+    text += QStringLiteral("\n左目2D标记点中心数量: ")
+        + QString::number(recon.frame_2d_points_left.size()) + QStringLiteral("\n");
+    for (const cv::Point2f& point : recon.frame_2d_points_left) {
+        text += formatPoint2fCsvZeroZ(point) + QStringLiteral("\n");
     }
 
-    const QString dataRoot = config.dataRoot.trimmed().isEmpty()
-        ? QStringLiteral("third_party/LB/data")
-        : config.dataRoot.trimmed();
-    return QDir(dataRoot).filePath(QStringLiteral("template-3D-ALL-Shift-Cut-Cut.txt"));
+    text += QStringLiteral("\n右目2D标记点中心数量: ")
+        + QString::number(recon.frame_2d_points_right.size()) + QStringLiteral("\n");
+    for (const cv::Point2f& point : recon.frame_2d_points_right) {
+        text += formatPoint2fCsvZeroZ(point) + QStringLiteral("\n");
+    }
+
+    text += QStringLiteral("\n对应点数量: ")
+        + QString::number(geoHash.filtered_frame_3d_points.size()) + QStringLiteral("\n");
+    text += QStringLiteral("标记点:\n");
+    for (const cv::Point3f& point : geoHash.filtered_frame_3d_points) {
+        text += formatPoint3fSpace(point) + QStringLiteral("\n");
+    }
+    text += QStringLiteral("\n模板点:\n");
+    for (const cv::Point3f& point : geoHash.corres_template_points) {
+        text += formatPoint3fSpace(point) + QStringLiteral("\n");
+    }
+    text += QStringLiteral("\n");
+    text += formatCvMat4x8Block(QStringLiteral("Opt Rt (from Template to Vision) is:"), geoHash.Rt);
+    text += formatCvMat4x8Block(QStringLiteral("scan_to_marker_RT is:"), geoHash.scan_to_marker_RT);
+    text += formatCvMat4x8Block(
+        QStringLiteral("Realtime Rt_global (from Scanner to Vision) is:"), geoHash.Rt_global);
+    return text;
+}
+
+void logLbDiagnosticText(const QString& diagnosticText)
+{
+    const QStringList lines = diagnosticText.split(QChar('\n'), Qt::SkipEmptyParts);
+    for (const QString& line : lines) {
+        qInfo(LOG_LB_POSE).noquote() << line;
+    }
 }
 
 }  // namespace
@@ -184,7 +309,14 @@ LbPoseResult runLbPoseDetection(
         }
 
         const QString templatePath = buildTemplatePath(config, trackCfg);
-        QByteArray templateBytes = QDir::toNativeSeparators(templatePath).toLocal8Bit();
+        if (templatePath.trimmed().isEmpty() || !QFileInfo::exists(templatePath)) {
+            return makeFailure(
+                QStringLiteral("LB 模板不存在：%1（请配置 [LbPose] templateFile=third_party/LB/template_for_scanner_ori.txt）")
+                    .arg(templatePath.isEmpty() ? QStringLiteral("<未配置>") : templatePath));
+        }
+
+        const QByteArray templateBytes =
+            QFile::encodeName(QDir::toNativeSeparators(templatePath));
         if (geoHash.read_template_pnts(templateBytes.constData()) != 0) {
             return makeFailure(QStringLiteral("从 %1 加载 LB 模板点云失败。").arg(templatePath));
         }
@@ -204,6 +336,9 @@ LbPoseResult runLbPoseDetection(
         if (trackResult != 0) {
             return makeFailure(QStringLiteral("LB 跟踪返回错误代码 %1。").arg(trackResult));
         }
+
+        result.diagnosticText = buildLbDiagnosticText(leftFrame, rightFrame, recon, geoHash);
+        logLbDiagnosticText(result.diagnosticText);
 
         result.success = true;
         result.message = QStringLiteral("LB 位姿检测成功完成。");

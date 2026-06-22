@@ -20,6 +20,7 @@ set(LB_LIBRARY_HEADERS
 )
 
 set(LB_DATA_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/template_for_scanner_ori.txt"
     "${CMAKE_CURRENT_SOURCE_DIR}/data/template-3D-ALL-Shift-Cut-Cut.txt"
     "${CMAKE_CURRENT_SOURCE_DIR}/track_config.ini"
 )

@@ -1,5 +1,6 @@
 #include "scan_tracking/vision/hole_measurement_adapter.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <exception>
@@ -10,9 +11,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QLoggingCategory>
 
-#include <pcl/common/common.h>
 #include <pcl/common/transforms.h>
-#include <pcl/filters/voxel_grid.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
@@ -26,73 +25,101 @@ namespace {
 
 Q_LOGGING_CATEGORY(LOG_HOLE, "vision.hole")
 
-// ICP / SOR 在百万级点云上易 OOM 或触发 PCL 索引溢出，IPC 在线路径目标 ≤ 30 万点。
-constexpr int kHolePreprocessTargetPoints = 300000;
-constexpr int kHolePreprocessMaxPasses = 8;
+// ICP / SOR 在百万级点云上易 OOM 或触发 PCL 索引溢出，IPC 在线路径目标 ≤ 2 万点。
+constexpr int kHolePreprocessTargetPoints = 20000;
+constexpr int kHoleStrideFirstThreshold = 350000;
+constexpr int kHoleStrideFirstTarget = 180000;
 
-double adaptiveVoxelLeafMm(
-    const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
-    double configuredLeafMm)
+bool isPointInCropBox(const pcl::PointXYZ& point, const hm::CropBox& box)
 {
-    pcl::PointXYZ minPt{};
-    pcl::PointXYZ maxPt{};
-    pcl::getMinMax3D(*cloud, minPt, maxPt);
-    const double extentX = std::max(1.0, static_cast<double>(maxPt.x - minPt.x));
-    const double extentY = std::max(1.0, static_cast<double>(maxPt.y - minPt.y));
-    const double extentZ = std::max(1.0, static_cast<double>(maxPt.z - minPt.z));
-    const double maxExtent = std::max({extentX, extentY, extentZ});
-    // PCL VoxelGrid 在 (extent/leaf) 过大时会 integer overflow 并几乎不降采样。
-    const double minLeafForGrid = maxExtent / 512.0;
-    const double baseLeaf = configuredLeafMm > 0.0 ? configuredLeafMm : 1.0;
-    return std::max(baseLeaf, minLeafForGrid);
+    return point.x >= box.min.x() && point.x <= box.max.x()
+        && point.y >= box.min.y() && point.y <= box.max.y()
+        && point.z >= box.min.z() && point.z <= box.max.z();
+}
+
+void forceUnorganizedCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
+{
+    if (!cloud || cloud->empty()) {
+        return;
+    }
+    cloud->width = static_cast<std::uint32_t>(cloud->size());
+    cloud->height = 1;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr subsampleByStride(
+    const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& cloud,
+    int targetPoints)
+{
+    auto output = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    if (!cloud || cloud->empty() || targetPoints <= 0) {
+        return output;
+    }
+
+    const int pointCount = static_cast<int>(cloud->size());
+    if (pointCount <= targetPoints) {
+        output->points = cloud->points;
+        forceUnorganizedCloud(output);
+        return output;
+    }
+
+    const int stride = std::max(1, (pointCount + targetPoints - 1) / targetPoints);
+    output->points.reserve(static_cast<std::size_t>(targetPoints));
+    for (int index = 0; index < pointCount; index += stride) {
+        output->points.push_back(cloud->points[static_cast<std::size_t>(index)]);
+    }
+    forceUnorganizedCloud(output);
+    return output;
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr downsampleLargeCloudForHolePipeline(
-    const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
-    double voxelLeafMm)
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
+    double /*voxelLeafMm*/)
 {
     if (!cloud || cloud->empty()) {
         return cloud;
     }
 
-    double leafMm = adaptiveVoxelLeafMm(cloud, voxelLeafMm);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr current = cloud;
-    for (int pass = 0;
-         pass < kHolePreprocessMaxPasses
-             && static_cast<int>(current->size()) > kHolePreprocessTargetPoints;
-         ++pass) {
-        pcl::PointCloud<pcl::PointXYZ>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZ>());
-        pcl::VoxelGrid<pcl::PointXYZ> voxel;
-        voxel.setInputCloud(current);
-        const float leaf = static_cast<float>(leafMm);
-        voxel.setLeafSize(leaf, leaf, leaf);
-        voxel.filter(*filtered);
-        if (filtered->empty()) {
-            leafMm *= 2.0;
-            continue;
-        }
+    forceUnorganizedCloud(cloud);
 
-        const int beforeCount = static_cast<int>(current->size());
-        const int afterCount = static_cast<int>(filtered->size());
+    if (static_cast<int>(cloud->size()) > kHoleStrideFirstThreshold) {
+        const int beforeCount = static_cast<int>(cloud->size());
+        pcl::PointCloud<pcl::PointXYZ>::Ptr strided =
+            subsampleByStride(cloud, kHoleStrideFirstTarget);
+        cloud.reset();
+        cloud = strided;
         qInfo(LOG_HOLE).noquote()
-            << QStringLiteral("[Hole] 路径合并点云预降采样 pass=") << (pass + 1)
-            << QStringLiteral(" leafMm=") << leafMm
+            << QStringLiteral("[Hole] 路径合并点云等间隔预抽样")
             << QStringLiteral(" ") << beforeCount
-            << QStringLiteral(" -> ") << afterCount;
-
-        if (afterCount >= beforeCount) {
-            leafMm *= 2.0;
-            continue;
-        }
-
-        current = filtered;
-        leafMm *= 1.5;
+            << QStringLiteral(" -> ") << static_cast<int>(cloud->size());
     }
-    return current;
+
+    if (static_cast<int>(cloud->size()) > kHolePreprocessTargetPoints * 2) {
+        const int beforeCount = static_cast<int>(cloud->size());
+        pcl::PointCloud<pcl::PointXYZ>::Ptr strided =
+            subsampleByStride(cloud, kHolePreprocessTargetPoints * 2);
+        cloud.reset();
+        cloud = strided;
+        qInfo(LOG_HOLE).noquote()
+            << QStringLiteral("[Hole] 路径合并点云等间隔预抽样(二次)")
+            << QStringLiteral(" ") << beforeCount
+            << QStringLiteral(" -> ") << static_cast<int>(cloud->size());
+    }
+
+    if (static_cast<int>(cloud->size()) > kHolePreprocessTargetPoints) {
+        const int beforeCount = static_cast<int>(cloud->size());
+        cloud = subsampleByStride(cloud, kHolePreprocessTargetPoints);
+        qInfo(LOG_HOLE).noquote()
+            << QStringLiteral("[Hole] 路径合并点云等间隔收尾抽样")
+            << QStringLiteral(" ") << beforeCount
+            << QStringLiteral(" -> ") << static_cast<int>(cloud->size());
+    }
+
+    return cloud;
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr toPclPointCloud(
-    const scan_tracking::mech_eye::PointCloudFrame& frame)
+    const scan_tracking::mech_eye::PointCloudFrame& frame,
+    const std::vector<hm::CropBox>* cropBoxes)
 {
     auto cloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
 
@@ -107,24 +134,40 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr toPclPointCloud(
         return cloud;
     }
 
-    cloud->points.reserve(static_cast<std::size_t>(pointCount));
+    const bool useCrop = cropBoxes != nullptr && !cropBoxes->empty();
+    cloud->points.reserve(useCrop
+        ? static_cast<std::size_t>(std::min(pointCount, 2'000'000))
+        : static_cast<std::size_t>(pointCount));
     bool allFinite = true;
     for (int index = 0; index < pointCount; ++index) {
         const auto base = static_cast<std::size_t>(index * 3);
         const float x = points[base];
         const float y = points[base + 1];
         const float z = points[base + 2];
-        allFinite = allFinite && std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+            allFinite = false;
+            continue;
+        }
+
+        if (useCrop) {
+            const pcl::PointXYZ point(x, y, z);
+            bool inside = false;
+            for (const auto& box : *cropBoxes) {
+                if (isPointInCropBox(point, box)) {
+                    inside = true;
+                    break;
+                }
+            }
+            if (!inside) {
+                continue;
+            }
+        }
+
         cloud->points.emplace_back(x, y, z);
     }
 
-    if (frame.width > 0 && frame.height > 0 && frame.width * frame.height == pointCount) {
-        cloud->width = static_cast<std::uint32_t>(frame.width);
-        cloud->height = static_cast<std::uint32_t>(frame.height);
-    } else {
-        cloud->width = static_cast<std::uint32_t>(pointCount);
-        cloud->height = 1;
-    }
+    cloud->width = static_cast<std::uint32_t>(cloud->points.size());
+    cloud->height = 1;
     cloud->is_dense = allFinite;
     return cloud;
 }
@@ -173,6 +216,13 @@ QString resolvePathRelativeToConfigFile(const QString& configFilePath, const QSt
     const QFileInfo relativeToConfig(QDir(configInfo.absolutePath()).filePath(pathValue));
     if (relativeToConfig.exists()) {
         return relativeToConfig.absoluteFilePath();
+    }
+
+    // CMake 将模板部署到 hole/template/，配置在 hole/config/ 下
+    const QFileInfo relativeToHoleRoot(
+        QDir(configInfo.absolutePath()).filePath(QStringLiteral("../") + pathValue));
+    if (relativeToHoleRoot.exists()) {
+        return relativeToHoleRoot.absoluteFilePath();
     }
 
     return resolveConfiguredPath(pathValue);
@@ -234,12 +284,6 @@ HoleInspectionResult runHoleMeasurement(
         return result;
     }
 
-    auto pclCloud = toPclPointCloud(cloud);
-    if (pclCloud->empty()) {
-        result.message = QStringLiteral("Hole 测量缺少有效输入点云。");
-        return result;
-    }
-
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
     const double icpRmsMaxMm = configManager != nullptr
         ? configManager->holeConfig().icpRmsMaxMm
@@ -256,6 +300,8 @@ HoleInspectionResult runHoleMeasurement(
 
         hm::MeasureConfig measureConfig = hm::loadConfig(configPath.toLocal8Bit().toStdString());
         measureConfig = prepareMeasureConfig(configPath, measureConfig);
+        // IPC 已在外部降采样，跳过 pipeline 内 SOR 以免百万点邻域搜索崩溃。
+        measureConfig.statisticalMeanK = 0;
 
         if (measureConfig.templateCloud.empty()) {
             result.message = QStringLiteral("Hole 测量配置缺少 template_cloud。");
@@ -267,14 +313,35 @@ HoleInspectionResult runHoleMeasurement(
             return result;
         }
 
+        const int rawPointCount = cloud.pointCount;
+        auto pclCloud = toPclPointCloud(
+            cloud,
+            measureConfig.cropBoxes.empty() ? nullptr : &measureConfig.cropBoxes);
+        if (pclCloud->empty()) {
+            if (!measureConfig.cropBoxes.empty()) {
+                qWarning(LOG_HOLE).noquote()
+                    << QStringLiteral("[Hole] crop_boxes 裁剪后为空，回退全量点云 rawPoints=")
+                    << rawPointCount;
+                pclCloud = toPclPointCloud(cloud, nullptr);
+            }
+            if (pclCloud->empty()) {
+                result.message = QStringLiteral("Hole 测量缺少有效输入点云。");
+                return result;
+            }
+        }
+
         qInfo(LOG_HOLE).noquote()
             << QStringLiteral("[Hole] 开始测量 pathId=") << inspectionPathId
-            << QStringLiteral(" 输入点数=") << static_cast<int>(pclCloud->size());
+            << QStringLiteral(" 原始点数=") << rawPointCount
+            << QStringLiteral(" 裁剪后=") << static_cast<int>(pclCloud->size());
 
-        pclCloud = downsampleLargeCloudForHolePipeline(pclCloud, measureConfig.voxelLeafMm);
+        pclCloud = downsampleLargeCloudForHolePipeline(
+            std::move(pclCloud),
+            measureConfig.voxelLeafMm);
 
         qInfo(LOG_HOLE).noquote()
-            << QStringLiteral("[Hole] 预处理后点数=") << static_cast<int>(pclCloud->size());
+            << QStringLiteral("[Hole] 预处理后点数=") << static_cast<int>(pclCloud->size())
+            << QStringLiteral(" 模板=") << QString::fromStdString(measureConfig.templateCloud);
 
         auto transformedCloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
         pcl::transformPointCloud(*pclCloud, *transformedCloud, measureConfig.poseCorrection);

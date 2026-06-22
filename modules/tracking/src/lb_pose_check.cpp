@@ -180,7 +180,7 @@ PoseCheckResult runLegacyLbPoseCheck(const scan_tracking::common::LbPoseConfig& 
         templateText = QString::fromLocal8Bit(trackCfg.paths.template_points.c_str()).trimmed();
     }
     if (templateText.isEmpty()) {
-        templateText = QDir(dataRootText).filePath(QStringLiteral("template-3D-ALL-Shift-Cut-Cut.txt"));
+        templateText = QDir(dataRootText).filePath(QStringLiteral("template_for_scanner_ori.txt"));
     }
 
     qInfo(LOG_LB_POSE).noquote()

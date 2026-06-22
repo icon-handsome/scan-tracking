@@ -85,6 +85,13 @@ struct FlowControlConfig {
     bool retainSegmentPly = true;
 };
 
+/// 每段扫描分组落盘：CXP 左右图 + 矩阵 + 点云（对照分析用）
+struct SegmentCaptureExportConfig {
+    bool enabled = false;
+    QString outputRoot = QStringLiteral("output/segment_capture");
+    bool saveRawPointCloud = true;
+};
+
 /// Mech-Eye 点云 IPC 后处理（深度裁剪 / 离群 / 平滑 / 降采样）
 struct PointCloudProcessingConfig {
     bool enabled = true;
@@ -314,6 +321,7 @@ public:
     const CameraConfig& cameraConfig() const;
     const VisionConfig& visionConfig() const;
     const FlowControlConfig& flowControlConfig() const;
+    const SegmentCaptureExportConfig& segmentCaptureExportConfig() const;
     const TrackingConfig& trackingConfig() const;
     const BevelConfig& bevelConfig() const;
     const HoleConfig& holeConfig() const;
@@ -364,6 +372,7 @@ private:
 CameraConfig m_cameraConfig;
     VisionConfig m_visionConfig;
     FlowControlConfig m_flowControlConfig;
+    SegmentCaptureExportConfig m_segmentCaptureExportConfig;
     TrackingConfig m_trackingConfig;
     BevelConfig m_bevelConfig;
     HoleConfig m_holeConfig;

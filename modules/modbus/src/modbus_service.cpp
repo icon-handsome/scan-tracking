@@ -106,6 +106,13 @@ void ModbusService::disconnectDevice()
     }
 
     if (m_server->state() != QModbusDevice::UnconnectedState) {
+        if (resetIpcResultBlock()) {
+            qInfo(LOG_MODBUS).noquote()
+                << QStringLiteral("Modbus Server 停止前已清零 IPC 结果区 40101-40184");
+        } else {
+            qWarning(LOG_MODBUS).noquote()
+                << QStringLiteral("Modbus Server 停止前清零 IPC 结果区失败");
+        }
         qInfo(LOG_MODBUS) << "正在停止 Modbus Server。";
         m_server->disconnectDevice();
     }

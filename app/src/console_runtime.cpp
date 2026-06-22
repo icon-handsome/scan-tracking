@@ -767,6 +767,9 @@ void ConsoleRuntime::printShutdownStatus()
         mechEyeService_->stop();
     }
     if (modbusService_) {
+        if (modbusService_->isConnected()) {
+            modbusService_->resetIpcResultBlock();
+        }
         modbusService_->disconnectDevice();
     }
     qInfo(appLog).noquote() << "正在停止扫描跟踪核心框架。";

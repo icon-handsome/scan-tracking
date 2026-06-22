@@ -254,6 +254,29 @@ FitReport fitPlanePca(const CloudConstPtr& cloud, Eigen::Vector4d& plane)
     return report;
 }
 
+CloudPtr subsampleByStrideForIcp(const CloudConstPtr& input, int targetPoints)
+{
+    CloudPtr output(new Cloud);
+    if (!input || input->empty() || targetPoints <= 0) {
+        return output;
+    }
+    const int pointCount = static_cast<int>(input->size());
+    if (pointCount <= targetPoints) {
+        *output = *input;
+        output->width = static_cast<std::uint32_t>(output->size());
+        output->height = 1;
+        return output;
+    }
+    const int stride = std::max(1, (pointCount + targetPoints - 1) / targetPoints);
+    output->points.reserve(static_cast<std::size_t>(targetPoints));
+    for (int index = 0; index < pointCount; index += stride) {
+        output->points.push_back(input->points[static_cast<std::size_t>(index)]);
+    }
+    output->width = static_cast<std::uint32_t>(output->points.size());
+    output->height = 1;
+    return output;
+}
+
 CloudPtr downsampleForIcp(const CloudConstPtr& input, int targetPoints)
 {
     if (!input || input->empty()) {
@@ -263,23 +286,13 @@ CloudPtr downsampleForIcp(const CloudConstPtr& input, int targetPoints)
         return CloudPtr(new Cloud(*input));
     }
 
-    CloudPtr current(new Cloud(*input));
-    double leafMm = 2.0;
-    for (int pass = 0;
-         pass < 8 && static_cast<int>(current->size()) > targetPoints;
-         ++pass) {
-        CloudPtr filtered(new Cloud);
-        pcl::VoxelGrid<PointT> voxel;
-        voxel.setInputCloud(current);
-        const float leaf = static_cast<float>(leafMm);
-        voxel.setLeafSize(leaf, leaf, leaf);
-        voxel.filter(*filtered);
-        if (filtered->empty() || filtered->size() >= current->size()) {
-            leafMm *= 2.0;
-            continue;
-        }
-        current = filtered;
-        leafMm *= 1.5;
+    CloudPtr current = subsampleByStrideForIcp(input, targetPoints);
+    if (static_cast<int>(current->size()) > targetPoints) {
+        current = subsampleByStrideForIcp(current, targetPoints);
+    }
+    if (static_cast<int>(input->size()) > targetPoints) {
+        std::cout << "icp_stride_downsample points=" << input->size() << "->" << current->size()
+                  << std::endl;
     }
     return current;
 }
@@ -311,7 +324,7 @@ FitReport alignScanToTemplate(const CloudConstPtr& scan,
         return report;
     }
 
-    constexpr int kGlobalIcpMaxPoints = 80000;
+    constexpr int kGlobalIcpMaxPoints = 50000;
     CloudPtr scanDs = downsampleForIcp(scan, kGlobalIcpMaxPoints);
     CloudPtr templDs = downsampleForIcp(templ, kGlobalIcpMaxPoints);
     std::cout << "global_icp_downsample scan=" << scan->size() << "->" << scanDs->size()

@@ -75,6 +75,7 @@ if exist "%ROOT%\third_party\LBN" robocopy "%ROOT%\third_party\LBN" "%APP_DEBUG%
 if not exist "%APP_DEBUG%\data\LB" mkdir "%APP_DEBUG%\data\LB"
 if not exist "%APP_DEBUG%\data\LBN" mkdir "%APP_DEBUG%\data\LBN"
 if exist "%ROOT%\third_party\LB\data" robocopy "%ROOT%\third_party\LB\data" "%APP_DEBUG%\data\LB" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
+if exist "%ROOT%\third_party\LB\template_for_scanner_ori.txt" copy /Y "%ROOT%\third_party\LB\template_for_scanner_ori.txt" "%APP_DEBUG%\data\LB\template_for_scanner_ori.txt" >nul
 if exist "%ROOT%\third_party\LBN\data" robocopy "%ROOT%\third_party\LBN\data" "%APP_DEBUG%\data\LBN" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
 if not exist "%APP_DEBUG%\config.ini" (
   copy /Y "%ROOT%\config.ini" "%APP_DEBUG%\config.ini" >nul

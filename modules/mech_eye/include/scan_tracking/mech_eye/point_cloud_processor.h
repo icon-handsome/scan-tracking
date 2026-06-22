@@ -4,7 +4,7 @@
 //
 // 供 StateMachine 分段 refinement 后台线程使用：
 //   - processPointCloudFrame：PCL 滤波/下采样等可配置后处理
-//   - transformPointCloudFrame：按 T0' × T 将分段点云变换到统一坐标系（行向量约定）
+//   - transformPointCloudFrame：按 T0（或 T0'×T 兼容形式）将分段点云变换到统一坐标系
 //   - multiplyRowMajor4x4：位姿矩阵链式乘法，与 LBN/LB 及 scan_paths_config 一致
 //
 // Windows 下 PCL/Eigen 非线程安全，所有入口须持有 pointCloudAlgorithmMutex()。
@@ -48,10 +48,8 @@ std::array<float, 16> multiplyRowMajor4x4(
     const std::array<float, 16>& left,
     const std::array<float, 16>& right);
 
-/* 将点云变换到统一坐标系，等价于 p' = p × (T0' × T)（行向量约定，与文档一致）
- *
- * @param calibrationMatrixT0Prime  标定矩阵 T0'（来自 scan_paths_config 或段结果）
- * @param stereoTrackingMatrixT     双目/LBN 跟踪矩阵 T
+/* 将点云变换到统一坐标系：p' = p × (calibration × stereo)。
+ * 当前 IPC 约定：LB 成功时 calibration=Rt_global、stereo=I；否则 calibration=T0'、stereo=I。
  */
 bool transformPointCloudFrame(
     const PointCloudFrame& input,
