@@ -2,6 +2,7 @@
 build/
 build-*/
 out/
+/deploy_debug/
 testdata/
 tools/*
 !tools/scan_tracking_dev.cmd
