@@ -131,9 +131,9 @@ void LivoxMid360Service::start()
             config,
             configManager->configFilePath());
         if (!m_openConfig.configFilePath.isEmpty()) {
-            qInfo(LOG_LIVOX_MID360_SVC).noquote()
-                << QStringLiteral("[LivoxMid360] Resolved config:")
-                << m_openConfig.configFilePath;
+            // qInfo(LOG_LIVOX_MID360_SVC).noquote()
+            //     << QStringLiteral("[LivoxMid360] Resolved config:")
+            //     << m_openConfig.configFilePath;
         }
     }
 
@@ -179,7 +179,7 @@ void LivoxMid360Service::stop()
     if (m_workerThread != nullptr) {
         m_workerThread->quit();
         if (!m_workerThread->wait(10000)) {
-            qCritical(LOG_LIVOX_MID360_SVC) << "[LivoxMid360] Worker thread did not exit in time.";
+            // qCritical(LOG_LIVOX_MID360_SVC) << "[LivoxMid360] Worker thread did not exit in time.";
         }
     }
 
@@ -217,7 +217,8 @@ void LivoxMid360Service::onWorkerStateChanged(
 
 void LivoxMid360Service::onWorkerLogMessage(QString message)
 {
-    emit logMessage(std::move(message));
+    Q_UNUSED(message);
+    // emit logMessage(std::move(message));
 }
 
 }  // namespace livox_mid360

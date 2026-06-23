@@ -20,15 +20,15 @@ namespace {
 
 void printUsage()
 {
-    qInfo(appLog).noquote()
-        << "Usage: gemini335_smoke_runner [options]\n"
-        << "  --serial SN        Open device by serial number\n"
-        << "  --index N          Open device by index (default 0)\n"
-        << "  --capture          Capture one frame after open\n"
-        << "  --count N          Capture count (default 1, requires --capture)\n"
-        << "  --timeout MS       Capture timeout in ms (default 5000)\n"
-        << "  --cache-dir PATH   Capture cache root (default: exe/ScanTracking_CaptureCache)\n"
-        << "  -h, --help         Show this help";
+    // qInfo(appLog).noquote()
+    //     << "Usage: gemini335_smoke_runner [options]\n"
+    //     << "  --serial SN        Open device by serial number\n"
+    //     << "  --index N          Open device by index (default 0)\n"
+    //     << "  --capture          Capture one frame after open\n"
+    //     << "  --count N          Capture count (default 1, requires --capture)\n"
+    //     << "  --timeout MS       Capture timeout in ms (default 5000)\n"
+    //     << "  --cache-dir PATH   Capture cache root (default: exe/ScanTracking_CaptureCache)\n"
+    //     << "  -h, --help         Show this help";
 }
 
 struct RunnerOptions {
@@ -102,10 +102,11 @@ int main(int argc, char* argv[])
         &worker,
         &scan_tracking::orbbec_gemini::OrbbecGeminiWorker::logMessage,
         [](const QString& message) {
-            qInfo(appLog).noquote() << message;
-            QTextStream stream(stdout);
-            stream << message << '\n';
-            stream.flush();
+            Q_UNUSED(message);
+            // qInfo(appLog).noquote() << message;
+            // QTextStream stream(stdout);
+            // stream << message << '\n';
+            // stream.flush();
         });
 
     int exitCode = 0;
@@ -120,8 +121,8 @@ int main(int argc, char* argv[])
         [&](bool success, scan_tracking::orbbec_gemini::OrbbecGeminiDeviceSummary,
             const QString& errorMessage) {
             if (!success) {
-                qCritical(appLog).noquote()
-                    << QStringLiteral("Open failed:") << errorMessage;
+                // qCritical(appLog).noquote()
+                //     << QStringLiteral("Open failed:") << errorMessage;
                 exitCode = 1;
                 loop.quit();
                 return;
@@ -145,17 +146,17 @@ int main(int argc, char* argv[])
         [&](scan_tracking::orbbec_gemini::OrbbecCaptureResult result) {
             if (result.errorCode
                 != scan_tracking::orbbec_gemini::OrbbecCaptureErrorCode::Success) {
-                qCritical(appLog).noquote()
-                    << QStringLiteral("Capture failed:") << result.errorMessage;
+                // qCritical(appLog).noquote()
+                //     << QStringLiteral("Capture failed:") << result.errorMessage;
                 exitCode = 3;
                 loop.quit();
                 return;
             }
 
-            qInfo(appLog).noquote()
-                << QStringLiteral("Capture saved depthRaw=") << result.depthRawPngPath
-                << QStringLiteral(" depthPreview=") << result.depthPreviewPngPath
-                << QStringLiteral(" pointCloud=") << result.pointCloudPlyPath;
+            // qInfo(appLog).noquote()
+            //     << QStringLiteral("Capture saved depthRaw=") << result.depthRawPngPath
+            //     << QStringLiteral(" depthPreview=") << result.depthPreviewPngPath
+            //     << QStringLiteral(" pointCloud=") << result.pointCloudPlyPath;
 
             --remainingCaptures;
             if (remainingCaptures <= 0) {

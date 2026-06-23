@@ -1384,12 +1384,9 @@
     }
   ],
   "executionConfig": {
-    "executeAllPaths": false,
-    "description": "路径1+2联调：path1=柱面开孔(7段) path2=内表面(19段)；各路径扫满后 Trig_Inspection",
-    "selectedPathIds": [
-      1,
-      2
-    ],
+    "executeAllPaths": true,
+    "description": "全路径联调（6条路径，算法旁路）：path1=柱面开孔(7) path2=内表面(19) path3=编号(1) path4=坡口(4) path5=厚度(8) path6=缺陷(144)",
+    "selectedPathIds": [],
     "pathExecutionOrder": "sequential",
     "allowPathSkipOnError": false
   },

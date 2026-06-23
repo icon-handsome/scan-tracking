@@ -98,7 +98,7 @@ void TfminiPlusService::stop()
     if (m_workerThread != nullptr) {
         m_workerThread->quit();
         if (!m_workerThread->wait(3000)) {
-            qCritical(LOG_TFMINI_PLUS_SVC) << "[TfminiPlus] Worker thread did not exit in time.";
+            // qCritical(LOG_TFMINI_PLUS_SVC) << "[TfminiPlus] Worker thread did not exit in time.";
         }
     }
 
@@ -130,7 +130,8 @@ void TfminiPlusService::onWorkerDistanceUpdated(int distanceCm, int strength)
 
 void TfminiPlusService::onWorkerLogMessage(QString message)
 {
-    emit logMessage(std::move(message));
+    Q_UNUSED(message);
+    // emit logMessage(std::move(message));
 }
 
 }  // namespace tfmini_plus

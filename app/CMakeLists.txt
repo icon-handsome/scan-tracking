@@ -46,7 +46,11 @@ set_target_properties(scan_tracking PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+    VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:scan_tracking>"
 )
+
+# Visual Studio「打开文件夹」CMake：默认启动项显示 scan-tracking (IPC)
+set_property(DIRECTORY "${CMAKE_SOURCE_DIR}" PROPERTY VS_STARTUP_PROJECT scan_tracking)
 
 if(EXISTS "${CMAKE_PREFIX_PATH}/bin/windeployqt.exe")
     add_custom_command(TARGET scan_tracking POST_BUILD

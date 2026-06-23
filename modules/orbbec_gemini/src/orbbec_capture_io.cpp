@@ -70,13 +70,13 @@ bool saveDepthFramePngs(
     int* validPixelCountOut)
 {
     if (frame.data == nullptr || frame.width <= 0 || frame.height <= 0) {
-        qWarning(LOG_ORBBEC_IO) << "saveDepthFramePngs: invalid frame";
+        // qWarning(LOG_ORBBEC_IO) << "saveDepthFramePngs: invalid frame";
         return false;
     }
 
     QImage rawImage(frame.width, frame.height, QImage::Format_Grayscale16);
     if (rawImage.isNull()) {
-        qWarning(LOG_ORBBEC_IO) << "saveDepthFramePngs: failed to allocate raw image";
+        // qWarning(LOG_ORBBEC_IO) << "saveDepthFramePngs: failed to allocate raw image";
         return false;
     }
 
@@ -106,8 +106,8 @@ bool saveDepthFramePngs(
 
     if (!rawPngPath.trimmed().isEmpty()) {
         if (!rawImage.save(rawPngPath)) {
-            qWarning(LOG_ORBBEC_IO).noquote()
-                << QStringLiteral("saveDepthFramePngs: failed to save raw depth PNG:") << rawPngPath;
+            // qWarning(LOG_ORBBEC_IO).noquote()
+            //     << QStringLiteral("saveDepthFramePngs: failed to save raw depth PNG:") << rawPngPath;
             return false;
         }
     }
@@ -115,7 +115,7 @@ bool saveDepthFramePngs(
     if (!previewPngPath.trimmed().isEmpty()) {
         QImage preview(frame.width, frame.height, QImage::Format_Grayscale8);
         if (preview.isNull()) {
-            qWarning(LOG_ORBBEC_IO) << "saveDepthFramePngs: failed to allocate preview image";
+            // qWarning(LOG_ORBBEC_IO) << "saveDepthFramePngs: failed to allocate preview image";
             return false;
         }
 
@@ -141,18 +141,18 @@ bool saveDepthFramePngs(
         }
 
         if (!preview.save(previewPngPath)) {
-            qWarning(LOG_ORBBEC_IO).noquote()
-                << QStringLiteral("saveDepthFramePngs: failed to save preview PNG:") << previewPngPath;
+            // qWarning(LOG_ORBBEC_IO).noquote()
+            //     << QStringLiteral("saveDepthFramePngs: failed to save preview PNG:") << previewPngPath;
             return false;
         }
     }
 
-    qInfo(LOG_ORBBEC_IO).noquote()
-        << QStringLiteral("Saved depth PNGs validPixels=%1 minRaw=%2 maxRaw=%3 scale=%4")
-               .arg(validCount)
-               .arg(minValue)
-               .arg(maxValue)
-               .arg(frame.valueScale, 0, 'f', 4);
+    // qInfo(LOG_ORBBEC_IO).noquote()
+    //     << QStringLiteral("Saved depth PNGs validPixels=%1 minRaw=%2 maxRaw=%3 scale=%4")
+    //            .arg(validCount)
+    //            .arg(minValue)
+    //            .arg(maxValue)
+    //            .arg(frame.valueScale, 0, 'f', 4);
     return true;
 }
 
@@ -174,14 +174,14 @@ bool savePointCloudPly(
     }
 
     if (validPoints.empty()) {
-        qWarning(LOG_ORBBEC_IO) << "savePointCloudPly: no valid points";
+        // qWarning(LOG_ORBBEC_IO) << "savePointCloudPly: no valid points";
         return false;
     }
 
     std::ofstream stream(plyPath.toStdString(), std::ios::out | std::ios::binary);
     if (!stream.is_open()) {
-        qWarning(LOG_ORBBEC_IO).noquote()
-            << QStringLiteral("savePointCloudPly: failed to open:") << plyPath;
+        // qWarning(LOG_ORBBEC_IO).noquote()
+        //     << QStringLiteral("savePointCloudPly: failed to open:") << plyPath;
         return false;
     }
 
@@ -199,10 +199,10 @@ bool savePointCloudPly(
         stream << point.x << ' ' << point.y << ' ' << point.z << '\n';
     }
 
-    qInfo(LOG_ORBBEC_IO).noquote()
-        << QStringLiteral("Saved point cloud PLY points=%1 path=%2")
-               .arg(validPoints.size())
-               .arg(plyPath);
+    // qInfo(LOG_ORBBEC_IO).noquote()
+    //     << QStringLiteral("Saved point cloud PLY points=%1 path=%2")
+    //            .arg(validPoints.size())
+    //            .arg(plyPath);
     return true;
 }
 

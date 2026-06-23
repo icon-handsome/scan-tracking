@@ -14,6 +14,8 @@
 #include "TR_Mark_3D_Recon.h"
 #include "TR_Mark_Track.h"
 
+#include "scan_tracking/common/config_manager.h"
+
 namespace scan_tracking {
 namespace vision {
 
@@ -227,6 +229,9 @@ QString buildLbDiagnosticText(
 
 void logLbDiagnosticText(const QString& diagnosticText)
 {
+    if (!scan_tracking::common::segmentCaptureExportEnabled()) {
+        return;
+    }
     const QStringList lines = diagnosticText.split(QChar('\n'), Qt::SkipEmptyParts);
     for (const QString& line : lines) {
         qInfo(LOG_LB_POSE).noquote() << line;
@@ -330,13 +335,15 @@ LbPoseResult runLbPoseDetection(
             angleToleranceDeg,
             minPercent);
         if (trackResult != 0) {
-            qWarning(LOG_LB_POSE).noquote()
-                << QStringLiteral("LB Get_Track_Pose 失败 code=%1").arg(trackResult)
-                << QStringLiteral("三维重建点数=") << geoHash.track_pose_last_recon_count
-                << QStringLiteral("邻域滤波后=") << geoHash.track_pose_last_neighbor_filtered_count
-                << QStringLiteral("模板匹配点数=") << geoHash.track_pose_last_matched_count
-                << QStringLiteral("最少需要=") << geoHash.track_pose_last_min_pose_points
-                << QStringLiteral("当前重建点数(调用前)=") << reconPointCount;
+            if (scan_tracking::common::segmentCaptureExportEnabled()) {
+                qWarning(LOG_LB_POSE).noquote()
+                    << QStringLiteral("LB Get_Track_Pose 失败 code=%1").arg(trackResult)
+                    << QStringLiteral("三维重建点数=") << geoHash.track_pose_last_recon_count
+                    << QStringLiteral("邻域滤波后=") << geoHash.track_pose_last_neighbor_filtered_count
+                    << QStringLiteral("模板匹配点数=") << geoHash.track_pose_last_matched_count
+                    << QStringLiteral("最少需要=") << geoHash.track_pose_last_min_pose_points
+                    << QStringLiteral("当前重建点数(调用前)=") << reconPointCount;
+            }
             return makeFailure(QStringLiteral("LB 跟踪返回错误代码 %1。").arg(trackResult));
         }
 

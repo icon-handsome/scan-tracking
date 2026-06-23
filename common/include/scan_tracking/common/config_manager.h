@@ -407,5 +407,12 @@ CameraConfig m_cameraConfig;
     ScanPathsConfig m_scanPathsConfig;  // 新增：扫描路径配置
 };
 
+/// [SegmentCaptureExport] enabled=true 时输出 LB/LBN 矩阵、诊断明细及落盘日志
+inline bool segmentCaptureExportEnabled()
+{
+    const ConfigManager* cm = ConfigManager::instance();
+    return cm != nullptr && cm->segmentCaptureExportConfig().enabled;
+}
+
 }  // namespace common
 }  // namespace scan_tracking

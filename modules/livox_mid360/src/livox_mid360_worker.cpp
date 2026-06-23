@@ -183,26 +183,26 @@ void LivoxMid360Worker::startWorker(const LivoxMid360OpenConfig& config)
     m_nextDeviceIndex = 0;
     m_discoveryActive = false;
 
-    emit logMessage(QStringLiteral("%1 Starting worker...").arg(logPrefix()));
+    // emit logMessage(QStringLiteral("%1 Starting worker...").arg(logPrefix()));
     emit stateChanged(LivoxMid360RuntimeState::Enumerating, QStringLiteral("Enumerating devices"));
 
     const QString configPath = config.configFilePath.trimmed();
     if (configPath.isEmpty() || !QFile::exists(configPath)) {
         const QString message =
             QStringLiteral("Livox config file not found: %1").arg(configPath);
-        emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
+        // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
         emit enumerateFinished({});
         emit openFinished(false, {}, message);
         emit stateChanged(LivoxMid360RuntimeState::Failed, message);
         return;
     }
 
-    emit logMessage(QStringLiteral("%1 Using config: %2").arg(logPrefix(), configPath));
+    // emit logMessage(QStringLiteral("%1 Using config: %2").arg(logPrefix(), configPath));
 
     QString configWarning;
     const QString sdkConfigPath = resolveConfigPathForSdk(configPath, &configWarning);
     if (!configWarning.isEmpty()) {
-        emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), configWarning));
+        // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), configWarning));
     }
 
     DisableLivoxSdkConsoleLogger();
@@ -212,7 +212,7 @@ void LivoxMid360Worker::startWorker(const LivoxMid360OpenConfig& config)
         const QString message = QStringLiteral(
             "LivoxLidarSdkInit failed for config: %1 (check JSON syntax, UTF-8 BOM, host_ip)")
             .arg(sdkConfigPath);
-        emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
+        // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
         cleanupTempConfigFile();
         emit enumerateFinished({});
         emit openFinished(false, {}, message);
@@ -227,7 +227,7 @@ void LivoxMid360Worker::startWorker(const LivoxMid360OpenConfig& config)
 
     if (!LivoxLidarSdkStart()) {
         const QString message = QStringLiteral("LivoxLidarSdkStart failed");
-        emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
+        // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
         teardownSdk();
         emit enumerateFinished({});
         emit openFinished(false, {}, message);
@@ -287,8 +287,8 @@ void LivoxMid360Worker::onDeviceDiscovered(
     summary.deviceTypeName = deviceTypeName(deviceType);
     m_discoveredDevices.push_back(summary);
 
-    emit logMessage(
-        QStringLiteral("%1 %2").arg(logPrefix(), formatDeviceSummaryLine(summary)));
+    // emit logMessage(
+    //     QStringLiteral("%1 %2").arg(logPrefix(), formatDeviceSummaryLine(summary)));
 
     const QString trimmedSerial = m_openConfig.serial.trimmed();
     if (!trimmedSerial.isEmpty() && serialNumber.compare(trimmedSerial, Qt::CaseInsensitive) == 0) {
@@ -311,10 +311,10 @@ void LivoxMid360Worker::finishDiscovery()
     }
     m_discoveryActive = false;
 
-    emit logMessage(
-        QStringLiteral("%1 Enumerated %2 device(s)")
-            .arg(logPrefix())
-            .arg(m_discoveredDevices.size()));
+    // emit logMessage(
+    //     QStringLiteral("%1 Enumerated %2 device(s)")
+    //         .arg(logPrefix())
+    //         .arg(m_discoveredDevices.size()));
     emit enumerateFinished(m_discoveredDevices);
 
     const QString trimmedSerial = m_openConfig.serial.trimmed();
@@ -341,15 +341,15 @@ void LivoxMid360Worker::finishDiscovery()
         const QString message = trimmedSerial.isEmpty()
             ? QStringLiteral("No Livox Mid-360 device discovered")
             : QStringLiteral("No Livox device matched serial: %1").arg(trimmedSerial);
-        emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
+        // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
         emit openFinished(false, {}, message);
         emit stateChanged(LivoxMid360RuntimeState::Failed, message);
         teardownSdk();
         return;
     }
 
-    emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), formatOpenedDeviceLine(selectedDevice)));
-    emit logMessage(QStringLiteral("%1 Ready (no point cloud stream started)").arg(logPrefix()));
+    // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), formatOpenedDeviceLine(selectedDevice)));
+    // emit logMessage(QStringLiteral("%1 Ready (no point cloud stream started)").arg(logPrefix()));
     emit openFinished(true, selectedDevice, {});
     emit stateChanged(LivoxMid360RuntimeState::Ready, QStringLiteral("Device opened"));
 }

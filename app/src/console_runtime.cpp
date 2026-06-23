@@ -169,24 +169,27 @@ void ConsoleRuntime::initModules()
     if (configManager != nullptr) {
         const auto& orbbecConfig = configManager->orbbecGeminiConfig();
         if (!orbbecConfig.enabled) {
-            qInfo(appLog) << QStringLiteral("[OrbbecGemini] disabled (orbbecGeminiEnabled=false)");
+            // qInfo(appLog) << QStringLiteral("[OrbbecGemini] disabled (orbbecGeminiEnabled=false)");
         } else {
             orbbecGeminiService_ = std::make_unique<scan_tracking::orbbec_gemini::OrbbecGeminiService>();
             QObject::connect(
                 orbbecGeminiService_.get(),
                 &scan_tracking::orbbec_gemini::OrbbecGeminiService::logMessage,
                 [](const QString& message) {
-                    qInfo(appLog).noquote() << message;
+                    Q_UNUSED(message);
+                    // qInfo(appLog).noquote() << message;
                 });
             QObject::connect(
                 orbbecGeminiService_.get(),
                 &scan_tracking::orbbec_gemini::OrbbecGeminiService::stateChanged,
                 [](scan_tracking::orbbec_gemini::OrbbecGeminiRuntimeState state,
                    const QString& description) {
-                    qInfo(appLog).noquote()
-                        << QStringLiteral("[OrbbecGemini] state=")
-                        << static_cast<int>(state)
-                        << description;
+                    Q_UNUSED(state);
+                    Q_UNUSED(description);
+                    // qInfo(appLog).noquote()
+                    //     << QStringLiteral("[OrbbecGemini] state=")
+                    //     << static_cast<int>(state)
+                    //     << description;
                 });
             QObject::connect(
                 orbbecGeminiService_.get(),
@@ -194,16 +197,16 @@ void ConsoleRuntime::initModules()
                 [](const scan_tracking::orbbec_gemini::OrbbecCaptureResult& result) {
                     if (result.errorCode
                         != scan_tracking::orbbec_gemini::OrbbecCaptureErrorCode::Success) {
-                        qWarning(appLog).noquote()
-                            << QStringLiteral("[OrbbecGemini] Capture failed:")
-                            << result.errorMessage;
+                        // qWarning(appLog).noquote()
+                        //     << QStringLiteral("[OrbbecGemini] Capture failed:")
+                        //     << result.errorMessage;
                         return;
                     }
-                    qInfo(appLog).noquote()
-                        << QStringLiteral("[OrbbecGemini] Capture saved req=") << result.requestId
-                        << QStringLiteral(" depthRaw=") << result.depthRawPngPath
-                        << QStringLiteral(" depthPreview=") << result.depthPreviewPngPath
-                        << QStringLiteral(" pointCloud=") << result.pointCloudPlyPath;
+                    // qInfo(appLog).noquote()
+                    //     << QStringLiteral("[OrbbecGemini] Capture saved req=") << result.requestId
+                    //     << QStringLiteral(" depthRaw=") << result.depthRawPngPath
+                    //     << QStringLiteral(" depthPreview=") << result.depthPreviewPngPath
+                    //     << QStringLiteral(" pointCloud=") << result.pointCloudPlyPath;
                 });
             QObject::connect(
                 orbbecGeminiService_.get(),
@@ -212,9 +215,9 @@ void ConsoleRuntime::initModules()
                    scan_tracking::orbbec_gemini::OrbbecGeminiDeviceSummary,
                    const QString& errorMessage) {
                     if (!success && !errorMessage.isEmpty()) {
-                        qWarning(appLog).noquote()
-                            << QStringLiteral("[OrbbecGemini] Open failed:")
-                            << errorMessage;
+                        // qWarning(appLog).noquote()
+                        //     << QStringLiteral("[OrbbecGemini] Open failed:")
+                        //     << errorMessage;
                         return;
                     }
                     if (!success || !orbbecConfig.captureOnStart || !orbbecConfig.saveCaptureToDisk) {
@@ -227,38 +230,41 @@ void ConsoleRuntime::initModules()
                         orbbecConfig.captureTimeoutMs,
                         true);
                     if (requestId == 0) {
-                        qWarning(appLog).noquote()
-                            << QStringLiteral("[OrbbecGemini] Startup capture request rejected");
+                        // qWarning(appLog).noquote()
+                        //     << QStringLiteral("[OrbbecGemini] Startup capture request rejected");
                     } else {
-                        qInfo(appLog).noquote()
-                            << QStringLiteral("[OrbbecGemini] Startup capture requested req=")
-                            << requestId;
+                        // qInfo(appLog).noquote()
+                        //     << QStringLiteral("[OrbbecGemini] Startup capture requested req=")
+                        //     << requestId;
                     }
                 });
             orbbecGeminiService_->start();
-            qInfo(appLog) << QStringLiteral("[OrbbecGemini] service started.");
+            // qInfo(appLog) << QStringLiteral("[OrbbecGemini] service started.");
         }
 
         const auto& livoxConfig = configManager->livoxMid360Config();
         if (!livoxConfig.enabled) {
-            qInfo(appLog) << QStringLiteral("[LivoxMid360] disabled (livoxMid360Enabled=false)");
+            // qInfo(appLog) << QStringLiteral("[LivoxMid360] disabled (livoxMid360Enabled=false)");
         } else {
             livoxMid360Service_ = std::make_unique<scan_tracking::livox_mid360::LivoxMid360Service>();
             QObject::connect(
                 livoxMid360Service_.get(),
                 &scan_tracking::livox_mid360::LivoxMid360Service::logMessage,
                 [](const QString& message) {
-                    qInfo(appLog).noquote() << message;
+                    Q_UNUSED(message);
+                    // qInfo(appLog).noquote() << message;
                 });
             QObject::connect(
                 livoxMid360Service_.get(),
                 &scan_tracking::livox_mid360::LivoxMid360Service::stateChanged,
                 [](scan_tracking::livox_mid360::LivoxMid360RuntimeState state,
                    const QString& description) {
-                    qInfo(appLog).noquote()
-                        << QStringLiteral("[LivoxMid360] state=")
-                        << static_cast<int>(state)
-                        << description;
+                    Q_UNUSED(state);
+                    Q_UNUSED(description);
+                    // qInfo(appLog).noquote()
+                    //     << QStringLiteral("[LivoxMid360] state=")
+                    //     << static_cast<int>(state)
+                    //     << description;
                 });
             QObject::connect(
                 livoxMid360Service_.get(),
@@ -267,18 +273,18 @@ void ConsoleRuntime::initModules()
                    scan_tracking::livox_mid360::LivoxMid360DeviceSummary,
                    const QString& errorMessage) {
                     if (!success && !errorMessage.isEmpty()) {
-                        qWarning(appLog).noquote()
-                            << QStringLiteral("[LivoxMid360] Open failed:")
-                            << errorMessage;
+                        // qWarning(appLog).noquote()
+                        //     << QStringLiteral("[LivoxMid360] Open failed:")
+                        //     << errorMessage;
                     }
                 });
             livoxMid360Service_->start();
-            qInfo(appLog) << QStringLiteral("[LivoxMid360] service started.");
+            // qInfo(appLog) << QStringLiteral("[LivoxMid360] service started.");
         }
 
         const auto& tfminiConfig = configManager->tfminiPlusConfig();
         if (!tfminiConfig.enabled) {
-            qInfo(appLog) << QStringLiteral("[TfminiPlus] disabled (tfminiPlusEnabled=false)");
+            // qInfo(appLog) << QStringLiteral("[TfminiPlus] disabled (tfminiPlusEnabled=false)");
         } else {
             // 第二工位吊装/内壁防碰辅助测距；Worker 按协议解析后丢弃，不写 PLC 安全位。
             tfminiPlusService_ = std::make_unique<scan_tracking::tfmini_plus::TfminiPlusService>();
@@ -286,31 +292,34 @@ void ConsoleRuntime::initModules()
                 tfminiPlusService_.get(),
                 &scan_tracking::tfmini_plus::TfminiPlusService::logMessage,
                 [](const QString& message) {
-                    qInfo(appLog).noquote() << message;
+                    Q_UNUSED(message);
+                    // qInfo(appLog).noquote() << message;
                 });
             QObject::connect(
                 tfminiPlusService_.get(),
                 &scan_tracking::tfmini_plus::TfminiPlusService::stateChanged,
                 [](scan_tracking::tfmini_plus::TfminiPlusRuntimeState state,
                    const QString& description) {
-                    qInfo(appLog).noquote()
-                        << QStringLiteral("[TfminiPlus] state=")
-                        << static_cast<int>(state)
-                        << description;
+                    Q_UNUSED(state);
+                    Q_UNUSED(description);
+                    // qInfo(appLog).noquote()
+                    //     << QStringLiteral("[TfminiPlus] state=")
+                    //     << static_cast<int>(state)
+                    //     << description;
                 });
             QObject::connect(
                 tfminiPlusService_.get(),
                 &scan_tracking::tfmini_plus::TfminiPlusService::openFinished,
                 [](bool success, const QString& errorMessage) {
                     if (!success && !errorMessage.isEmpty()) {
-                        qWarning(appLog).noquote()
-                            << QStringLiteral("[TfminiPlus] Open failed:")
-                            << errorMessage;
+                        // qWarning(appLog).noquote()
+                        //     << QStringLiteral("[TfminiPlus] Open failed:")
+                        //     << errorMessage;
                     }
                 });
             // TODO: Worker 恢复 emit distanceUpdated 后，在此接入打印/告警/碰撞阈值过滤。
             tfminiPlusService_->start();
-            qInfo(appLog) << QStringLiteral("[TfminiPlus] service started.");
+            // qInfo(appLog) << QStringLiteral("[TfminiPlus] service started.");
         }
     }
 

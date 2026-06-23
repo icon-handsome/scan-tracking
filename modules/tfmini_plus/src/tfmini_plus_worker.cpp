@@ -88,7 +88,7 @@ void TfminiPlusWorker::startWorker(const TfminiPlusOpenConfig& config)
     const QString portName = config.portName.trimmed();
     if (portName.isEmpty()) {
         const QString message = QStringLiteral("Serial port is empty; set tfminiPlusPort in [TfminiPlus]");
-        emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
+        // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
         emit openFinished(false, message);
         emit stateChanged(TfminiPlusRuntimeState::Failed, message);
         return;
@@ -114,7 +114,7 @@ void TfminiPlusWorker::startWorker(const TfminiPlusOpenConfig& config)
     if (!m_serialPort->open(QIODevice::ReadOnly)) {
         const QString message = QStringLiteral("Open serial port failed: %1 (%2)")
                                     .arg(portName, m_serialPort->errorString());
-        emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
+        // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
         emit openFinished(false, message);
         emit stateChanged(TfminiPlusRuntimeState::Failed, message);
         teardownSerial();
@@ -124,7 +124,7 @@ void TfminiPlusWorker::startWorker(const TfminiPlusOpenConfig& config)
     const QString openedMessage = QStringLiteral("Opened %1 baud=%2 8N1")
                                       .arg(portName)
                                       .arg(m_serialPort->baudRate());
-    emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), openedMessage));
+    // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), openedMessage));
     emit openFinished(true, {});
     emit stateChanged(TfminiPlusRuntimeState::Ready, openedMessage);
 }
@@ -167,7 +167,7 @@ void TfminiPlusWorker::onSerialError()
     }
 
     const QString message = QStringLiteral("Serial port error: %1").arg(m_serialPort->errorString());
-    emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
+    // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), message));
     emit stateChanged(TfminiPlusRuntimeState::Failed, message);
 }
 
@@ -202,13 +202,13 @@ void TfminiPlusWorker::parseBuffer()
         }
 
         if (m_logFrames) {
-            qInfo(LOG_TFMINI_PLUS_FRAME).noquote()
-                << QStringLiteral("%1 dist=%2cm strength=%3 reliable=%4")
-                       .arg(logPrefix())
-                       .arg(frame.distanceCm)
-                       .arg(frame.strength)
-                       .arg(frame.isReliable ? QStringLiteral("yes")
-                                             : QStringLiteral("no"));
+            // qInfo(LOG_TFMINI_PLUS_FRAME).noquote()
+            //     << QStringLiteral("%1 dist=%2cm strength=%3 reliable=%4")
+            //            .arg(logPrefix())
+            //            .arg(frame.distanceCm)
+            //            .arg(frame.strength)
+            //            .arg(frame.isReliable ? QStringLiteral("yes")
+            //                                  : QStringLiteral("no"));
         }
         // TODO: emit distanceUpdated、碰撞阈值过滤、写 PLC 安全位等。
         m_buffer.remove(0, kFrameSize);

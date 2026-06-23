@@ -2911,10 +2911,12 @@ bool StateMachine::loadMergedPointCloudForInspection(
     mergedCloud.width = mergedPointCount;
     mergedCloud.height = 1;
 
-    if (m_poseStitchRunRootDirectory.isEmpty()) {
+    if (scan_tracking::common::segmentCaptureExportEnabled() && m_poseStitchRunRootDirectory.isEmpty()) {
         ensurePoseStitchRunRootDirectory();
     }
-    persistMergedInspectionPointCloudToDisk(inspectPathId, mergedSegmentCount, mergedCloud);
+    if (scan_tracking::common::segmentCaptureExportEnabled()) {
+        persistMergedInspectionPointCloudToDisk(inspectPathId, mergedSegmentCount, mergedCloud);
+    }
 
     *outCloud = std::move(mergedCloud);
     if (totalPointCount != nullptr) {
@@ -4094,10 +4096,12 @@ void StateMachine::applyLbnCalibrationUpdate(
     }
 
     if (!needRotation) {
-        qInfo(LOG_FLOW).noquote()
-            << QStringLiteral("LBN 标定：路径=") << pathId
-            << QStringLiteral(" 段号=") << segmentIndex
-            << QStringLiteral(" 无需转盘，保持当前 T0'");
+        if (scan_tracking::common::segmentCaptureExportEnabled()) {
+            qInfo(LOG_FLOW).noquote()
+                << QStringLiteral("LBN 标定：路径=") << pathId
+                << QStringLiteral(" 段号=") << segmentIndex
+                << QStringLiteral(" 无需转盘，保持当前 T0'");
+        }
     } else {
         const auto& lbn = bundle.lbnPoseResult;
         if (!lbn.invoked) {
@@ -4127,18 +4131,20 @@ void StateMachine::applyLbnCalibrationUpdate(
                 const auto rt = poseMatrixToArray(lbn.poseMatrix);
                 m_currentCalibrationMatrix = multiplyRowMajor4x4(rt, m_currentCalibrationMatrix);
 
-                qInfo(LOG_FLOW).noquote()
-                    << QStringLiteral("LBN 标定已更新 T0'，路径=") << pathId
-                    << QStringLiteral(" 段号=") << segmentIndex
-                    << QStringLiteral(" 匹配点数=") << lbn.matchedPointCount;
-                for (int row = 0; row < 4; ++row) {
+                if (scan_tracking::common::segmentCaptureExportEnabled()) {
                     qInfo(LOG_FLOW).noquote()
-                        << QStringLiteral("  T0'[%1] %2 %3 %4 %5")
-                               .arg(row)
-                               .arg(m_currentCalibrationMatrix[static_cast<std::size_t>(row * 4 + 0)], 0, 'g', 6)
-                               .arg(m_currentCalibrationMatrix[static_cast<std::size_t>(row * 4 + 1)], 0, 'g', 6)
-                               .arg(m_currentCalibrationMatrix[static_cast<std::size_t>(row * 4 + 2)], 0, 'g', 6)
-                               .arg(m_currentCalibrationMatrix[static_cast<std::size_t>(row * 4 + 3)], 0, 'g', 6);
+                        << QStringLiteral("LBN 标定已更新 T0'，路径=") << pathId
+                        << QStringLiteral(" 段号=") << segmentIndex
+                        << QStringLiteral(" 匹配点数=") << lbn.matchedPointCount;
+                    for (int row = 0; row < 4; ++row) {
+                        qInfo(LOG_FLOW).noquote()
+                            << QStringLiteral("  T0'[%1] %2 %3 %4 %5")
+                                   .arg(row)
+                                   .arg(m_currentCalibrationMatrix[static_cast<std::size_t>(row * 4 + 0)], 0, 'g', 6)
+                                   .arg(m_currentCalibrationMatrix[static_cast<std::size_t>(row * 4 + 1)], 0, 'g', 6)
+                                   .arg(m_currentCalibrationMatrix[static_cast<std::size_t>(row * 4 + 2)], 0, 'g', 6)
+                                   .arg(m_currentCalibrationMatrix[static_cast<std::size_t>(row * 4 + 3)], 0, 'g', 6);
+                    }
                 }
             }
         }
@@ -4206,7 +4212,7 @@ void StateMachine::applySegmentPoseStitching(int pathId, int segmentIndex)
         }
     }
 
-    if (!lbValid) {
+    if (!lbValid && scan_tracking::common::segmentCaptureExportEnabled()) {
         qWarning(LOG_FLOW).noquote()
             << QStringLiteral("[PoseStitch] LB 无效，拼接回退 T0'（JSON/LBN），路径=") << pathId
             << QStringLiteral(" 段号=") << segmentIndex
@@ -4243,14 +4249,16 @@ void StateMachine::applySegmentPoseStitching(int pathId, int segmentIndex)
             stitchedCloud);
     }
 
-    qInfo(LOG_FLOW).noquote()
-        << QStringLiteral("[PoseStitch] 点云已拼接 T0")
-        << (rtGlobalAsT0 ? QStringLiteral("(Rt_global)") : QStringLiteral("(T0' fallback)"))
-        << QStringLiteral(" 路径=") << pathId
-        << QStringLiteral(" 段号=") << segmentIndex
-        << QStringLiteral(" 点数=") << stitchedCloud.pointCount
-        << QStringLiteral(" LB有效=") << lbValid
-        << QStringLiteral(" 说明=") << stitchMessage;
+    if (scan_tracking::common::segmentCaptureExportEnabled()) {
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[PoseStitch] 点云已拼接 T0")
+            << (rtGlobalAsT0 ? QStringLiteral("(Rt_global)") : QStringLiteral("(T0' fallback)"))
+            << QStringLiteral(" 路径=") << pathId
+            << QStringLiteral(" 段号=") << segmentIndex
+            << QStringLiteral(" 点数=") << stitchedCloud.pointCount
+            << QStringLiteral(" LB有效=") << lbValid
+            << QStringLiteral(" 说明=") << stitchMessage;
+    }
 
     const auto combinedOutputRt = calibrationMatrix;
     recordSegmentPoseStitch(
@@ -4377,6 +4385,10 @@ void StateMachine::initializePoseStitchRunOutputDirectory()
 
 bool StateMachine::ensurePoseStitchRunRootDirectory()
 {
+    if (!scan_tracking::common::segmentCaptureExportEnabled()) {
+        return false;
+    }
+
     if (!m_poseStitchRunRootDirectory.isEmpty()) {
         return true;
     }
@@ -4397,6 +4409,10 @@ bool StateMachine::ensurePoseStitchRunRootDirectory()
 
 void StateMachine::persistInspectionPoseStitchOutput(int pathId) const
 {
+    if (!scan_tracking::common::segmentCaptureExportEnabled()) {
+        return;
+    }
+
     if (pathId <= 0) {
         qWarning(LOG_FLOW).noquote()
             << QStringLiteral("[PoseStitchOutput] 跳过落盘：无效 pathId=") << pathId;
@@ -4503,6 +4519,10 @@ void StateMachine::persistInspectionPoseStitchOutput(int pathId) const
 
 void StateMachine::persistLastPoseStitchArtifactToDisk() const
 {
+    if (!scan_tracking::common::segmentCaptureExportEnabled()) {
+        return;
+    }
+
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
     if (configManager == nullptr || !configManager->segmentCaptureExportConfig().saveRawPointCloud) {
         return;
@@ -4562,6 +4582,10 @@ void StateMachine::persistMergedInspectionPointCloudToDisk(
     int mergedSegmentCount,
     const scan_tracking::mech_eye::PointCloudFrame& mergedCloud) const
 {
+    if (!scan_tracking::common::segmentCaptureExportEnabled()) {
+        return;
+    }
+
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
     if (configManager == nullptr || !configManager->segmentCaptureExportConfig().saveRawPointCloud) {
         return;

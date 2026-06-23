@@ -3,6 +3,11 @@
     "cmake.cmakePath": "C:/Program Files/CMake/bin/cmake.exe",
     "cmake.defaultConfigurePreset": "win-msvc2019-qtcore-ninja-debug",
     "cmake.defaultBuildPreset": "win-msvc2019-qtcore-ninja-debug",
+    "cmake.launchTarget": "scan_tracking",
+    "cmake.debugConfig": {
+        "name": "scan-tracking (IPC)",
+        "cwd": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug"
+    },
     "cmake.configureOnOpen": false,
     "cmake.buildBeforeRun": false,
     "cmake.automaticReconfigure": false,

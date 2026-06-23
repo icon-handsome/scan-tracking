@@ -330,26 +330,33 @@ void VisionPipelineService::finishBundleIfReady()
 
     const auto lbConfig = m_lbPoseConfig;
     const auto lbnConfig = m_lbnPoseConfig;
+    const bool verbosePoseLogs = scan_tracking::common::segmentCaptureExportEnabled();
     QPointer<VisionPipelineService> self(this);
     // 位姿检测为 CPU 密集型，放到 detached 后台线程，完成后 invokeMethod 回主线程
-    std::thread([self, bundle, lbConfig, lbnConfig, hikReady, runLbn]() mutable {
+    std::thread([self, bundle, lbConfig, lbnConfig, hikReady, runLbn, verbosePoseLogs]() mutable {
         auto completedBundle = bundle;
 
         if (runLbn) {
             if (lbnConfig.useIdentityRtWithoutMarkers) {
                 completedBundle.lbnPoseResult = makeIdentityLbnBypassResult();
-                qWarning() << "[LBN位姿]" << completedBundle.lbnPoseResult.message;
+                if (verbosePoseLogs) {
+                    qWarning() << "[LBN位姿]" << completedBundle.lbnPoseResult.message;
+                }
             } else {
-                qInfo() << QStringLiteral("[LBN位姿] 开始检测")
-                        << QStringLiteral(" 纹理=") << bundle.mechEyeResult.texture2D.width << QStringLiteral("x")
-                        << bundle.mechEyeResult.texture2D.height
-                        << QStringLiteral(" 点云网格=") << bundle.mechEyeResult.pointCloud.width << QStringLiteral("x")
-                        << bundle.mechEyeResult.pointCloud.height;
+                if (verbosePoseLogs) {
+                    qInfo() << QStringLiteral("[LBN位姿] 开始检测")
+                            << QStringLiteral(" 纹理=") << bundle.mechEyeResult.texture2D.width << QStringLiteral("x")
+                            << bundle.mechEyeResult.texture2D.height
+                            << QStringLiteral(" 点云网格=") << bundle.mechEyeResult.pointCloud.width << QStringLiteral("x")
+                            << bundle.mechEyeResult.pointCloud.height;
+                }
                 completedBundle.lbnPoseResult = runLbnPoseDetection(bundle.mechEyeResult, lbnConfig);
             }
-            const auto& lbn = completedBundle.lbnPoseResult;
-            qInfo() << QStringLiteral("[LBN位姿] 完成：已调用=") << lbn.invoked << QStringLiteral(" 成功=") << lbn.success
-                    << QStringLiteral(" 说明=") << lbn.message << QStringLiteral(" 匹配点数=") << lbn.matchedPointCount;
+            if (verbosePoseLogs) {
+                const auto& lbn = completedBundle.lbnPoseResult;
+                qInfo() << QStringLiteral("[LBN位姿] 完成：已调用=") << lbn.invoked << QStringLiteral(" 成功=") << lbn.success
+                        << QStringLiteral(" 说明=") << lbn.message << QStringLiteral(" 匹配点数=") << lbn.matchedPointCount;
+            }
         } else {
             completedBundle.lbnPoseResult.invoked = false;
             completedBundle.lbnPoseResult.message =
@@ -361,34 +368,38 @@ void VisionPipelineService::finishBundleIfReady()
         // 转盘段（needMechEye2D）仅 LBN 标定；封头段用 CXP 双目跑 LB
         const bool runLb = hikReady && !bundle.request.needMechEye2D;
         if (runLb) {
-            qInfo() << QStringLiteral("[LB位姿] 开始检测，左目(CameraA)=")
-                    << bundle.request.hikCameraAKey
-                    << bundle.hikCameraAResult.frame.width << QStringLiteral("x")
-                    << bundle.hikCameraAResult.frame.height
-                    << QStringLiteral(" frameId=") << bundle.hikCameraAResult.frame.frameId
-                    << QStringLiteral(" timestampMs=") << bundle.hikCameraAResult.frame.timestampMs
-                    << QStringLiteral(" 右目(CameraB)=") << bundle.request.hikCameraBKey
-                    << bundle.hikCameraBResult.frame.width << QStringLiteral("x")
-                    << bundle.hikCameraBResult.frame.height
-                    << QStringLiteral(" frameId=") << bundle.hikCameraBResult.frame.frameId
-                    << QStringLiteral(" timestampMs=") << bundle.hikCameraBResult.frame.timestampMs;
+            if (verbosePoseLogs) {
+                qInfo() << QStringLiteral("[LB位姿] 开始检测，左目(CameraA)=")
+                        << bundle.request.hikCameraAKey
+                        << bundle.hikCameraAResult.frame.width << QStringLiteral("x")
+                        << bundle.hikCameraAResult.frame.height
+                        << QStringLiteral(" frameId=") << bundle.hikCameraAResult.frame.frameId
+                        << QStringLiteral(" timestampMs=") << bundle.hikCameraAResult.frame.timestampMs
+                        << QStringLiteral(" 右目(CameraB)=") << bundle.request.hikCameraBKey
+                        << bundle.hikCameraBResult.frame.width << QStringLiteral("x")
+                        << bundle.hikCameraBResult.frame.height
+                        << QStringLiteral(" frameId=") << bundle.hikCameraBResult.frame.frameId
+                        << QStringLiteral(" timestampMs=") << bundle.hikCameraBResult.frame.timestampMs;
+            }
 
             completedBundle.lbPoseResult = runLbPoseDetection(
                 completedBundle.hikCameraAResult.frame,
                 completedBundle.hikCameraBResult.frame,
                 lbConfig);
 
-            const auto& lr = completedBundle.lbPoseResult;
-            qInfo() << QStringLiteral("[LB位姿] 完成：成功=") << lr.success << QStringLiteral(" 说明=") << lr.message
-                    << QStringLiteral(" 帧点数=") << lr.framePointCount;
-            if (lr.poseMatrix.valid) {
-                qInfo() << QStringLiteral("[LB位姿] Rt 矩阵：");
-                for (int row = 0; row < 4; ++row) {
-                    qInfo().noquote() << QString("  [%1, %2, %3, %4]")
-                        .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 0]), 12, 'f', 6)
-                        .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 1]), 12, 'f', 6)
-                        .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 2]), 12, 'f', 6)
-                        .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 3]), 12, 'f', 6);
+            if (verbosePoseLogs) {
+                const auto& lr = completedBundle.lbPoseResult;
+                qInfo() << QStringLiteral("[LB位姿] 完成：成功=") << lr.success << QStringLiteral(" 说明=") << lr.message
+                        << QStringLiteral(" 帧点数=") << lr.framePointCount;
+                if (lr.poseMatrix.valid) {
+                    qInfo() << QStringLiteral("[LB位姿] Rt 矩阵：");
+                    for (int row = 0; row < 4; ++row) {
+                        qInfo().noquote() << QString("  [%1, %2, %3, %4]")
+                            .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 0]), 12, 'f', 6)
+                            .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 1]), 12, 'f', 6)
+                            .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 2]), 12, 'f', 6)
+                            .arg(static_cast<double>(lr.poseMatrix.values[row * 4 + 3]), 12, 'f', 6);
+                    }
                 }
             }
         } else if (hikReady && bundle.request.needMechEye2D) {
@@ -396,7 +407,9 @@ void VisionPipelineService::finishBundleIfReady()
             completedBundle.lbPoseResult.success = false;
             completedBundle.lbPoseResult.message =
                 QStringLiteral("转盘点位，跳过 LB 位姿检测（仅 LBN）。");
-            qInfo() << QStringLiteral("[LB位姿] 转盘段跳过（needMechEye2D=true，仅 LBN）");
+            if (verbosePoseLogs) {
+                qInfo() << QStringLiteral("[LB位姿] 转盘段跳过（needMechEye2D=true，仅 LBN）");
+            }
         } else {
             completedBundle.lbPoseResult.invoked = false;
             completedBundle.lbPoseResult.success = false;

@@ -123,13 +123,15 @@ bool extractPointCloud(
         const OBCameraParam cameraParam = pipeline.getCameraParam();
         pointCloudFilter.setCameraParam(cameraParam);
     } catch (const ob::Error& error) {
-        qWarning(LOG_ORBBEC_GEMINI).noquote()
-            << QStringLiteral("%1 PointCloudFilter setCameraParam failed: %2")
-                   .arg(logPrefix(), QString::fromStdString(error.what()));
+        Q_UNUSED(error);
+        // qWarning(LOG_ORBBEC_GEMINI).noquote()
+        //     << QStringLiteral("%1 PointCloudFilter setCameraParam failed: %2")
+        //            .arg(logPrefix(), QString::fromStdString(error.what()));
     } catch (const std::exception& error) {
-        qWarning(LOG_ORBBEC_GEMINI).noquote()
-            << QStringLiteral("%1 PointCloudFilter setCameraParam failed: %2")
-                   .arg(logPrefix(), QString::fromUtf8(error.what()));
+        Q_UNUSED(error);
+        // qWarning(LOG_ORBBEC_GEMINI).noquote()
+        //     << QStringLiteral("%1 PointCloudFilter setCameraParam failed: %2")
+        //            .arg(logPrefix(), QString::fromUtf8(error.what()));
     }
 
     const std::shared_ptr<ob::Frame> pointCloudFrame = pointCloudFilter.process(frameSet);
@@ -184,7 +186,7 @@ void OrbbecGeminiWorker::startWorker(const OrbbecGeminiOpenConfig& config)
     m_stopping = false;
     m_openedDevice = {};
 
-    emit logMessage(QStringLiteral("%1 Starting worker...").arg(logPrefix()));
+    // emit logMessage(QStringLiteral("%1 Starting worker...").arg(logPrefix()));
     emit stateChanged(OrbbecGeminiRuntimeState::Enumerating, QStringLiteral("Enumerating devices"));
 
     QVector<OrbbecGeminiDeviceSummary> summaries;
@@ -195,15 +197,15 @@ void OrbbecGeminiWorker::startWorker(const OrbbecGeminiOpenConfig& config)
         const uint32_t count = deviceList->getCount();
 
         if (count == 0) {
-            emit logMessage(QStringLiteral("%1 No device found").arg(logPrefix()));
+            // emit logMessage(QStringLiteral("%1 No device found").arg(logPrefix()));
             emit enumerateFinished(summaries);
             emit openFinished(false, OrbbecGeminiDeviceSummary{}, QStringLiteral("No Orbbec device connected"));
             emit stateChanged(OrbbecGeminiRuntimeState::Failed, QStringLiteral("No device found"));
             return;
         }
 
-        emit logMessage(
-            QStringLiteral("%1 Enumerated %2 device(s)").arg(logPrefix()).arg(count));
+        // emit logMessage(
+        //     QStringLiteral("%1 Enumerated %2 device(s)").arg(logPrefix()).arg(count));
 
         for (uint32_t index = 0; index < count; ++index) {
             try {
@@ -212,13 +214,13 @@ void OrbbecGeminiWorker::startWorker(const OrbbecGeminiOpenConfig& config)
                 const OrbbecGeminiDeviceSummary summary =
                     summaryFromDeviceInfo(static_cast<int>(index), info);
                 summaries.push_back(summary);
-                emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), formatDeviceSummaryLine(summary)));
+                // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), formatDeviceSummaryLine(summary)));
             } catch (const ob::Error& error) {
-                emit logMessage(
-                    QStringLiteral("%1 Failed to probe device index=%2: %3")
-                        .arg(logPrefix())
-                        .arg(index)
-                        .arg(QString::fromStdString(error.what())));
+                // emit logMessage(
+                //     QStringLiteral("%1 Failed to probe device index=%2: %3")
+                //         .arg(logPrefix())
+                //         .arg(index)
+                //         .arg(QString::fromStdString(error.what())));
             }
         }
 
@@ -229,9 +231,9 @@ void OrbbecGeminiWorker::startWorker(const OrbbecGeminiOpenConfig& config)
         const QString trimmedSerial = config.serial.trimmed();
         int openedIndex = config.deviceIndex;
         if (!trimmedSerial.isEmpty()) {
-            emit logMessage(
-                QStringLiteral("%1 Opening device by serial=%2")
-                    .arg(logPrefix(), trimmedSerial));
+            // emit logMessage(
+            //     QStringLiteral("%1 Opening device by serial=%2")
+            //         .arg(logPrefix(), trimmedSerial));
             const QByteArray serialBytes = trimmedSerial.toUtf8();
             m_impl->device = deviceList->getDeviceBySN(serialBytes.constData());
             for (const OrbbecGeminiDeviceSummary& summary : summaries) {
@@ -241,10 +243,10 @@ void OrbbecGeminiWorker::startWorker(const OrbbecGeminiOpenConfig& config)
                 }
             }
         } else {
-            emit logMessage(
-                QStringLiteral("%1 Opening device by index=%2")
-                    .arg(logPrefix())
-                    .arg(config.deviceIndex));
+            // emit logMessage(
+            //     QStringLiteral("%1 Opening device by index=%2")
+            //         .arg(logPrefix())
+            //         .arg(config.deviceIndex));
             if (config.deviceIndex < 0
                 || static_cast<uint32_t>(config.deviceIndex) >= deviceList->getCount()) {
                 throw std::runtime_error(
@@ -256,7 +258,7 @@ void OrbbecGeminiWorker::startWorker(const OrbbecGeminiOpenConfig& config)
         }
 
         m_openedDevice = summaryFromDeviceInfo(openedIndex, m_impl->device->getDeviceInfo());
-        emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), formatOpenedDeviceLine(m_openedDevice)));
+        // emit logMessage(QStringLiteral("%1 %2").arg(logPrefix(), formatOpenedDeviceLine(m_openedDevice)));
 
         m_impl->pipeline = std::make_unique<ob::Pipeline>(m_impl->device);
         const std::shared_ptr<ob::Config> streamConfig = std::make_shared<ob::Config>();
@@ -279,28 +281,28 @@ void OrbbecGeminiWorker::startWorker(const OrbbecGeminiOpenConfig& config)
                 OB_FORMAT_RGB);
         }
 
-        emit logMessage(
-            QStringLiteral("%1 Starting depth stream %2x%3@%4fps")
-                .arg(logPrefix())
-                .arg(depthWidth)
-                .arg(depthHeight)
-                .arg(fps));
+        // emit logMessage(
+        //     QStringLiteral("%1 Starting depth stream %2x%3@%4fps")
+        //         .arg(logPrefix())
+        //         .arg(depthWidth)
+        //         .arg(depthHeight)
+        //         .arg(fps));
         m_impl->pipeline->start(streamConfig);
         m_impl->streamsStarted = true;
 
         const int warmupCount = std::max(config.warmupFrameCount, 0);
         if (warmupCount > 0) {
-            emit logMessage(
-                QStringLiteral("%1 Discarding %2 warmup frame(s)").arg(logPrefix()).arg(warmupCount));
+            // emit logMessage(
+            //     QStringLiteral("%1 Discarding %2 warmup frame(s)").arg(logPrefix()).arg(warmupCount));
             discardWarmupFrames(*m_impl->pipeline, warmupCount);
         }
 
-        emit logMessage(QStringLiteral("%1 Ready (depth stream started)").arg(logPrefix()));
+        // emit logMessage(QStringLiteral("%1 Ready (depth stream started)").arg(logPrefix()));
         emit stateChanged(OrbbecGeminiRuntimeState::Ready, QStringLiteral("Device opened"));
         emit openFinished(true, m_openedDevice, {});
     } catch (const ob::Error& error) {
         const QString message = QString::fromStdString(error.what());
-        emit logMessage(QStringLiteral("%1 Open failed: %2").arg(logPrefix(), message));
+        // emit logMessage(QStringLiteral("%1 Open failed: %2").arg(logPrefix(), message));
         emit openFinished(false, OrbbecGeminiDeviceSummary{}, message);
         emit stateChanged(OrbbecGeminiRuntimeState::Failed, message);
         if (m_impl->pipeline != nullptr && m_impl->streamsStarted) {
@@ -314,7 +316,7 @@ void OrbbecGeminiWorker::startWorker(const OrbbecGeminiOpenConfig& config)
         m_impl->device.reset();
     } catch (const std::exception& error) {
         const QString message = QString::fromUtf8(error.what());
-        emit logMessage(QStringLiteral("%1 Open failed: %2").arg(logPrefix(), message));
+        // emit logMessage(QStringLiteral("%1 Open failed: %2").arg(logPrefix(), message));
         emit openFinished(false, OrbbecGeminiDeviceSummary{}, message);
         emit stateChanged(OrbbecGeminiRuntimeState::Failed, message);
         if (m_impl->pipeline != nullptr && m_impl->streamsStarted) {
@@ -337,13 +339,13 @@ void OrbbecGeminiWorker::stopWorker()
         try {
             m_impl->pipeline->stop();
         } catch (const ob::Error& error) {
-            emit logMessage(
-                QStringLiteral("%1 Pipeline stop failed: %2")
-                    .arg(logPrefix(), QString::fromStdString(error.what())));
+            // emit logMessage(
+            //     QStringLiteral("%1 Pipeline stop failed: %2")
+            //         .arg(logPrefix(), QString::fromStdString(error.what())));
         } catch (const std::exception& error) {
-            emit logMessage(
-                QStringLiteral("%1 Pipeline stop failed: %2")
-                    .arg(logPrefix(), QString::fromUtf8(error.what())));
+            // emit logMessage(
+            //     QStringLiteral("%1 Pipeline stop failed: %2")
+            //         .arg(logPrefix(), QString::fromUtf8(error.what())));
         }
     }
 
@@ -462,22 +464,22 @@ void OrbbecGeminiWorker::performCapture(const OrbbecCaptureRequest& request)
 
         result.captureDurationMs = timer.elapsed();
         if (result.errorCode == OrbbecCaptureErrorCode::Success) {
-            emit logMessage(
-                QStringLiteral("%1 Capture ok req=%2 size=%3x%4 validDepth=%5 points=%6 elapsed=%7ms")
-                    .arg(logPrefix())
-                    .arg(request.requestId)
-                    .arg(result.depthWidth)
-                    .arg(result.depthHeight)
-                    .arg(result.validDepthPixelCount)
-                    .arg(result.pointCloudPointCount)
-                    .arg(result.captureDurationMs));
+            // emit logMessage(
+            //     QStringLiteral("%1 Capture ok req=%2 size=%3x%4 validDepth=%5 points=%6 elapsed=%7ms")
+            //         .arg(logPrefix())
+            //         .arg(request.requestId)
+            //         .arg(result.depthWidth)
+            //         .arg(result.depthHeight)
+            //         .arg(result.validDepthPixelCount)
+            //         .arg(result.pointCloudPointCount)
+            //         .arg(result.captureDurationMs));
             if (saveToDisk) {
-                emit logMessage(
-                    QStringLiteral("%1 Saved depthRaw=%2 depthPreview=%3 pointCloud=%4")
-                        .arg(logPrefix())
-                        .arg(result.depthRawPngPath)
-                        .arg(result.depthPreviewPngPath)
-                        .arg(result.pointCloudPlyPath));
+                // emit logMessage(
+                //     QStringLiteral("%1 Saved depthRaw=%2 depthPreview=%3 pointCloud=%4")
+                //         .arg(logPrefix())
+                //         .arg(result.depthRawPngPath)
+                //         .arg(result.depthPreviewPngPath)
+                //         .arg(result.pointCloudPlyPath));
             }
         }
 
@@ -491,14 +493,14 @@ void OrbbecGeminiWorker::performCapture(const OrbbecCaptureRequest& request)
         result.errorCode = OrbbecCaptureErrorCode::CaptureFailed;
         result.errorMessage = QString::fromStdString(error.what());
         result.captureDurationMs = timer.elapsed();
-        emit logMessage(QStringLiteral("%1 Capture failed: %2").arg(logPrefix(), result.errorMessage));
+        // emit logMessage(QStringLiteral("%1 Capture failed: %2").arg(logPrefix(), result.errorMessage));
         emit captureFinished(result);
         emit stateChanged(OrbbecGeminiRuntimeState::Ready, result.errorMessage);
     } catch (const std::exception& error) {
         result.errorCode = OrbbecCaptureErrorCode::CaptureFailed;
         result.errorMessage = QString::fromUtf8(error.what());
         result.captureDurationMs = timer.elapsed();
-        emit logMessage(QStringLiteral("%1 Capture failed: %2").arg(logPrefix(), result.errorMessage));
+        // emit logMessage(QStringLiteral("%1 Capture failed: %2").arg(logPrefix(), result.errorMessage));
         emit captureFinished(result);
         emit stateChanged(OrbbecGeminiRuntimeState::Ready, result.errorMessage);
     }
