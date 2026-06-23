@@ -108,7 +108,7 @@ PointCloudFrame ConvertUntexturedPointCloudToFrame(
     return pointCloud;
 }
 
-void applyMech3DCaptureUserSet(mmind::eye::UserSet& userSet, bool edgeArtifactRemovalEnabled)
+void applyMech3DCaptureUserSet(mmind::eye::UserSet& userSet, bool noiseRemovalNormal)
 {
     const auto& visionCfg = common::ConfigManager::instance()->visionConfig();
 
@@ -120,24 +120,37 @@ void applyMech3DCaptureUserSet(mmind::eye::UserSet& userSet, bool edgeArtifactRe
         << QStringLiteral("[深度范围] 设置为 [") << configuredRange.min << QStringLiteral(",")
         << configuredRange.max << QStringLiteral("] mm，成功=") << depthStatus.isOK();
 
-    const auto edgeStatus = userSet.setBoolValue(
-        mmind::eye::pointcloud_processing_setting::EdgeArtifactRemoval::name,
-        edgeArtifactRemovalEnabled);
+    using Outlier = mmind::eye::pointcloud_processing_setting::OutlierRemoval;
+    using Noise = mmind::eye::pointcloud_processing_setting::NoiseRemoval;
+
+    const auto outlierStatus =
+        userSet.setEnumValue(Outlier::name, static_cast<int>(Outlier::Value::Off));
+
+    const int noiseLevel = noiseRemovalNormal
+        ? static_cast<int>(Noise::Value::Normal)
+        : static_cast<int>(Noise::Value::Off);
+
+    const auto noiseStatus = userSet.setEnumValue(Noise::name, noiseLevel);
     qInfo(LOG_MECHEYE_WORKER).noquote()
-        << QStringLiteral("[边缘伪点去除] EdgeArtifactRemoval=")
-        << edgeArtifactRemovalEnabled
-        << QStringLiteral("，成功=") << edgeStatus.isOK();
-    if (!edgeStatus.isOK()) {
+        << QStringLiteral("[点云滤波] OutlierRemoval=Off NoiseRemoval=")
+        << (noiseRemovalNormal ? QStringLiteral("Normal") : QStringLiteral("Off"))
+        << QStringLiteral(" 成功=") << outlierStatus.isOK() << noiseStatus.isOK();
+    if (!outlierStatus.isOK()) {
         qWarning(LOG_MECHEYE_WORKER).noquote()
-            << QStringLiteral("[边缘伪点去除] 设置失败（当前型号可能不支持）: ")
-            << QString::fromStdString(edgeStatus.errorDescription);
+            << QStringLiteral("[点云滤波] OutlierRemoval 关闭失败: ")
+            << QString::fromStdString(outlierStatus.errorDescription);
+    }
+    if (!noiseStatus.isOK()) {
+        qWarning(LOG_MECHEYE_WORKER).noquote()
+            << QStringLiteral("[点云滤波] NoiseRemoval 设置失败: ")
+            << QString::fromStdString(noiseStatus.errorDescription);
     }
 }
 
 PointCloudFrame capturePointCloud3D(
     mmind::eye::Camera& camera,
     int timeoutMs,
-    bool edgeArtifactRemovalEnabled,
+    bool noiseRemovalNormal,
     qint64* elapsedMs,
     QString* errorMessage)
 {
@@ -145,7 +158,7 @@ PointCloudFrame capturePointCloud3D(
     timer.start();
 
     mmind::eye::Frame3D frame3D;
-    applyMech3DCaptureUserSet(camera.currentUserSet(), edgeArtifactRemovalEnabled);
+    applyMech3DCaptureUserSet(camera.currentUserSet(), noiseRemovalNormal);
     const auto status = camera.capture3D(frame3D, static_cast<unsigned int>(timeoutMs));
     if (!status.isOK()) {
         if (elapsedMs != nullptr) {
@@ -181,14 +194,14 @@ PointCloudFrame capturePointCloud3D(
 PointCloudFrame capturePointCloud3DComparison(
     mmind::eye::Camera& camera,
     int timeoutMs,
-    bool edgeArtifactRemovalEnabled,
+    bool noiseRemovalNormal,
     qint64* elapsedMs,
     QString* errorMessage)
 {
     return capturePointCloud3D(
         camera,
         timeoutMs,
-        edgeArtifactRemovalEnabled,
+        noiseRemovalNormal,
         elapsedMs,
         errorMessage);
 }
@@ -375,7 +388,7 @@ void MechEyeWorker::performCapture(const scan_tracking::mech_eye::CaptureRequest
             result.pointCloud = capturePointCloud3D(
                 m_impl->camera,
                 normalized.timeoutMs,
-                normalized.edgeArtifactRemovalEnabled,
+                true,
                 &result.elapsedMs,
                 &errorMessage);
             if (!errorMessage.isEmpty()) {
@@ -385,11 +398,10 @@ void MechEyeWorker::performCapture(const scan_tracking::mech_eye::CaptureRequest
             }
 
             if (normalized.comparisonCaptureEnabled && status.isOK()) {
-                const bool oppositeEdgeSetting = !normalized.edgeArtifactRemovalEnabled;
                 result.comparisonPointCloud = capturePointCloud3DComparison(
                     m_impl->camera,
                     normalized.timeoutMs,
-                    oppositeEdgeSetting,
+                    false,
                     &result.comparisonElapsedMs,
                     &errorMessage);
                 if (!errorMessage.isEmpty()) {
@@ -399,9 +411,7 @@ void MechEyeWorker::performCapture(const scan_tracking::mech_eye::CaptureRequest
             }
         } else {
             mmind::eye::Frame2DAnd3D frame2DAnd3D;
-            applyMech3DCaptureUserSet(
-                m_impl->camera.currentUserSet(),
-                normalized.edgeArtifactRemovalEnabled);
+            applyMech3DCaptureUserSet(m_impl->camera.currentUserSet(), true);
             status = m_impl->camera.capture2DAnd3D(
                 frame2DAnd3D,
                 static_cast<unsigned int>(normalized.timeoutMs));
@@ -743,11 +753,6 @@ void MechEyeWorker::printCameraParameters()
     std::string outlierRemoval;
     userSet.getEnumValue("PointCloudOutlierRemoval", outlierRemoval);
 
-    bool edgeArtifactRemoval = false;
-    userSet.getBoolValue(
-        mmind::eye::pointcloud_processing_setting::EdgeArtifactRemoval::name,
-        edgeArtifactRemoval);
-
     qInfo(LOG_MECHEYE_WORKER).noquote()
         << "=== MechEye 相机信息 ===\n"
         << "  型号:" << m_cameraInfo.model << "\n"
@@ -764,8 +769,7 @@ void MechEyeWorker::printCameraParameters()
         << "  深度范围:" << depthRange.min << " - " << depthRange.max << " mm\n"
         << "  表面平滑:" << QString::fromStdString(surfaceSmoothing) << "\n"
         << "  噪声去除:" << QString::fromStdString(noiseRemoval) << "\n"
-        << "  离群点去除:" << QString::fromStdString(outlierRemoval) << "\n"
-        << "  边缘伪点去除:" << edgeArtifactRemoval;
+        << "  离群点去除:" << QString::fromStdString(outlierRemoval);
 
     // 打印深度相机内参（Nano Ultra 没有独立 2D 纹理相机，只打印深度内参）
     const auto& depIntr = intrinsics.depth;

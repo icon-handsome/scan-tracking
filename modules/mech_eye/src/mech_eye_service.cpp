@@ -151,7 +151,6 @@ quint64 MechEyeService::requestCapture(
     const QString& cameraKey,
     CaptureMode mode,
     int timeoutMs,
-    bool edgeArtifactRemovalEnabled,
     bool comparisonCaptureEnabled)
 {
     if (!m_started || m_stopping || m_worker == nullptr) {
@@ -170,7 +169,6 @@ quint64 MechEyeService::requestCapture(
 
     request.mode = mode;    // 采集模式
     request.timeoutMs = timeoutMs > 0 ? timeoutMs : m_defaultCaptureTimeoutMs;  //超时设置
-    request.edgeArtifactRemovalEnabled = edgeArtifactRemovalEnabled;
     request.comparisonCaptureEnabled = comparisonCaptureEnabled;
 
     m_busy = true;

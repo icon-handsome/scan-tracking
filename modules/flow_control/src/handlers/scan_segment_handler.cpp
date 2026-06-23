@@ -85,8 +85,7 @@ void StateMachine::executeScanSegmentTask()
         m_activeTask.scanSegmentIndex,
         m_activeTask.taskId,
         mechCaptureMode,
-        visionConfig.mechEdgeArtifactRemovalEnabled,
-        visionConfig.mechEdgeArtifactRemovalComparisonEnabled);
+        visionConfig.mechPointCloudProcessingComparisonEnabled);
 
     if (requestId == 0) {
         finishScanSegmentFailure(

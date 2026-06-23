@@ -18,12 +18,12 @@ QString buildSegmentPlyPath(
     quint32 taskId,
     const QString& timestamp = QString());
 
-/// 比较采集 PLY：<root>/mech_3d/compare/{edge_on|edge_off}/segment_..._cmp.ply
+/// 比较采集 PLY：<root>/mech_3d/compare/{noise_on|noise_off}/segment_..._cmp.ply
 QString buildComparisonPlyPath(
     const QString& configuredRoot,
     int segmentIndex,
     quint32 taskId,
-    bool edgeArtifactRemovalEnabled,
+    bool noiseRemovalNormal,
     const QString& timestamp = QString());
 
 /// 将 PointCloudFrame 保存为 ASCII PLY（x,y,z,nx,ny,nz）

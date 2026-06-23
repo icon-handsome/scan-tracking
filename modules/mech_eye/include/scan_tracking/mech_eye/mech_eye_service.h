@@ -64,7 +64,6 @@ public:
         const QString& cameraKey,
         CaptureMode mode = CaptureMode::Capture3DOnly,
         int timeoutMs = 30000,
-        bool edgeArtifactRemovalEnabled = true,
         bool comparisonCaptureEnabled = false);
 
 signals:

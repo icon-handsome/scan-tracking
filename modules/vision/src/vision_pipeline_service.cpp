@@ -143,7 +143,6 @@ quint64 VisionPipelineService::requestCaptureBundle(
     int segmentIndex,
     quint32 taskId,
     scan_tracking::mech_eye::CaptureMode mechCaptureMode,
-    bool mechEdgeArtifactRemovalEnabled,
     bool mechComparisonCaptureEnabled)
 {
     // ---- 前置校验 ----
@@ -169,7 +168,6 @@ quint64 VisionPipelineService::requestCaptureBundle(
     // Capture2DAnd3D 表示转盘段，后续会跑 LBN 而非 LB
     request.needMechEye2D =
         mechCaptureMode == scan_tracking::mech_eye::CaptureMode::Capture2DAnd3D;
-    request.mechEdgeArtifactRemovalEnabled = mechEdgeArtifactRemovalEnabled;
     request.mechComparisonCaptureEnabled = mechComparisonCaptureEnabled;
     request.mechEyeCameraKey = m_config.mechEyeCameraKey;
     request.mechEyeTimeoutMs = m_config.mechCaptureTimeoutMs > 0 ? m_config.mechCaptureTimeoutMs : 5000;
@@ -190,7 +188,6 @@ quint64 VisionPipelineService::requestCaptureBundle(
         request.mechEyeCameraKey,
         mechCaptureMode,
         request.mechEyeTimeoutMs,
-        request.mechEdgeArtifactRemovalEnabled,
         request.mechComparisonCaptureEnabled);
     if (pending.mechRequestId == 0) {
         emit fatalError(VisionErrorCode::CaptureRejected, QStringLiteral("启动 Mech-Eye 采集失败。"));
@@ -220,8 +217,7 @@ quint64 VisionPipelineService::requestCaptureBundle(
         segmentIndex,
         taskId,
         mechCaptureMode,
-        visionConfig.mechEdgeArtifactRemovalEnabled,
-        visionConfig.mechEdgeArtifactRemovalComparisonEnabled);
+        visionConfig.mechPointCloudProcessingComparisonEnabled);
 }
 
 // 梅卡延迟到期后调用：并行发起 CXP 左/右目 poseCapture

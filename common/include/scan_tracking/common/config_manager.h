@@ -51,12 +51,8 @@ struct VisionConfig {
     int mechCaptureTimeoutMs;
     int mechDepthRangeMin;
     int mechDepthRangeMax;
-    /// Nano Ultra 等型号：SDK 点云后处理 EdgeArtifactRemoval（边缘伪点去除）
-    bool mechEdgeArtifactRemovalEnabled = true;
-    /// 调试：同一次流程额外采一帧，保存 EdgeArtifactRemoval 开 / 关两份点云
-    bool mechEdgeArtifactRemovalComparisonEnabled = false;
-    /// 调试比较版是否同时落盘原始点云与对比点云
-    bool mechEdgeArtifactRemovalComparisonSaveEnabled = false;
+    /// 调试：同次额外采一帧（Noise=Off），与主流程（Noise=Normal）对比落盘
+    bool mechPointCloudProcessingComparisonEnabled = false;
     int hikConnectTimeoutMs;
     int hikCaptureTimeoutMs;
     float hikExposureTimeUs = 50000.0f;  ///< 海康 A/B 双目曝光（微秒），连接时写入相机

@@ -338,7 +338,6 @@ void Logger::messageHandler(QtMsgType type, const QMessageLogContext& context, c
 void Logger::log(QtMsgType type, const QMessageLogContext& context, const QString& msg)
 {
     const QByteArray msg_utf8 = msg.toUtf8();
-
     struct DepthGuard {
         DepthGuard() { ++g_log_handler_depth; }
         ~DepthGuard() { --g_log_handler_depth; }

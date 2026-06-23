@@ -1112,8 +1112,7 @@ void HmiTcpServer::handleCmdCaptureBundle(const QJsonObject& message)
             segmentIndex,
             taskId,
             mechCaptureMode,
-            visionConfig.mechEdgeArtifactRemovalEnabled,
-            visionConfig.mechEdgeArtifactRemovalComparisonEnabled);
+            visionConfig.mechPointCloudProcessingComparisonEnabled);
         
         QJsonObject payload = buildResponsePayload(true, QStringLiteral("组合采集请求已发送"));
         payload[QLatin1String("requestId")] = static_cast<qint64>(reqId);

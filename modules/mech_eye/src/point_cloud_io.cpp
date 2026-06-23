@@ -54,7 +54,7 @@ QString buildComparisonPlyPath(
     const QString& configuredRoot,
     int segmentIndex,
     quint32 taskId,
-    bool edgeArtifactRemovalEnabled,
+    bool noiseRemovalNormal,
     const QString& timestamp)
 {
     const QString baseDir = scan_tracking::common::captureCacheMech3DDir(configuredRoot);
@@ -66,9 +66,9 @@ QString buildComparisonPlyPath(
     const QString compareDir =
         QDir(baseDir).absoluteFilePath(QStringLiteral("compare"));
     const QString modeDir =
-        QDir(compareDir).absoluteFilePath(edgeArtifactRemovalEnabled
-            ? QStringLiteral("edge_on")
-            : QStringLiteral("edge_off"));
+        QDir(compareDir).absoluteFilePath(noiseRemovalNormal
+            ? QStringLiteral("noise_on")
+            : QStringLiteral("noise_off"));
     if (!scan_tracking::common::ensureDirectoryExists(modeDir).isEmpty()) {
         const QString ts =
             timestamp.trimmed().isEmpty() ? scan_tracking::common::buildCaptureTimestamp() : timestamp;

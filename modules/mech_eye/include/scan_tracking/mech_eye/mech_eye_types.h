@@ -106,8 +106,7 @@ struct CaptureRequest {
     QString cameraKey;  // 相机唯一标识
     CaptureMode mode = CaptureMode::Capture3DOnly;  // 采集模式
     int timeoutMs = 30000;  // 采集超时时间，单位毫秒，默认30秒
-    bool edgeArtifactRemovalEnabled = true;  // 本次采集是否启用边缘伪点去除
-    bool comparisonCaptureEnabled = false;  // 是否同次额外采一帧做对比
+    bool comparisonCaptureEnabled = false;  // 是否同次额外采一帧（Noise=Off）与主流程（Normal）对比
 };
 
 /* 采集结果 */
