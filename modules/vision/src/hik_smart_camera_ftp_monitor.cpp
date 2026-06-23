@@ -95,13 +95,27 @@ bool HikSmartCameraFtpMonitor::start(const QString& ftpDirectory)
 
     // 把启动前已存在的文件全部标记为已处理，只监控后续新增文件
     // 避免历史文件触发大量 imageReady 信号，也防止启动时的信号风暴
+    // 启动期禁止 QDir::entryInfoList（与上文 create_directories 同理，SDK 加载后易堆损坏）
     {
-        QDir dir(m_ftpDirectory);
-        const QFileInfoList existingFiles = dir.entryInfoList(
-            QDir::Files | QDir::NoDotAndDotDot, QDir::Time);
-        for (const QFileInfo& fi : existingFiles) {
-            if (isImageFile(fi.fileName())) {
-                m_processedFiles.insert(fi.absoluteFilePath());
+        std::error_code iterEc;
+        const auto scanRoot = std::filesystem::path(m_ftpDirectory.toStdWString());
+        if (std::filesystem::is_directory(scanRoot, iterEc) && !iterEc) {
+            for (const auto& entry :
+                 std::filesystem::directory_iterator(scanRoot, iterEc)) {
+                if (iterEc) {
+                    break;
+                }
+                std::error_code entryEc;
+                if (!entry.is_regular_file(entryEc) || entryEc) {
+                    continue;
+                }
+                const QString fileName =
+                    QString::fromStdWString(entry.path().filename().native());
+                if (!isImageFile(fileName)) {
+                    continue;
+                }
+                m_processedFiles.insert(
+                    QString::fromStdWString(entry.path().wstring()));
             }
         }
         qInfo(hikFtpMonitorLog) << "启动时跳过已有图片文件：" << m_processedFiles.size() << "个";

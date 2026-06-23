@@ -1381,14 +1381,10 @@
   ],
   "executionConfig": {
     "executeAllPaths": false,
-    "description": "六路径联调：path1=7段, path2=19段, path3=1段, path4=4段, path5=8段, path6=144段",
+    "description": "路径1+2联调：path1=柱面开孔(7段) path2=内表面(19段)",
     "selectedPathIds": [
       1,
-      2,
-      3,
-      4,
-      5,
-      6
+      2
     ],
     "pathExecutionOrder": "sequential",
     "allowPathSkipOnError": false

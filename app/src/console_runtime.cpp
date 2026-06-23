@@ -469,6 +469,7 @@ void ConsoleRuntime::initVisionFlowModules(
         &application_);
     qInfo(appLog) << QStringLiteral("[启动] VisionPipelineService 已创建。");
 
+    qInfo(appLog) << QStringLiteral("[启动] 连接 VisionPipelineService 信号...");
     QObject::connect(
         visionPipelineService_.get(),
         &scan_tracking::vision::VisionPipelineService::stateChanged,
@@ -487,7 +488,9 @@ void ConsoleRuntime::initVisionFlowModules(
                 onAutoLatencyBundleFinished(bundle);
             }
         });
+    qInfo(appLog) << QStringLiteral("[启动] VisionPipelineService 信号已连接。");
 
+    qInfo(appLog) << QStringLiteral("[启动] 调用 VisionPipelineService::start...");
     visionPipelineService_->start(visionConfig);
     qInfo(appLog) << QStringLiteral("视觉集成框架已启动。");
 
@@ -518,8 +521,10 @@ void ConsoleRuntime::initVisionFlowModules(
     // HMI：先注入依赖并绑定信号，再 listen / 启动状态机，避免 start() 内重复 connect 或漏接早期事件
     const auto& hmiConfig = scan_tracking::common::ConfigManager::instance()->hmiConfig();
     if (hmiConfig.enabled) {
+        qInfo(appLog) << QStringLiteral("[启动] 即将创建 HmiTcpServer...");
         hmiTcpServer_ = std::make_unique<scan_tracking::hmi_server::HmiTcpServer>(
             static_cast<int>(hmiConfig.tcpPort), &application_);
+        qInfo(appLog) << QStringLiteral("[启动] HmiTcpServer 已创建，绑定服务信号...");
         hmiTcpServer_->setStateMachine(stateMachine_.get());
         hmiTcpServer_->setModbusService(modbusService_.get());
         hmiTcpServer_->setMechEyeService(mechEyeService_.get());
@@ -529,6 +534,7 @@ void ConsoleRuntime::initVisionFlowModules(
             hikCxpCameraAService_.get(), hikCxpCameraBService_.get(), nullptr);
         hmiTcpServer_->setHikCameraCController(hikCameraCController_.get());
         hmiTcpServer_->bindServiceSignals();
+        qInfo(appLog) << QStringLiteral("[启动] HmiTcpServer 服务信号已绑定。");
 
         // 坡口测量 inspectPointCloud 返回后立即经 HMI TCP 推送 event.inspection.finished（含失败）
         // 注意：std::function 不可对同一对象连续 std::move，否则 StateMachine 侧会得到空回调并在析构时崩溃。
@@ -552,6 +558,7 @@ void ConsoleRuntime::initVisionFlowModules(
     }
 
     stateMachine_->start();
+    qInfo(appLog) << QStringLiteral("[启动] StateMachine 已 start。");
 
     // 等状态机接好信号后再建 Modbus 链路，避免启动期漏掉 connected 事件。
     if (!modbusService_->connectDevice()) {

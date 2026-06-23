@@ -3,7 +3,7 @@
   "description": "封头检测多路径扫描配置文件",
   "lastModified": "2026-06-18",
   "_deprecationNote": "推荐改用 config/scan_paths/station1_default.json；本文件保留用于向后兼容。",
-  "_fieldTestNote": "六路径联调：path1=柱面开孔(hole) path2=内表面 path3=编号(code_read) path4=坡口 path5=厚度 path6=缺陷；扫满后 Trig_Inspection",
+  "_fieldTestNote": "当前联调：path1=柱面开孔(hole) + path2=内表面(internal_surface)；各路径扫满后 Trig_Inspection",
   "calibrationMatrix": {
     "_todo": "TODO(calibration): 当前 T0 为临时联调用单位矩阵；正式投产前须替换为现场标定的 Mech-Eye → 机械臂/世界 4×4。",
     "calibrationStatus": "PLACEHOLDER_IDENTITY_FOR_TEMP_TEST",
@@ -1385,14 +1385,10 @@
   ],
   "executionConfig": {
     "executeAllPaths": false,
-    "description": "六路径联调：path1=柱面开孔 path2=内表面 path3=编号 path4=坡口 path5=厚度 path6=缺陷",
+    "description": "路径1+2联调：path1=柱面开孔(7段) path2=内表面(19段)；各路径扫满后 Trig_Inspection",
     "selectedPathIds": [
       1,
-      2,
-      3,
-      4,
-      5,
-      6
+      2
     ],
     "pathExecutionOrder": "sequential",
     "allowPathSkipOnError": false
