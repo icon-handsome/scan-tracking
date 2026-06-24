@@ -176,6 +176,7 @@ void StateMachine::executeInspectionTask()
     emit inspectionFinished(
         summary.resultCode, summary.ngReasonWord0, summary.ngReasonWord1,
         summary.measureItemCount, trackingResult.measurement, trackingResult.message);
+    maybeEmitPresetInspectionDemo(m_activeTask.scanSegmentIndex);
     // 每条路径检测后保留各路径点云，供后续路径继续扫描；整轮结束由 Trig_ResultReset 清空
 }
 

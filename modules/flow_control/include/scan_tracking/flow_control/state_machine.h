@@ -211,8 +211,8 @@ signals:
     /// 结果复位完成
     void resultResetFinished(quint16 resultCode);
 
-    /// 全部启用扫描路径已完成（最后一条路径的最后一段采集落盘后触发，每轮扫描仅一次）
-    void enabledPathsScanComplete(int lastPathId, QVector<int> completedPathIds);
+    /// 演示：末路径末段 Trig_Inspection 握手完成，请求 HMI 推送预设 headMetrics
+    void presetInspectionDemoRequested(int segmentIndex);
 
 private slots:
     // 轮询 PLC 状态
@@ -541,10 +541,9 @@ private:
     int firstEnabledScanPathId() const;
     int configuredFirstPathPauseAfterPoint() const;
     void maybeLatchFirstPathStepPause(int pathId, int segmentIndex);
-    void maybeEmitEnabledPathsScanComplete(int pathId);
+    void maybeEmitPresetInspectionDemo(int segmentIndex);
     bool isFirstPathStepPauseBlocking(QString* errorMessage) const;
     void clearFirstPathStepPauseLatch();
-    void clearEnabledPathsScanCompleteLatch();
 
     void persistSegmentCaptureExportGroup(
         int pathId,
@@ -692,7 +691,6 @@ private:
     QSet<int> m_currentPathSegments;                        // 当前路径已缓存的段号集合（用于检测重复）
     bool m_firstPathStepPauseLatched = false;               // 路径1联调：已达暂停点，拒绝后续扫描
     int m_firstPathStepPauseAtSegment = 0;                  // 路径1联调：已暂停的点位号
-    bool m_enabledPathsScanCompleteEmitted = false;         // 本轮扫描是否已上报 enabledPathsScanComplete
     mutable std::mutex m_segmentCacheMutex;
     std::array<float, 16> m_baseCalibrationMatrix{};       // 基准 T0（来自 scan_paths_config.json）
     std::array<float, 16> m_currentCalibrationMatrix{};    // 当前 T0' / T0''（转动点由 LBN 链式更新）

@@ -302,6 +302,8 @@ private:
     /// 显控连接后一次性推送全零检测展示帧（resultCode=0，便于 UI 初始化绑定）
     void publishInitialInspectionDisplay();
 
+    void publishPresetInspectionOnPathsComplete();
+
     QTcpServer* m_tcpServer = nullptr;      ///< Qt TCP 服务器
     HmiSession* m_session = nullptr;        ///< 当前客户端会话（单客户端模式）
     int m_port = 9900;                      ///< 监听端口

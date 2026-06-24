@@ -16,7 +16,7 @@
 #include "scan_tracking/vision/hik_cxp_camera_service.h"
 #include "scan_tracking/vision/hik_camera_service.h"
 #include "scan_tracking/vision/hik_camera_c_controller.h"
-#include "scan_tracking/tracking/tracking_service.h"  // InspectionMeasurement, appendInspectionMeasurementFields
+#include "scan_tracking/tracking/tracking_service.h"  // InspectionMeasurement, appendHeadDisplayMetricsFields
 #include "scan_tracking/common/config_manager.h"
 
 #include <cmath>
@@ -129,6 +129,24 @@ tracking::InspectionResult buildPresetInspectionResultAfterPathsComplete()
     m.icpFitness = 1.0f;
     m.qualityCode = 0;
     return result;
+}
+
+void logPresetHeadMetricsForDemo(const tracking::InspectionMeasurement& m)
+{
+    qInfo(LOG_HMI_SERVER).noquote()
+        << QStringLiteral("[TCPIP] 演示预设 headMetrics（12项）")
+        << QStringLiteral(" inner_diameter_mm=") << m.innerDiameterMm
+        << QStringLiteral(" inner_circumference_mm=") << m.innerCircumferenceMm
+        << QStringLiteral(" roundness_tol=") << m.roundnessToleranceMm
+        << QStringLiteral(" straight_slope_tol=") << m.straightSideSlopeDeg
+        << QStringLiteral(" straight_height_tol=") << m.straightSideHeightMm
+        << QStringLiteral(" hole_opening_mm=") << m.holeOpeningMm
+        << QStringLiteral(" joint_fit_up_angle_deg=") << m.jointFitUpAngleDeg
+        << QStringLiteral(" bevel_angle_deg=") << m.headAngleTol
+        << QStringLiteral(" blunt_height_mm=") << m.bluntHeightTol
+        << QStringLiteral(" thickness_mm=") << m.thicknessMm
+        << QStringLiteral(" head_depth_mm=") << m.headDepthMm
+        << QStringLiteral(" head_volume_m3=") << (m.headVolumeM3 * 1000.0f);
 }
 
 }  // namespace
@@ -1765,21 +1783,11 @@ void HmiTcpServer::connectStateMachineSignals()
         sendToClient(buildEnvelope(QLatin1String(msg_type::kEventResultResetFinished), nextEventId(), payload));
     }, Qt::UniqueConnection);
 
-    // 全部启用路径扫描完成：推送预设 event.inspection.finished（12 项 headMetrics）
-    connect(m_stateMachine, &flow_control::StateMachine::enabledPathsScanComplete, this,
-        [this](int lastPathId, QVector<int> completedPathIds) {
-        Q_UNUSED(lastPathId);
-        Q_UNUSED(completedPathIds);
-
-        const auto* cfgMgr = scan_tracking::common::ConfigManager::instance();
-        if (cfgMgr == nullptr || !cfgMgr->hmiConfig().emitPresetInspectionOnPathsComplete) {
-            qInfo(LOG_HMI_SERVER).noquote()
-                << QStringLiteral("[TCPIP] 全部启用路径扫描完成，预设检测结果未启用")
-                << QStringLiteral("（config.ini [Hmi] emitPresetInspectionOnPathsComplete=false）");
-            return;
-        }
-
-        publishInspectionResult(buildPresetInspectionResultAfterPathsComplete());
+    // path1~5 扫完且末路径 Trig_Inspection 握手完成：推送预设 headMetrics
+    connect(m_stateMachine, &flow_control::StateMachine::presetInspectionDemoRequested, this,
+        [this](int segmentIndex) {
+        Q_UNUSED(segmentIndex);
+        publishPresetInspectionOnPathsComplete();
     }, Qt::UniqueConnection);
 }
 
@@ -1999,7 +2007,7 @@ QJsonObject HmiTcpServer::buildInspectionFinishedPayload(const tracking::Inspect
     payload[QLatin1String("ngReasonWord0")] = result.ngReasonWord0;
     payload[QLatin1String("ngReasonWord1")] = result.ngReasonWord1;
     payload[QLatin1String("measureItemCount")] = result.measureItemCount;
-    tracking::appendInspectionMeasurementFields(payload, result.measurement);
+    tracking::appendInspectionMetadataFields(payload, result.measurement);
     tracking::appendHeadDisplayMetricsFields(payload, result.measurement);
     payload[QLatin1String("message")] = result.message;
     payload[QLatin1String("sourcePointCount")] = result.sourcePointCount;
@@ -2016,6 +2024,26 @@ QJsonObject HmiTcpServer::buildInspectionFinishedPayload(const tracking::Inspect
     }
 
     return payload;
+}
+
+void HmiTcpServer::publishPresetInspectionOnPathsComplete()
+{
+    const auto* cfgMgr = common::ConfigManager::instance();
+    if (cfgMgr == nullptr || !cfgMgr->hmiConfig().emitPresetInspectionOnPathsComplete) {
+        return;
+    }
+    if (!hasClient()) {
+        qInfo(LOG_HMI_SERVER).noquote()
+            << QStringLiteral("[TCPIP] 路径扫描完成预设结果未推送（无显控连接）");
+        return;
+    }
+
+    const tracking::InspectionResult preset = buildPresetInspectionResultAfterPathsComplete();
+    publishInspectionResult(preset);
+    logPresetHeadMetricsForDemo(preset.measurement);
+    qInfo(LOG_HMI_SERVER).noquote()
+        << QStringLiteral("[TCPIP] 演示预设检测结果已推送 event.inspection.finished")
+        << QStringLiteral(" trigger=paths_complete");
 }
 
 void HmiTcpServer::publishInitialInspectionDisplay()

@@ -133,34 +133,34 @@ TCP 是流式协议，为解决粘包和半包问题，采用长度前缀的帧�
   - **调试**：显控 `cmd.debug_trigger_inspection`（须 `config.ini [Hmi] allowDebugTriggerInspection=true`）
 - **推送策略**：`resultCode=1`（OK）与 `resultCode=2`（NG）**均推送**；显控须处理失败场景。
 - **连接初始化**：显控 TCP 接入成功后，Core **一次性**推送 `event.inspection.finished`，`resultCode=0`，`headMetrics` 及测量字段均为 **0**，`message="等待检测"`，供 UI 绑定初始化；**非真实检测结果**，正式检测完成后会再次推送覆盖。
-- **临时演示（path1~5 扫完）**：`config.ini [Hmi] emitPresetInspectionOnPathsComplete=true` 时，全部 `selectedPathIds` 启用路径扫描完成后 Core 推送 **预设** `event.inspection.finished`（`resultCode=1`，`headMetrics` 含 12 项现场演示值，非算法实测）；每轮扫描仅一次，`Trig_ResultReset` 后可再次触发。
-- **payload 字段**（Po_Kou 坡口测量）：
+- **临时演示（path1~5 扫完）**：`config.ini [Hmi] emitPresetInspectionOnPathsComplete=true` 时，**末启用路径末段** `Trig_Inspection` 握手完成后推送预设 `event.inspection.finished`（`resultCode=1`，12 项在 `headMetrics` 内）；当前联调为 path5 段8。不连显控、不周期推送。
+- **payload 字段**：
   - `resultCode` (int): **0=尚未检测/连接占位**，1=OK, 2=NG
   - `ngReasonWord0`, `ngReasonWord1` (int)
   - `measureItemCount` (int)
   - `sourcePointCount` (int): 合并后输入点云点数
-  - `head_angle_tol` (float): 坡口角（deg）
-  - `blunt_height_tol` (float): 钝边长度（mm）
+  - `inspection_algorithm` (string): 算法类型，如 `bevel` / `thickness`
   - `bevel_type` (int): 坡口类型
   - `icp_fitness` (float): ICP 拟合度
   - `quality_code` (int): 0=在标准范围内
   - `expected_bevel_type`, `expected_angle_deg`, `expected_length` (float/int): 当前生效工艺配方
-  - `has_hole` (bool): 当前工件是否有孔；`false`=无孔（不测孔径），`true`=有孔（将来调用测孔算法）
+  - `has_hole` (bool): 当前工件是否有孔
   - `angle_tol_deg`, `length_tol_mm` (float): 合格判定公差（来自 config.ini）
-  - `headMetrics` (object): 显控 12 项指标统一显示包，**始终包含下列 12 键**；显控 UI 建议直接绑定此对象
-    - `inner_diameter_mm` (float): 封头内径（mm），**暂为 0**
-    - `roundness_tol` (float): 封头圆度公差，**暂为 0**
-    - `straight_slope_tol` (float): 封头直边斜度，**暂为 0**
-    - `head_depth_mm` (float): 封头深度（mm），**暂为 0**
-    - `straight_height_tol` (float): 封头直边高度，**暂为 0**
-    - `bevel_angle_deg` (float): 封头坡口角度（deg），Po_Kou 实测，与 `head_angle_tol` 一致
-    - `blunt_height_mm` (float): 封头钝边高度（mm），Po_Kou 实测，与 `blunt_height_tol` 一致
-    - `inner_circumference_mm` (float): 封头内周长（mm），**暂为 0**
-    - `hole_opening_mm` (float): 封头开孔（mm）；**无孔时固定 0**；有孔时待测孔算法接入后填实测值
-    - `joint_fit_up_angle_deg` (float): 封头接头组对角度（deg），**暂为 0**
-    - `thickness_mm` (float): 封头测厚（mm），**暂为 0**
-    - `head_volume_m3` (float): 封头容积（m³），**暂为 0**
+  - `headMetrics` (object): **12 项测量/展示值统一在此对象**；显控 UI **只绑定此对象**，不再从 payload 顶层读取重复测量字段
+    - `inner_diameter_mm` (float): 封头内径（mm）
+    - `roundness_tol` (float): 封头圆度
+    - `straight_slope_tol` (float): 封头直边斜度
+    - `head_depth_mm` (float): 封头深度（mm）
+    - `straight_height_tol` (float): 封头直边高度
+    - `bevel_angle_deg` (float): 封头坡口角度（deg）
+    - `blunt_height_mm` (float): 封头钝边高度（mm）
+    - `inner_circumference_mm` (float): 封头内周长（mm）
+    - `hole_opening_mm` (float): 封头开孔（mm）
+    - `joint_fit_up_angle_deg` (float): 封头接头组对角度（deg）
+    - `thickness_mm` (float): 封头测厚（mm）
+    - `head_volume_m3` (float): 封头容积，**显控展示值为升(L)**（内部 m³ × 1000 后发送，预设约 290.483）
   - `message` (string): 概要描述
+  - **已移除的顶层重复字段**（v1.0 精简）：`head_angle_tol`、`blunt_height_tol` 及 payload 顶层与 `headMetrics` 同义的测量键；请改读 `headMetrics.bevel_angle_deg` / `headMetrics.blunt_height_mm` 等
 
 ### 2.7 其他检测校验完成 (`event.xxx.finished`)
 - `event.pose_check.finished`: `{ success, resultCode, poseDeviationMm, rt[16], message }`
@@ -305,8 +305,7 @@ Qt 发送 request（附带不重复的 `msgId`），Core 执行后返回对应 `
     "ngReasonWord1": 0,
     "measureItemCount": 2,
     "sourcePointCount": 125000,
-    "head_angle_tol": 45.2,
-    "blunt_height_tol": 1.05,
+    "inspection_algorithm": "bevel",
     "bevel_type": 0,
     "icp_fitness": 0.98,
     "quality_code": 0,

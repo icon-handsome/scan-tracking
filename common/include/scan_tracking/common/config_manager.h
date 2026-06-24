@@ -231,7 +231,7 @@ struct HmiConfig {
     quint16 tcpPort = 9900;    ///< 监听端口
     /// 是否允许显控发送 cmd.debug_trigger_inspection（用缓存点云跑坡口测量并推送，不写 PLC）
     bool allowDebugTriggerInspection = false;
-    /// 全部启用路径扫描完成后是否推送预设 event.inspection.finished（临时演示）
+    /// path1~5 扫完且末路径 Trig_Inspection 握手完成后推送预设 headMetrics（临时演示）
     bool emitPresetInspectionOnPathsComplete = false;
 };
 

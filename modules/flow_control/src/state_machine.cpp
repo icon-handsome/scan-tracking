@@ -1786,6 +1786,7 @@ void StateMachine::executeBypassActiveTask()
         completeActiveTask(1, protocol::AckState::Completed, true);
         tracking::InspectionMeasurement measurement;
         emit inspectionFinished(1, 0, 0, 0, measurement, QStringLiteral("算法旁路"));
+        maybeEmitPresetInspectionDemo(m_activeTask.scanSegmentIndex);
         break;
     }
     case protocol::Stage::UnloadCalc:
@@ -2006,7 +2007,6 @@ void StateMachine::commitScanSegmentCaptureImmediate(
     emit scanFinished(segmentIndex, 1, imageCount, cloudFrameCount);
 
     maybeLatchFirstPathStepPause(pathId, segmentIndex);
-    maybeEmitEnabledPathsScanComplete(pathId);
 }
 
 void StateMachine::exportSegmentCxp2dImages(
@@ -2078,7 +2078,6 @@ void StateMachine::commitBypassScanSegmentCapture(
     emit scanFinished(segmentIndex, 1, imageCount, cloudFrameCount);
 
     maybeLatchFirstPathStepPause(pathId, segmentIndex);
-    maybeEmitEnabledPathsScanComplete(pathId);
 }
 
 void StateMachine::registerRefinementJob()
@@ -2596,11 +2595,6 @@ void StateMachine::clearFirstPathStepPauseLatch()
     m_firstPathStepPauseAtSegment = 0;
 }
 
-void StateMachine::clearEnabledPathsScanCompleteLatch()
-{
-    m_enabledPathsScanCompleteEmitted = false;
-}
-
 bool StateMachine::isFirstPathStepPauseBlocking(QString* errorMessage) const
 {
     if (!m_firstPathStepPauseLatched) {
@@ -2638,9 +2632,10 @@ void StateMachine::maybeLatchFirstPathStepPause(int pathId, int segmentIndex)
     publishIpcStatus();
 }
 
-void StateMachine::maybeEmitEnabledPathsScanComplete(int pathId)
+void StateMachine::maybeEmitPresetInspectionDemo(int segmentIndex)
 {
-    if (m_enabledPathsScanCompleteEmitted) {
+    const auto* cfgMgr = common::ConfigManager::instance();
+    if (cfgMgr == nullptr || !cfgMgr->hmiConfig().emitPresetInspectionOnPathsComplete) {
         return;
     }
 
@@ -2650,20 +2645,17 @@ void StateMachine::maybeEmitEnabledPathsScanComplete(int pathId)
     }
 
     const int lastPathId = pathIds.back();
-    if (pathId != lastPathId || m_currentPathId != pathId) {
+    const int lastPathSegmentTotal = segmentTotalForPath(lastPathId);
+    if (lastPathSegmentTotal <= 0 || segmentIndex != lastPathSegmentTotal) {
         return;
     }
-    if (!isCurrentPathSegmentSetComplete()) {
-        return;
-    }
-
-    m_enabledPathsScanCompleteEmitted = true;
 
     qInfo(LOG_FLOW).noquote()
-        << QStringLiteral("[多路径] 全部启用路径扫描完成，lastPathId=") << lastPathId
-        << QStringLiteral(" pathIds=") << pathIds;
+        << QStringLiteral("[演示] Trig_Inspection 段号=") << segmentIndex
+        << QStringLiteral(" 匹配末路径 path") << lastPathId
+        << QStringLiteral("，请求推送预设 headMetrics。");
 
-    emit enabledPathsScanComplete(lastPathId, pathIds);
+    emit presetInspectionDemoRequested(segmentIndex);
 }
 
 int StateMachine::resolvePathIdForIncomingSegment(int segmentIndex) const
@@ -4067,7 +4059,6 @@ void StateMachine::resetScanSegmentCache()
     m_currentPathId = 1;
     m_currentPathSegments.clear();
     clearFirstPathStepPauseLatch();
-    clearEnabledPathsScanCompleteLatch();
 
     if (totalCacheSize > 0) {
         qInfo(LOG_FLOW).noquote()
@@ -5063,6 +5054,20 @@ bool StateMachine::validateScanSegmentRequest(const QVector<quint16>& commandBlo
                 return false;
             }
             if (targetPathId == m_currentPathId) {
+                const auto* cfgMgr = common::ConfigManager::instance();
+                const QVector<int> pathIds = enabledScanPathIds();
+                const bool demoPathsComplete =
+                    cfgMgr != nullptr && cfgMgr->hmiConfig().emitPresetInspectionOnPathsComplete;
+                const bool allPathsDone =
+                    !pathIds.isEmpty() && m_currentPathId == pathIds.back()
+                    && isCurrentPathSegmentSetComplete();
+                if (demoPathsComplete && segmentIndex == 1 && allPathsDone) {
+                    qInfo(LOG_FLOW).noquote()
+                        << QStringLiteral("[演示] 全部路径已扫完，PLC 下发新一轮段1，自动重置路径上下文。");
+                    m_currentPathId = pathIds.front();
+                    m_currentPathSegments.clear();
+                    return true;
+                }
                 if (errorMessage != nullptr) {
                     *errorMessage = QStringLiteral("无下一路径可切换，段号=%1").arg(segmentIndex);
                 }

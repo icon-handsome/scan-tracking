@@ -26,10 +26,10 @@ QString buildComparisonPlyPath(
     bool noiseRemovalNormal,
     const QString& timestamp = QString());
 
-/// 将 PointCloudFrame 保存为 ASCII PLY（x,y,z,nx,ny,nz）
+/// 将 PointCloudFrame 保存为 binary little-endian PLY（仅 x,y,z；不写法向）
 bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absolutePath);
 
-/// 从 ASCII PLY 加载点云；支持 x,y,z 与 x,y,z,nx,ny,nz
+/// 从 PLY 加载点云；支持 binary_little_endian 与 legacy ASCII（x,y,z 或 x,y,z,nx,ny,nz）
 bool loadPointCloudFrameFromPly(const QString& absolutePath, PointCloudFrame* outFrame);
 
 /// 释放 PointCloudFrame 中的大数组，保留 pointCount/width/height 等元数据

@@ -51,8 +51,11 @@ struct InspectionMeasurement {
     float headVolumeM3 = 0.0f;
 };
 
-/// 将测量项写入 JSON payload（协议 snake_case 字段名）
+/// 将测量项写入 JSON payload（协议 snake_case 字段名，含与 headMetrics 重复的顶层测量值）
 void appendInspectionMeasurementFields(QJsonObject& payload, const InspectionMeasurement& measurement);
+
+/// 将算法元数据写入 payload（不含与 headMetrics 重复的测量值，供 HMI event.inspection.finished 使用）
+void appendInspectionMetadataFields(QJsonObject& payload, const InspectionMeasurement& measurement);
 
 /// 将显控 12 项指标写入 payload.headMetrics（2 项 Po_Kou 实测，其余 10 项暂为 0）
 void appendHeadDisplayMetricsFields(QJsonObject& payload, const InspectionMeasurement& measurement);

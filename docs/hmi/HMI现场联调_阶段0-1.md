@@ -110,7 +110,8 @@ void onJsonEnvelope(const QJsonObject& envelope) {
     }
     const QJsonObject payload = envelope.value(QStringLiteral("payload")).toObject();
     const int resultCode = payload.value(QStringLiteral("resultCode")).toInt();
-    const double headAngle = payload.value(QStringLiteral("head_angle_tol")).toDouble();
+    const QJsonObject headMetrics = payload.value(QStringLiteral("headMetrics")).toObject();
+    const double bevelAngleDeg = headMetrics.value(QStringLiteral("bevel_angle_deg")).toDouble();
     // resultCode==2 时也要更新 UI，展示 message / 错误日志
 }
 ```

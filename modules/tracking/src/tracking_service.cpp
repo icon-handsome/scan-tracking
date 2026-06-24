@@ -219,6 +219,26 @@ void appendInspectionMeasurementFields(QJsonObject& payload, const InspectionMea
     payload[QStringLiteral("head_volume_m3")] = measurementJsonValue(measurement.headVolumeM3);
 }
 
+void appendInspectionMetadataFields(QJsonObject& payload, const InspectionMeasurement& measurement)
+{
+    QString algorithmName = QStringLiteral("bevel");
+    if (measurement.algorithm == InspectionAlgorithm::Hole) {
+        algorithmName = QStringLiteral("hole");
+    } else if (measurement.algorithm == InspectionAlgorithm::Thickness) {
+        algorithmName = QStringLiteral("thickness");
+    } else if (measurement.algorithm == InspectionAlgorithm::InternalSurface) {
+        algorithmName = QStringLiteral("internal_surface");
+    } else if (measurement.algorithm == InspectionAlgorithm::CodeRead) {
+        algorithmName = QStringLiteral("code_read");
+    } else if (measurement.algorithm == InspectionAlgorithm::Defect) {
+        algorithmName = QStringLiteral("defect");
+    }
+    payload[QStringLiteral("inspection_algorithm")] = algorithmName;
+    payload[QStringLiteral("bevel_type")] = measurement.bevelType;
+    payload[QStringLiteral("icp_fitness")] = measurementJsonValue(measurement.icpFitness);
+    payload[QStringLiteral("quality_code")] = measurement.qualityCode;
+}
+
 void appendHeadDisplayMetricsFields(QJsonObject& payload, const InspectionMeasurement& measurement)
 {
     QJsonObject headMetrics;
@@ -239,7 +259,9 @@ void appendHeadDisplayMetricsFields(QJsonObject& payload, const InspectionMeasur
     headMetrics[QStringLiteral("joint_fit_up_angle_deg")] =
         measurementJsonValue(measurement.jointFitUpAngleDeg);
     headMetrics[QStringLiteral("thickness_mm")] = measurementJsonValue(measurement.thicknessMm);
-    headMetrics[QStringLiteral("head_volume_m3")] = measurementJsonValue(measurement.headVolumeM3);
+    // 显控展示用升(L)：内部 headVolumeM3 为 m³，发送时 ×1000
+    headMetrics[QStringLiteral("head_volume_m3")] =
+        measurementJsonValue(measurement.headVolumeM3 * 1000.0f);
     payload[QStringLiteral("headMetrics")] = headMetrics;
 }
 
