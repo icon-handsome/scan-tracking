@@ -133,6 +133,7 @@ TCP 是流式协议，为解决粘包和半包问题，采用长度前缀的帧�
   - **调试**：显控 `cmd.debug_trigger_inspection`（须 `config.ini [Hmi] allowDebugTriggerInspection=true`）
 - **推送策略**：`resultCode=1`（OK）与 `resultCode=2`（NG）**均推送**；显控须处理失败场景。
 - **连接初始化**：显控 TCP 接入成功后，Core **一次性**推送 `event.inspection.finished`，`resultCode=0`，`headMetrics` 及测量字段均为 **0**，`message="等待检测"`，供 UI 绑定初始化；**非真实检测结果**，正式检测完成后会再次推送覆盖。
+- **临时演示（path1~5 扫完）**：`config.ini [Hmi] emitPresetInspectionOnPathsComplete=true` 时，全部 `selectedPathIds` 启用路径扫描完成后 Core 推送 **预设** `event.inspection.finished`（`resultCode=1`，`headMetrics` 含 12 项现场演示值，非算法实测）；每轮扫描仅一次，`Trig_ResultReset` 后可再次触发。
 - **payload 字段**（Po_Kou 坡口测量）：
   - `resultCode` (int): **0=尚未检测/连接占位**，1=OK, 2=NG
   - `ngReasonWord0`, `ngReasonWord1` (int)

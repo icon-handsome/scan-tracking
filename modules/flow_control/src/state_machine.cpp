@@ -2006,6 +2006,7 @@ void StateMachine::commitScanSegmentCaptureImmediate(
     emit scanFinished(segmentIndex, 1, imageCount, cloudFrameCount);
 
     maybeLatchFirstPathStepPause(pathId, segmentIndex);
+    maybeEmitEnabledPathsScanComplete(pathId);
 }
 
 void StateMachine::exportSegmentCxp2dImages(
@@ -2077,6 +2078,7 @@ void StateMachine::commitBypassScanSegmentCapture(
     emit scanFinished(segmentIndex, 1, imageCount, cloudFrameCount);
 
     maybeLatchFirstPathStepPause(pathId, segmentIndex);
+    maybeEmitEnabledPathsScanComplete(pathId);
 }
 
 void StateMachine::registerRefinementJob()
@@ -2594,6 +2596,11 @@ void StateMachine::clearFirstPathStepPauseLatch()
     m_firstPathStepPauseAtSegment = 0;
 }
 
+void StateMachine::clearEnabledPathsScanCompleteLatch()
+{
+    m_enabledPathsScanCompleteEmitted = false;
+}
+
 bool StateMachine::isFirstPathStepPauseBlocking(QString* errorMessage) const
 {
     if (!m_firstPathStepPauseLatched) {
@@ -2629,6 +2636,34 @@ void StateMachine::maybeLatchFirstPathStepPause(int pathId, int segmentIndex)
         << QStringLiteral("后续 Trig_ScanSegment 将被拒绝，直至 firstPathPauseAfterPoint=0")
         << QStringLiteral("或调大后重启 IPC，或执行 Trig_ResultReset。");
     publishIpcStatus();
+}
+
+void StateMachine::maybeEmitEnabledPathsScanComplete(int pathId)
+{
+    if (m_enabledPathsScanCompleteEmitted) {
+        return;
+    }
+
+    const QVector<int> pathIds = enabledScanPathIds();
+    if (pathIds.isEmpty()) {
+        return;
+    }
+
+    const int lastPathId = pathIds.back();
+    if (pathId != lastPathId || m_currentPathId != pathId) {
+        return;
+    }
+    if (!isCurrentPathSegmentSetComplete()) {
+        return;
+    }
+
+    m_enabledPathsScanCompleteEmitted = true;
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[多路径] 全部启用路径扫描完成，lastPathId=") << lastPathId
+        << QStringLiteral(" pathIds=") << pathIds;
+
+    emit enabledPathsScanComplete(lastPathId, pathIds);
 }
 
 int StateMachine::resolvePathIdForIncomingSegment(int segmentIndex) const
@@ -4032,6 +4067,7 @@ void StateMachine::resetScanSegmentCache()
     m_currentPathId = 1;
     m_currentPathSegments.clear();
     clearFirstPathStepPauseLatch();
+    clearEnabledPathsScanCompleteLatch();
 
     if (totalCacheSize > 0) {
         qInfo(LOG_FLOW).noquote()

@@ -633,8 +633,6 @@ BevelConfig loadConfig(const std::string& configPath)
     if (hasConfigKey(text, "preprocess.outlier.mean_k")) cfg.sorMeanK = parseIntValue(requireConfigValue(text, "preprocess.outlier.mean_k"), "preprocess.outlier.mean_k", 0);
     if (hasConfigKey(text, "preprocess.outlier.stddev_mul")) cfg.sorStddevMulThresh = parseDoubleValue(requireConfigValue(text, "preprocess.outlier.stddev_mul"), "preprocess.outlier.stddev_mul", 0);
 
-
-
     if (hasConfigKey(text, "icp.max_iterations")) cfg.icpMaxIterations = parseIntValue(requireConfigValue(text, "icp.max_iterations"), "icp.max_iterations", 0);
     if (hasConfigKey(text, "icp.max_correspondence_distance")) cfg.icpMaxCorrespondenceDistance = parseDoubleValue(requireConfigValue(text, "icp.max_correspondence_distance"), "icp.max_correspondence_distance", 0);
     if (hasConfigKey(text, "icp.transformation_epsilon")) cfg.icpTransformationEpsilon = parseDoubleValue(requireConfigValue(text, "icp.transformation_epsilon"), "icp.transformation_epsilon", 0);

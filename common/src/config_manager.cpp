@@ -910,6 +910,8 @@ void ConfigManager::load(const QString& filePath)
     }
     m_hmiConfig.allowDebugTriggerInspection =
         settings.value("allowDebugTriggerInspection", false).toBool();
+    m_hmiConfig.emitPresetInspectionOnPathsComplete =
+        settings.value("emitPresetInspectionOnPathsComplete", false).toBool();
     settings.endGroup();
 
     QtMsgType minType = QtDebugMsg;

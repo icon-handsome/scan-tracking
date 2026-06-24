@@ -101,6 +101,36 @@ bool shouldForwardLogToHmi(QtMsgType type, const QString& category, const QStrin
     return type >= QtWarningMsg;
 }
 
+tracking::InspectionResult buildPresetInspectionResultAfterPathsComplete()
+{
+    tracking::InspectionResult result;
+    result.resultCode = 1;
+    result.ngReasonWord0 = 0;
+    result.ngReasonWord1 = 0;
+    result.measureItemCount = 12;
+    result.sourcePointCount = 0;
+    result.message = QStringLiteral("演示预设检测结果（全部启用路径扫描完成）");
+
+    tracking::InspectionMeasurement& m = result.measurement;
+    m.algorithm = tracking::InspectionAlgorithm::Bevel;
+    m.innerDiameterMm = 1200.8770f;
+    m.innerCircumferenceMm = 3772.6665f;
+    m.roundnessToleranceMm = 2.0584f;
+    m.straightSideSlopeDeg = -0.9186f;
+    m.straightSideHeightMm = 51.8544f;
+    m.holeOpeningMm = 182.4121f;
+    m.jointFitUpAngleDeg = 21.5145f;
+    m.headAngleTol = 39.5309f;
+    m.bluntHeightTol = 6.36838f;
+    m.thicknessMm = 16.9713566951f;
+    m.headDepthMm = 341.262f;
+    m.headVolumeM3 = 0.290483f;  // 290.483 L → m³
+    m.bevelType = 0;
+    m.icpFitness = 1.0f;
+    m.qualityCode = 0;
+    return result;
+}
+
 }  // namespace
 
 HmiTcpServer::HmiTcpServer(int port, QObject* parent)
@@ -583,6 +613,8 @@ void HmiTcpServer::handleCmdGetConfig(const QJsonObject& message)
     hmiObj[QLatin1String("enabled")] = cfgMgr->hmiConfig().enabled;
     hmiObj[QLatin1String("tcpPort")] = cfgMgr->hmiConfig().tcpPort;
     hmiObj[QLatin1String("allowDebugTriggerInspection")] = cfgMgr->hmiConfig().allowDebugTriggerInspection;
+    hmiObj[QLatin1String("emitPresetInspectionOnPathsComplete")] =
+        cfgMgr->hmiConfig().emitPresetInspectionOnPathsComplete;
     configPayload[QLatin1String("hmi")] = hmiObj;
     
     // 8. LbPose 配置
@@ -1731,6 +1763,23 @@ void HmiTcpServer::connectStateMachineSignals()
         QJsonObject payload;
         payload[QLatin1String("resultCode")] = resultCode;
         sendToClient(buildEnvelope(QLatin1String(msg_type::kEventResultResetFinished), nextEventId(), payload));
+    }, Qt::UniqueConnection);
+
+    // 全部启用路径扫描完成：推送预设 event.inspection.finished（12 项 headMetrics）
+    connect(m_stateMachine, &flow_control::StateMachine::enabledPathsScanComplete, this,
+        [this](int lastPathId, QVector<int> completedPathIds) {
+        Q_UNUSED(lastPathId);
+        Q_UNUSED(completedPathIds);
+
+        const auto* cfgMgr = scan_tracking::common::ConfigManager::instance();
+        if (cfgMgr == nullptr || !cfgMgr->hmiConfig().emitPresetInspectionOnPathsComplete) {
+            qInfo(LOG_HMI_SERVER).noquote()
+                << QStringLiteral("[TCPIP] 全部启用路径扫描完成，预设检测结果未启用")
+                << QStringLiteral("（config.ini [Hmi] emitPresetInspectionOnPathsComplete=false）");
+            return;
+        }
+
+        publishInspectionResult(buildPresetInspectionResultAfterPathsComplete());
     }, Qt::UniqueConnection);
 }
 
