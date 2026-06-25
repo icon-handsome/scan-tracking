@@ -1,24 +1,49 @@
 #pragma once
 
+/**
+ * @file point_cloud_io.h
+ * @brief Mech-Eye 点云与 2D 纹理的磁盘 I/O 工具
+ *
+ * 负责分段采集结果的落盘与回放：
+ * - PLY：binary_little_endian xyz（保存时过滤 NaN；加载时兼容 ASCII 与带法向格式）
+ * - PNG：8 位灰度 Mech 2D 纹理
+ *
+ * 路径规则与 common/capture_cache_paths 一致，目录结构示例：
+ * @code
+ *   <scanCacheDirectory>/
+ *     mech_3d/segment_{N}_task{T}_{timestamp}.ply
+ *     mech_3d/compare/noise_on|noise_off/segment_{N}_task{T}_{timestamp}_cmp.ply
+ *     mech_2d/segment_{N}_task{T}_{timestamp}.png
+ * @endcode
+ */
+
 #include <QtCore/QString>
 
 #include "scan_tracking/mech_eye/mech_eye_types.h"
 
 namespace scan_tracking::mech_eye {
 
-/// 默认采集缓存根目录：<applicationDir>/ScanTracking_CaptureCache
+/** @brief 默认采集缓存根目录：<applicationDir>/ScanTracking_CaptureCache */
 QString defaultScanCacheDirectory();
 
-/// 生成分段 PLY 绝对路径（mech_3d 子目录）：segment_{N}_task{T}_{timestamp}.ply
-/// @param configuredRoot config.ini scanCacheDirectory，空则默认根目录
-/// @param timestamp 与同段海康图共用；空则自动生成
+/**
+ * @brief 生成分段 PLY 绝对路径（mech_3d 子目录）
+ * @param configuredRoot config.ini [Paths] scanCacheDirectory，空则使用默认根目录
+ * @param segmentIndex 分段序号（从 1 起）
+ * @param taskId 当前任务 ID
+ * @param timestamp 时间戳字符串；空则自动生成，需与海康 2D 图共用同一 timestamp
+ * @return 绝对路径；目录创建失败时返回空字符串
+ */
 QString buildSegmentPlyPath(
     const QString& configuredRoot,
     int segmentIndex,
     quint32 taskId,
     const QString& timestamp = QString());
 
-/// 比较采集 PLY：<root>/mech_3d/compare/{noise_on|noise_off}/segment_..._cmp.ply
+/**
+ * @brief 生成对比采集 PLY 路径
+ * @param noiseRemovalNormal true → noise_on（主流程 Normal），false → noise_off（对比帧 Off）
+ */
 QString buildComparisonPlyPath(
     const QString& configuredRoot,
     int segmentIndex,
@@ -26,23 +51,32 @@ QString buildComparisonPlyPath(
     bool noiseRemovalNormal,
     const QString& timestamp = QString());
 
-/// 将 PointCloudFrame 保存为 binary little-endian PLY（仅 x,y,z；不写法向）
+/**
+ * @brief 将 PointCloudFrame 保存为 binary little-endian PLY
+ * @note 仅写入 x,y,z 三通道；NaN/Inf 点会被跳过；不写入 normals
+ */
 bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absolutePath);
 
-/// 从 PLY 加载点云；支持 binary_little_endian 与 legacy ASCII（x,y,z 或 x,y,z,nx,ny,nz）
+/**
+ * @brief 从 PLY 文件加载点云
+ * @note 支持 binary_little_endian 与 legacy ASCII；可识别 x,y,z 或 x,y,z,nx,ny,nz 属性
+ */
 bool loadPointCloudFrameFromPly(const QString& absolutePath, PointCloudFrame* outFrame);
 
-/// 释放 PointCloudFrame 中的大数组，保留 pointCount/width/height 等元数据
+/**
+ * @brief 释放 PointCloudFrame 中的大数组，保留 pointCount/width/height 等元数据
+ * @note 用于分段 refinement 完成后主动回收内存，避免多段点云同时驻留
+ */
 void releasePointCloudFrameBuffers(PointCloudFrame* frame);
 
-/// 生成分段 Mech 2D PNG 绝对路径（mech_2d 子目录）
+/** @brief 生成分段 Mech 2D PNG 绝对路径（mech_2d 子目录） */
 QString buildSegmentMech2DPngPath(
     const QString& configuredRoot,
     int segmentIndex,
     quint32 taskId,
     const QString& timestamp = QString());
 
-/// 将 GrayTextureFrame 保存为 8 位灰度 PNG
+/** @brief 将 GrayTextureFrame 保存为 8 位灰度 PNG */
 bool saveGrayTextureFrameToPng(const GrayTextureFrame& frame, const QString& absolutePath);
 
 }  // namespace scan_tracking::mech_eye

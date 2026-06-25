@@ -1,3 +1,10 @@
+/**
+ * @file point_cloud_io.cpp
+ * @brief 点云 PLY 与 2D PNG 的读写实现
+ *
+ * PLY 保存策略：过滤 NaN/Inf 后写入 binary_little_endian xyz。
+ * PLY 加载策略：解析 header 后按 ASCII 或 binary 分支读取，跳过无效点。
+ */
 #include "scan_tracking/mech_eye/point_cloud_io.h"
 
 #include "scan_tracking/common/capture_cache_paths.h"
@@ -22,23 +29,30 @@ namespace scan_tracking::mech_eye {
 
 namespace {
 
+/** @brief 判断三维坐标是否为有限值（非 NaN/Inf） */
 bool isFinitePoint(float x, float y, float z)
 {
     return std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
 }
 
+/** @brief PLY 存储格式枚举，由 header 中的 format 行解析 */
 enum class PlyStorageFormat {
     Unknown = 0,
     Ascii,
     BinaryLittleEndian,
 };
 
+/** @brief PLY 文件头解析结果 */
 struct ParsedPlyHeader {
     PlyStorageFormat format = PlyStorageFormat::Unknown;
     int vertexCount = 0;
     bool hasNormals = false;
 };
 
+/**
+ * @brief 从 QTextStream 当前位置逐行解析 PLY header，直至 end_header
+ * @return 解析成功且 format 已知、vertexCount > 0 时返回 true
+ */
 bool parsePlyHeader(QTextStream& stream, ParsedPlyHeader* header)
 {
     if (header == nullptr) {
@@ -71,6 +85,7 @@ bool parsePlyHeader(QTextStream& stream, ParsedPlyHeader* header)
     return header->format != PlyStorageFormat::Unknown && header->vertexCount > 0;
 }
 
+/** @brief 将解析后的点/法向数组写入 outFrame，并设置 pointCount/width/height */
 bool assignLoadedPointCloud(
     PointCloudFrame* outFrame,
     std::shared_ptr<std::vector<float>> points,
@@ -94,6 +109,7 @@ bool assignLoadedPointCloud(
     return true;
 }
 
+/** @brief 读取 ASCII PLY body：每行 x y z [nx ny nz]，跳过无效点 */
 bool loadAsciiPlyBody(QTextStream& stream, const ParsedPlyHeader& header, PointCloudFrame* outFrame)
 {
     auto points = std::make_shared<std::vector<float>>();
@@ -142,6 +158,7 @@ bool loadAsciiPlyBody(QTextStream& stream, const ParsedPlyHeader& header, PointC
     return assignLoadedPointCloud(outFrame, std::move(points), std::move(normals), header.hasNormals);
 }
 
+/** @brief 读取 binary_little_endian PLY body：每顶点 3 或 6 个 float（xyz 或 xyz+法向） */
 bool loadBinaryPlyBody(QFile& file, const ParsedPlyHeader& header, PointCloudFrame* outFrame)
 {
     const int floatsPerVertex = header.hasNormals ? 6 : 3;
@@ -186,11 +203,19 @@ bool loadBinaryPlyBody(QFile& file, const ParsedPlyHeader& header, PointCloudFra
 
 }  // namespace
 
+/** @brief 委托 common 模块获取默认采集缓存根目录 */
 QString defaultScanCacheDirectory()
 {
     return scan_tracking::common::defaultCaptureCacheRoot();
 }
 
+/**
+ * @brief 生成分段主点云 PLY 路径
+ *
+ * 目录：<root>/mech_3d/
+ * 命名：segment_{segmentIndex}_task{taskId}_{timestamp}.ply
+ * timestamp 与海康 2D 图共用，便于同段数据关联检索。
+ */
 QString buildSegmentPlyPath(
     const QString& configuredRoot,
     int segmentIndex,
@@ -210,6 +235,12 @@ QString buildSegmentPlyPath(
     return QDir(baseDir).absoluteFilePath(fileName);
 }
 
+/**
+ * @brief 生成对比采集 PLY 路径（NoiseRemoval 开/关各一目录）
+ *
+ * noise_on  → 主流程 Normal 滤波点云
+ * noise_off → comparisonCaptureEnabled 时的 Off 滤波点云
+ */
 QString buildComparisonPlyPath(
     const QString& configuredRoot,
     int segmentIndex,
@@ -241,6 +272,17 @@ QString buildComparisonPlyPath(
     return QString();
 }
 
+/**
+ * @brief 将 PointCloudFrame 写入 binary_little_endian PLY
+ *
+ * 步骤：
+ * 1. 校验 frame 与路径
+ * 2. 第一遍扫描统计有限值点数（header 中 vertex 数量）
+ * 3. 第二遍拷贝有效点到连续 buffer
+ * 4. 自动创建父目录，写入 header + float32 xyz body
+ *
+ * @note 不写入 normals；保存后的 pointCount 可能小于原始 frame（NaN 被剔除）
+ */
 bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absolutePath)
 {
     if (!frame.isValid() || absolutePath.trimmed().isEmpty()) {
@@ -250,6 +292,7 @@ bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absol
 
     const auto& points = *frame.pointsXYZ;
 
+    // pointCount 与 buffer 长度取 min，防止元数据与数组不一致
     const int pointCount = frame.pointCount;
     const int availablePointCount = static_cast<int>(points.size() / 3);
     const int count = std::min(pointCount, availablePointCount);
@@ -258,6 +301,7 @@ bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absol
         return false;
     }
 
+    // 预扫描：PLY header 的 vertex 数量必须为实际写入的有效点数
     std::size_t validCount = 0;
     for (int index = 0; index < count; ++index) {
         const auto base = static_cast<std::size_t>(index * 3);
@@ -271,6 +315,7 @@ bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absol
         return false;
     }
 
+    // 紧凑拷贝有效顶点，避免 PLY 文件中夹杂 NaN
     std::vector<float> vertexBuffer;
     vertexBuffer.reserve(validCount * 3);
     for (int index = 0; index < count; ++index) {
@@ -290,6 +335,7 @@ bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absol
     QFileInfo fileInfo(absolutePath);
     QDir().mkpath(fileInfo.absolutePath());
 
+    // 使用 std::ofstream 二进制写入 body；Qt QFile 亦可，此处与 PCL 生态习惯一致
     std::ofstream ofs(absolutePath.toStdString(), std::ios::binary);
     if (!ofs.is_open()) {
         qWarning(LOG_POINT_CLOUD_IO).noquote()
@@ -329,6 +375,13 @@ bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absol
     return true;
 }
 
+/**
+ * @brief 从 PLY 加载点云至 PointCloudFrame
+ *
+ * 支持 format ascii 与 binary_little_endian。
+ * 加载后 width=pointCount、height=1（非 organized 格式）；
+ * 若 header 含 nx 属性则填充 normalsXYZ。
+ */
 bool loadPointCloudFrameFromPly(const QString& absolutePath, PointCloudFrame* outFrame)
 {
     if (outFrame == nullptr || absolutePath.trimmed().isEmpty()) {
@@ -351,6 +404,7 @@ bool loadPointCloudFrameFromPly(const QString& absolutePath, PointCloudFrame* ou
 
     bool loaded = false;
     if (header.format == PlyStorageFormat::BinaryLittleEndian) {
+        // QTextStream 解析 header 后文件指针可能偏移，binary body 需 seek 到准确位置
         const qint64 bodyOffset = stream.pos();
         if (!file.seek(bodyOffset)) {
             qWarning(LOG_POINT_CLOUD_IO) << QStringLiteral("loadPointCloudFrameFromPly：无法定位 binary body");
@@ -383,6 +437,7 @@ bool loadPointCloudFrameFromPly(const QString& absolutePath, PointCloudFrame* ou
     return true;
 }
 
+/** @brief 释放大数组 shared_ptr，元数据字段保留供日志/索引使用 */
 void releasePointCloudFrameBuffers(PointCloudFrame* frame)
 {
     if (frame == nullptr) {
@@ -392,6 +447,7 @@ void releasePointCloudFrameBuffers(PointCloudFrame* frame)
     frame->normalsXYZ.reset();
 }
 
+/** @brief 生成分段 Mech 2D 灰度图 PNG 路径（mech_2d 子目录，命名规则同 PLY） */
 QString buildSegmentMech2DPngPath(
     const QString& configuredRoot,
     int segmentIndex,
@@ -411,6 +467,12 @@ QString buildSegmentMech2DPngPath(
     return QDir(baseDir).absoluteFilePath(fileName);
 }
 
+/**
+ * @brief GrayTextureFrame → 8 位灰度 PNG
+ *
+ * 逐行拷贝 pixels 到 QImage::Format_Grayscale8 后调用 QImage::save。
+ * 调用前需确保 frame.isValid() 且父目录可写。
+ */
 bool saveGrayTextureFrameToPng(const GrayTextureFrame& frame, const QString& absolutePath)
 {
     if (!frame.isValid() || absolutePath.trimmed().isEmpty()) {
@@ -425,6 +487,7 @@ bool saveGrayTextureFrameToPng(const GrayTextureFrame& frame, const QString& abs
     for (int row = 0; row < frame.height; ++row) {
         auto* scanLine = image.scanLine(row);
         const auto offset = static_cast<std::size_t>(row * frame.width);
+        // pixels 为行优先 uint8 数组，与 QImage scanLine 逐列对应
         for (int col = 0; col < frame.width; ++col) {
             scanLine[col] = (*frame.pixels)[offset + static_cast<std::size_t>(col)];
         }

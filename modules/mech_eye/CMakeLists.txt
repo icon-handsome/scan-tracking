@@ -1,3 +1,12 @@
+# Mech-Eye 3D 相机模块 (scan_tracking_mech_eye)
+#
+# 组件：
+#   MechEyeService   — 主线程门面，管理 worker 线程与采集请求
+#   MechEyeWorker    — SDK 发现/连接/采图（独立 QThread）
+#   point_cloud_io   — 分段 PLY/PNG 落盘与加载
+#   point_cloud_processor — PCL 后处理与 T0'×T 坐标变换
+#   MechEyeNanoSmokeTest — 独立烟雾测试（不依赖 Service 线程）
+#
 scan_tracking_require_mech_eye_sdk()
 
 find_package(PCL 1.12 REQUIRED COMPONENTS common filters surface)

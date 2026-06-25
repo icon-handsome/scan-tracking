@@ -1,3 +1,10 @@
+/**
+ * @file point_cloud_processor.cpp
+ * @brief PCL 点云后处理与 4×4 坐标变换实现
+ *
+ * 后处理流水线（config.enabled 时按序执行）：
+ * PassThrough(z) → StatisticalOutlierRemoval → MovingLeastSquares → VoxelGrid
+ */
 #include "scan_tracking/mech_eye/point_cloud_processor.h"
 
 #include <QLoggingCategory>
@@ -21,7 +28,12 @@ Q_LOGGING_CATEGORY(LOG_POINT_CLOUD_PROC, "mech_eye.point_cloud_processor")
 
 namespace scan_tracking::mech_eye {
 
-// PCL/Eigen 在 Windows 下非线程安全；多段后台 refinement 与坡口测量并发时会偶发 aligned_free 崩溃。
+/**
+ * @brief 进程内 PCL/Eigen 全局互斥锁
+ *
+ * Windows 下多线程并发调用 PCL（尤其 MLS/VoxelGrid）会触发 Eigen aligned_free 崩溃。
+ * StateMachine 分段 refinement 与坡口测量可能并行，所有 PCL 入口须持有此锁。
+ */
 std::mutex& pointCloudAlgorithmMutex()
 {
     static std::mutex mutex;
@@ -33,11 +45,13 @@ namespace {
 using Cloud = pcl::PointCloud<pcl::PointXYZ>;
 using CloudPtr = Cloud::Ptr;
 
+/** @brief 判断三维坐标是否为有限值 */
 bool isFinitePoint(float x, float y, float z)
 {
     return std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
 }
 
+/** @brief PointCloudFrame → PCL 点云，跳过 NaN/Inf 点 */
 CloudPtr toPclCloud(const PointCloudFrame& frame)
 {
     auto cloud = pcl::make_shared<Cloud>();
@@ -67,6 +81,7 @@ CloudPtr toPclCloud(const PointCloudFrame& frame)
     return cloud;
 }
 
+/** @brief PCL 点云 → PointCloudFrame，保留 frameId/timestampMs 等元数据 */
 PointCloudFrame fromPclCloud(const CloudPtr& cloud, const PointCloudFrame& metadata)
 {
     PointCloudFrame frame;
@@ -96,6 +111,7 @@ PointCloudFrame fromPclCloud(const CloudPtr& cloud, const PointCloudFrame& metad
     return frame;
 }
 
+/** @brief 深拷贝 PointCloudFrame（含 pointsXYZ / normalsXYZ 数组） */
 PointCloudFrame clonePointCloudFrameFull(const PointCloudFrame& src)
 {
     PointCloudFrame dst = src;
@@ -108,6 +124,7 @@ PointCloudFrame clonePointCloudFrameFull(const PointCloudFrame& src)
     return dst;
 }
 
+/** @brief 检查滤波后点数是否满足 minPoints 下限，不足时写入 message */
 bool checkMinPoints(const CloudPtr& cloud, int minPoints, const QString& stepLabel, QString* message)
 {
     if (!cloud || static_cast<int>(cloud->size()) < minPoints) {
@@ -122,6 +139,7 @@ bool checkMinPoints(const CloudPtr& cloud, int minPoints, const QString& stepLab
     return true;
 }
 
+/** @brief 返回行优先 4×4 单位矩阵 */
 std::array<float, 16> identityMatrix4x4()
 {
     std::array<float, 16> matrix{};
@@ -129,6 +147,7 @@ std::array<float, 16> identityMatrix4x4()
     return matrix;
 }
 
+/** @brief 行优先 float[16] → Eigen::Matrix4f（按 row-major 索引映射） */
 Eigen::Matrix4f rowMajorToEigen(const std::array<float, 16>& matrix)
 {
     Eigen::Matrix4f eigenMatrix;
@@ -142,6 +161,12 @@ Eigen::Matrix4f rowMajorToEigen(const std::array<float, 16>& matrix)
 
 }  // namespace
 
+/**
+ * @brief 行优先 4×4 矩阵乘法：out = left × right
+ *
+ * 索引约定：matrix[row * 4 + col]，与 StateMachine、LBN 位姿链、scan_paths_config 一致。
+ * 不使用 Eigen 乘法以避免额外依赖，矩阵规模固定 4×4 开销可忽略。
+ */
 std::array<float, 16> multiplyRowMajor4x4(
     const std::array<float, 16>& left,
     const std::array<float, 16>& right)
@@ -160,6 +185,16 @@ std::array<float, 16> multiplyRowMajor4x4(
     return out;
 }
 
+/**
+ * @brief 将分段点云变换到统一坐标系
+ *
+ * 变换矩阵：combined = calibrationMatrixT0Prime × stereoTrackingMatrixT
+ * IPC 约定：
+ * - LB 位姿检测成功：calibration=Rt_global(T0)，stereo=I
+ * - 否则：calibration=T0'，stereo=I（兼容旧链式）
+ *
+ * 内部使用 pcl::transformPointCloud，持有 pointCloudAlgorithmMutex。
+ */
 bool transformPointCloudFrame(
     const PointCloudFrame& input,
     const std::array<float, 16>& calibrationMatrixT0Prime,
@@ -185,6 +220,7 @@ bool transformPointCloudFrame(
 
     const auto combinedTransform =
         multiplyRowMajor4x4(calibrationMatrixT0Prime, stereoTrackingMatrixT);
+    // row-major float[16] → Eigen::Matrix4f，供 pcl::transformPointCloud 使用
     const Eigen::Matrix4f eigenTransform = rowMajorToEigen(combinedTransform);
 
     CloudPtr cloud = toPclCloud(input);
@@ -214,6 +250,18 @@ bool transformPointCloudFrame(
     return true;
 }
 
+/**
+ * @brief 对 Mech-Eye 点云执行可配置 PCL 后处理流水线
+ *
+ * config.enabled=false 时深拷贝直通，不持有额外锁开销以上的逻辑。
+ * enabled=true 时按序执行（任一步骤点数低于 minPointsAfterProcessing 则失败返回）：
+ *   1. PassThrough(z)     — depthMinMm ~ depthMaxMm
+ *   2. StatisticalOutlierRemoval — meanK + stddevMul
+ *   3. MovingLeastSquares — 表面平滑
+ *   4. VoxelGrid          — 体素降采样
+ *
+ * @param report 可选；写入 input/output 点数与摘要信息
+ */
 bool processPointCloudFrame(
     const PointCloudFrame& input,
     const common::PointCloudProcessingConfig& config,
@@ -238,6 +286,7 @@ bool processPointCloudFrame(
     }
 
     if (!config.enabled) {
+        // 后处理关闭：完整深拷贝，保留 normals 等附属数据
         *output = clonePointCloudFrameFull(input);
         localReport.outputPointCount = output->pointCount;
         localReport.message = QStringLiteral("点云后处理已禁用，直通原始点云。");
@@ -262,6 +311,7 @@ bool processPointCloudFrame(
     const int minPoints = std::max(1, config.minPointsAfterProcessing);
     QString failMessage;
 
+    // --- 步骤 1：Z 轴深度裁剪（相机坐标系，单位 mm） ---
     if (config.depthMinMm < config.depthMaxMm) {
         pcl::PassThrough<pcl::PointXYZ> pass;
         pass.setInputCloud(cloud);
@@ -282,6 +332,7 @@ bool processPointCloudFrame(
         }
     }
 
+    // --- 步骤 2：统计离群点去除（点数须大于 meanK 才有意义） ---
     if (config.outlierRemovalEnabled && cloud->size() > static_cast<std::size_t>(config.outlierMeanK)) {
         pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
         sor.setInputCloud(cloud);
@@ -303,6 +354,7 @@ bool processPointCloudFrame(
         }
     }
 
+    // --- 步骤 3：MLS 表面平滑（不计算法向，仅更新 xyz） ---
     if (config.smoothingEnabled && config.mlsSearchRadiusMm > 0.0f && !cloud->empty()) {
         pcl::MovingLeastSquares<pcl::PointXYZ, pcl::PointXYZ> mls;
         mls.setInputCloud(cloud);
@@ -325,6 +377,7 @@ bool processPointCloudFrame(
         }
     }
 
+    // --- 步骤 4：体素网格降采样（leaf 为立方体边长 mm） ---
     if (config.downsampleEnabled && config.voxelLeafSizeMm > 0.0f) {
         pcl::VoxelGrid<pcl::PointXYZ> voxel;
         voxel.setInputCloud(cloud);
@@ -347,6 +400,7 @@ bool processPointCloudFrame(
         }
     }
 
+    // 转回 PointCloudFrame 并填充统计报告
     *output = fromPclCloud(cloud, input);
     localReport.outputPointCount = output->pointCount;
     localReport.message = QStringLiteral(

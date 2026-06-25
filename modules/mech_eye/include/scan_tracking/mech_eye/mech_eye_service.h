@@ -1,10 +1,23 @@
 #pragma once
 
-// Mech-Eye 3D 相机服务（主线程门面）。
-//
-// 在独立 QThread 中托管 MechEyeWorker，所有阻塞式 SDK 调用（发现、连接、采图）
-// 均在 worker 线程完成，结果经 Qt 信号异步回传主线程。
-// 供 VisionPipelineService / StateMachine 发起分段点云采集。
+/**
+ * @file mech_eye_service.h
+ * @brief Mech-Eye 3D 相机服务（主线程门面）
+ *
+ * 在独立 QThread 中托管 MechEyeWorker，所有阻塞式 SDK 调用（发现、连接、采图）
+ * 均在 worker 线程完成，结果经 Qt 信号异步回传主线程。
+ *
+ * 典型用法：
+ * @code
+ *   service->start();
+ *   // 等待 stateChanged(Ready)
+ *   quint64 id = service->requestCapture(cameraKey, CaptureMode::Capture3DOnly);
+ *   // 连接 captureFinished 接收 CaptureResult
+ * @endcode
+ *
+ * 并发策略：单相机单并发，忙碌或未 Ready 时 requestCapture 返回 0。
+ * 调用方：VisionPipelineService、StateMachine 分段点云采集。
+ */
 
 #include <QtCore/QObject>
 
@@ -19,7 +32,7 @@ namespace mech_eye {
 
 class MechEyeWorker;
 
-/// 主线程侧 Mech-Eye 门面：请求排队、busy 互斥、状态转发
+/** @brief 主线程侧 Mech-Eye 门面：请求排队、busy 互斥、状态转发 */
 class MechEyeService : public QObject {
     Q_OBJECT
 

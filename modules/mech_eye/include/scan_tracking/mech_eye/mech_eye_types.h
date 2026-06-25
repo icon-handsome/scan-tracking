@@ -1,7 +1,13 @@
 #pragma once
 
-// 将跨线程传递的数据类型集中定义在这里，避免 service 和 worker 相互包含。
-// 这些类型后续也可能被 flow_control 或 tracking 复用，因此命名尽量保持业务语义清晰。
+/**
+ * @file mech_eye_types.h
+ * @brief Mech-Eye 3D 相机模块的公共数据类型
+ *
+ * 将跨线程传递的数据类型集中定义于此，避免 MechEyeService 与 MechEyeWorker 相互包含。
+ * 类型同时供 flow_control、tracking、vision 等上层模块复用。
+ * 所有结构体均通过 Q_DECLARE_METATYPE 注册，以支持 Qt 信号槽的 QueuedConnection 投递。
+ */
 
 #include <memory>
 #include <vector>
@@ -13,41 +19,41 @@
 namespace scan_tracking {
 namespace mech_eye {
 
-/* 采集模式 */
+/** @brief SDK 采集模式，对应 Mech-Eye capture3D / capture2DAnd3D / capture2D 接口 */
 enum class CaptureMode {
-    Capture3DOnly = 0,
-    Capture2DAnd3D = 1,
-    Capture2DOnly = 2,
+    Capture3DOnly = 0,   ///< 仅 3D 点云（分段扫描主流程默认模式）
+    Capture2DAnd3D = 1,  ///< 同步 2D 灰度纹理 + 3D 点云（需纹理对齐时使用）
+    Capture2DOnly = 2,   ///< 仅 2D 灰度图（调试用）
 };
 
-/* 采集与连接过程中的统一错误码 */
+/** @brief 采集与连接过程中的统一错误码，供上层 StateMachine / HMI 统一处理 */
 enum class CaptureErrorCode {
     Success = 0,
-    NotStarted = 1,
-    NotConnected = 2,
-    Busy = 3,
-    DiscoverFailed = 4,
-    ConnectFailed = 5,
-    CaptureFailed = 6,
+    NotStarted = 1,       ///< 服务尚未 start()
+    NotConnected = 2,     ///< 相机未连接或已掉线
+    Busy = 3,             ///< 单相机单并发：上一次采集尚未结束
+    DiscoverFailed = 4,   ///< discoverCameras 未发现设备
+    ConnectFailed = 5,    ///< connect 失败
+    CaptureFailed = 6,    ///< SDK 采图失败或结果为空
     DisconnectFailed = 7,
-    Timeout = 8,
-    InvalidRequest = 9,
-    UnknownError = 10,
+    Timeout = 8,          ///< 发现/连接/采集超时
+    InvalidRequest = 9,   ///< 参数非法（cameraKey 空、模式不支持等）
+    UnknownError = 10,    ///< SDK 异常或未映射错误
 };
 
-/* 相机运行状态 */
+/** @brief 相机运行状态机，由 MechEyeWorker 驱动并经 MechEyeService 转发 */
 enum class CameraRuntimeState {
     Idle = 0,
-    Discovering = 1,
-    Connecting = 2,
-    Ready = 3,
-    Capturing = 4,
+    Discovering = 1,   ///< 正在局域网搜索 Mech-Eye 设备
+    Connecting = 2,    ///< 正在建立 TCP 连接
+    Ready = 3,         ///< 已连接，可接受采集请求
+    Capturing = 4,     ///< 采集中
     Disconnecting = 5,
-    Error = 6,
-    Stopped = 7,
+    Error = 6,         ///< 连接/采集失败，需 refresh 或重启服务
+    Stopped = 7,       ///< stop() 后终态
 };
 
-/* 相机信息快照，用于跨线程传递和状态展示 */
+/** @brief 相机信息快照，用于跨线程传递和 HMI 状态展示 */
 struct CameraInfoSnapshot {
     QString model;  // 相机型号
     QString serialNumber;   // 序列号
@@ -56,7 +62,10 @@ struct CameraInfoSnapshot {
     bool connected = false; // 是否已连接
 };
 
-/* 与 3D 纹理点云对齐的 2D 灰度图（Capture2DAnd3D 时有效） */
+/**
+ * @brief 与 3D 点云像素对齐的 2D 灰度图
+ * @note Capture2DAnd3D 模式下由 SDK Frame2D 转换；Capture2DOnly 时仅含此字段
+ */
 struct GrayTextureFrame {
     std::shared_ptr<std::vector<uint8_t>> pixels;
     int width = 0;
@@ -69,8 +78,11 @@ struct GrayTextureFrame {
     }
 };
 
-/* 点云帧数据
- * 使用 shared_ptr 保存大数组，避免跨线程传递时发生深拷贝。
+/**
+ * @brief 点云帧数据
+ *
+ * 使用 shared_ptr 持有大数组，跨线程 QueuedConnection 传递时仅拷贝指针。
+ * pointsXYZ 为行优先排列：index i 对应 (x,y,z) = [i*3], [i*3+1], [i*3+2]。
  */
 struct PointCloudFrame {
     std::shared_ptr<std::vector<float>> pointsXYZ;  // 每三个 float 表示一个点的 x, y, z 坐标
@@ -100,16 +112,19 @@ struct PointCloudFrame {
     }
 };
 
-/* 采集请求参数 */
+/**
+ * @brief 采集请求参数，由 MechEyeService::requestCapture 构造并投递至 Worker
+ */
 struct CaptureRequest {
-    quint64 requestId = 0;  // 唯一标识符
-    QString cameraKey;  // 相机唯一标识
-    CaptureMode mode = CaptureMode::Capture3DOnly;  // 采集模式
-    int timeoutMs = 30000;  // 采集超时时间，单位毫秒，默认30秒
-    bool comparisonCaptureEnabled = false;  // 是否同次额外采一帧（Noise=Off）与主流程（Normal）对比
+    quint64 requestId = 0;
+    QString cameraKey;  ///< 型号/序列号/IP/设备名，空则使用 config.ini 默认相机
+    CaptureMode mode = CaptureMode::Capture3DOnly;
+    int timeoutMs = 30000;
+    /** @brief 同次额外采一帧 NoiseRemoval=Off，与主流程 Normal 对比滤波效果 */
+    bool comparisonCaptureEnabled = false;
 };
 
-/* 采集结果 */
+/** @brief 采集结果，通过 captureFinished 信号回传主线程 */
 struct CaptureResult {
     quint64 requestId = 0;  // 唯一标识符，与 CaptureRequest 中的 requestId 一致
     QString cameraKey;  // 相机唯一标识
@@ -118,8 +133,8 @@ struct CaptureResult {
     QString errorMessage;   // 错误描述，便于日志记录和调试
     CameraInfoSnapshot cameraInfo;  // 采集时的相机信息快照
     PointCloudFrame pointCloud; // 采集到的点云数据
-    PointCloudFrame comparisonPointCloud; // 同次对比点云（可选）
-    GrayTextureFrame texture2D; // 与点云对齐的 2D 灰度纹理（仅 Capture2DAnd3D）
+    PointCloudFrame comparisonPointCloud; ///< comparisonCaptureEnabled 时的 Noise=Off 点云
+    GrayTextureFrame texture2D;           ///< Capture2DAnd3D / Capture2DOnly 时的灰度图
     qint64 elapsedMs = 0;   // 采集耗时，单位毫秒
     qint64 comparisonElapsedMs = 0; // 对比点云采集耗时，单位毫秒
 

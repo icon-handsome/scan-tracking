@@ -1,13 +1,16 @@
 #pragma once
 
-// 点云后处理与坐标变换工具。
-//
-// 供 StateMachine 分段 refinement 后台线程使用：
-//   - processPointCloudFrame：PCL 滤波/下采样等可配置后处理
-//   - transformPointCloudFrame：按 T0（或 T0'×T 兼容形式）将分段点云变换到统一坐标系
-//   - multiplyRowMajor4x4：位姿矩阵链式乘法，与 LBN/LB 及 scan_paths_config 一致
-//
-// Windows 下 PCL/Eigen 非线程安全，所有入口须持有 pointCloudAlgorithmMutex()。
+/**
+ * @file point_cloud_processor.h
+ * @brief 点云后处理与坐标变换工具
+ *
+ * 供 StateMachine 分段 refinement 后台线程使用：
+ * - processPointCloudFrame：深度裁剪 → 离群点去除 → MLS 平滑 → 体素降采样
+ * - transformPointCloudFrame：p' = p × (T0' × T)，将分段点云变换到统一坐标系
+ * - multiplyRowMajor4x4：行优先 4×4 矩阵乘法，与 LBN/LB 及 scan_paths_config 一致
+ *
+ * @warning Windows 下 PCL/Eigen 非线程安全；所有入口须持有 pointCloudAlgorithmMutex()。
+ */
 
 #include <QtCore/QString>
 

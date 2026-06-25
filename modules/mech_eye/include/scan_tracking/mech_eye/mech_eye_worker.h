@@ -1,9 +1,16 @@
 #pragma once
 
-// Mech-Eye SDK 工作线程实现。
-//
-// 由 MechEyeService 所在 QThread 驱动，执行相机发现、连接、2D/3D 采图及
-// Frame3D → PointCloudFrame 转换。禁止在主线程直接调用本类槽函数。
+/**
+ * @file mech_eye_worker.h
+ * @brief Mech-Eye SDK 工作线程实现
+ *
+ * 由 MechEyeService 创建的独立 QThread 驱动，执行：
+ * - 局域网 discoverCameras → connect → 心跳检测
+ * - capture3D / capture2DAnd3D / capture2D 及对比采集
+ * - SDK Frame3D → PointCloudFrame、Frame2D → GrayTextureFrame 转换
+ *
+ * @warning 禁止在主线程直接调用本类 public slots；须通过 MechEyeService 信号投递。
+ */
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
@@ -21,7 +28,7 @@ class Frame2DAnd3D;
 namespace scan_tracking {
 namespace mech_eye {
 
-/// SDK 操作执行体；与 MechEyeService 通过 QueuedConnection 通信
+/** @brief SDK 操作执行体；与 MechEyeService 通过 QueuedConnection 通信 */
 class MechEyeWorker : public QObject {
     Q_OBJECT
 
