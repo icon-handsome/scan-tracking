@@ -1,0 +1,32 @@
+{
+  "CMakeTargetsViewExcludedItems": [
+    "CMakeTarget:gemini335_smoke_runner",
+    "CMakeTarget:scan_tracking_cxp_smoke",
+    "CMakeTarget:scan_tracking_bevel_smoke_test",
+    "CMakeTarget:scan_tracking_tracking_smoke_test",
+    "CMakeTarget:scan_tracking_hik_mono_io_test",
+    "CMakeTarget:scan_tracking_point_cloud_io_test",
+    "CMakeTarget:scan_tracking_point_cloud_processor_test",
+    "CMakeTarget:scan_tracking_lbn_offline_runner",
+    "CMakeTarget:scan_tracking_third_party_hik_mvs",
+    "CMakeTarget:scan_tracking_third_party_hik_mvs_samples",
+    "CMakeTarget:scan_tracking_third_party_hik_mvs_resources",
+    "CMakeTarget:scan_tracking_third_party_misc_resources"
+  ],
+  "ExcludedItems": [
+    "build/",
+    "third_party/MVS/Development/Samples/",
+    "third_party/MVS/Development/MVFG/",
+    "third_party/MVS/Development/DirectShow/",
+    "third_party/MVS/Development/DotNet/",
+    "third_party/MVS/Development/Samples/MvSerial/",
+    "third_party/Po_Kou_Ce_Liang/*.vcxproj",
+    "third_party/Po_Kou_Ce_Liang/*.sln",
+    "third_party/Hole/*.sln",
+    "third_party/Hole/*.vcxproj",
+    "third_party/Thicknessmeasurement/*.sln",
+    "third_party/Thicknessmeasurement/*.vcxproj",
+    "third_party/**/*.csproj",
+    "third_party/**/*.vbproj"
+  ]
+}

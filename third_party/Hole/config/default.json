@@ -2,7 +2,7 @@
   // 输入点云：IPC 在线注入扫描点云，留空即可
   "input_frames": [],
 
-  // 模板点云：相对本配置文件目录
+  // 模板点云：相对本配置文件目录（部署于 hole/template/）
   "template_cloud": "template/Zhu_Mian_Kai_Kong_Template_cut_trans.pcd",
 
   // 位姿矫正矩阵：按行填写 4x4 矩阵，单位 mm
@@ -16,33 +16,21 @@
   // 全局裁剪包围盒：用于扫描点云预处理裁剪；点落入任意一个包围盒都会保留
   "crop_boxes": [
     {
-      "crop_min": [-793.858551, -622.153976, 1453.552124],
-      "crop_max": [706.141449, 877.846024, 2253.552124]
-    },
-    {
-      "crop_min": [-793.858551, -622.153976, 1453.552124],
-      "crop_max": [706.141449, 877.846024, 2253.552124]
-    },
-    {
-      "crop_min": [-793.858551, -622.153976, 1453.552124],
-      "crop_max": [706.141449, 877.846024, 2253.552124]
-    },
-    {
-      "crop_min": [-793.858551, -622.153976, 1453.552124],
-      "crop_max": [706.141449, 877.846024, 2253.552124]
+      "crop_min": [-1067.692, -1402.588, 3307.2705],
+      "crop_max": [331.008, -283.808, 4459.1895]
     }
   ],
   // 离群点滤波与体素降采样
   "statistical_mean_k": 10,
   "statistical_stddev_mul": 3.0,
-  "voxel_leaf_mm": 1.0,
+  "voxel_leaf_mm": 2.0,
 
   // 封头直边圆柱拟合参数
   "cylinder_distance_threshold_mm": 2.0,
   "cylinder_max_iterations": 200,
 
   // ICP 匹配参数：模板匹配和局部开孔匹配共用
-  "icp_max_correspondence_distance_mm": 100.0,
+  "icp_max_correspondence_distance_mm": 50.0,
   "icp_max_iterations": 300,
   "icp_transformation_epsilon": 1e-8,
   "icp_fitness_epsilon": 0.001,
@@ -111,8 +99,8 @@
       "projection_direction": [0.4319, -0.7518, -0.4983],
       "projection_image_width": 600,
       "projection_image_height": 600,
-      "projection_crop_min": [-915.50885010, -694.62951660, 3658.92675781],
-      "projection_crop_max": [-612.43914795, -514.05395508, 4009.65405273],
+      "projection_crop_min": [-831.567, -659.185, 3810.19],
+      "projection_crop_max": [-711.567, -539.185, 3930.19],
       "cylinder_feature_points": [
       -775.91131592, -578.40905762, 3853.95458984,
       -791.84069824, -587.54357910, 3869.23120117,

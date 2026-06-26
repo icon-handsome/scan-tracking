@@ -535,6 +535,7 @@ private:
 
     bool ensureSegmentCaptureExportSessionRoot();
     void exportSegmentCxp2dImages(
+        int pathId,
         int segmentIndex,
         const scan_tracking::vision::MultiCameraCaptureBundle& bundle);
 

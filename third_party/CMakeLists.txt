@@ -9,6 +9,10 @@ option(SCAN_TRACKING_SHOW_MECHEYE_SDK_IN_IDE
     "Expose third_party/Mech-Eye SDK-2.5.4 in the IDE (INTERFACE + resource targets)"
     OFF
 )
+option(SCAN_TRACKING_SHOW_HIK_MVS_SAMPLES_IN_IDE
+    "Expose third_party/MVS sample sources in the IDE (keeps SDK demo .vcxproj/.csproj out of startup list when OFF)"
+    OFF
+)
 
 function(scan_tracking_add_ide_resource_target target_name root_dir prefix)
     set(resource_files ${ARGN})
@@ -98,22 +102,24 @@ scan_tracking_add_ide_resource_target(
     ${SCAN_TRACKING_HIK_MVS_HEADERS}
 )
 
-file(GLOB_RECURSE SCAN_TRACKING_HIK_MVS_SAMPLES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/MVS/Development/Samples/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/MVS/Development/Samples/*.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/MVS/Development/Samples/*.cpp"
-)
-if(SCAN_TRACKING_HIK_MVS_SAMPLES)
-    add_library(scan_tracking_third_party_hik_mvs_samples INTERFACE)
-    target_sources(scan_tracking_third_party_hik_mvs_samples INTERFACE ${SCAN_TRACKING_HIK_MVS_SAMPLES})
-    source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/MVS/Development/Samples" PREFIX "third_party/MVS/Development/Samples" FILES ${SCAN_TRACKING_HIK_MVS_SAMPLES})
-    set_target_properties(scan_tracking_third_party_hik_mvs_samples PROPERTIES FOLDER "third_party")
-    scan_tracking_add_ide_resource_target(
-        scan_tracking_third_party_hik_mvs_sample_resources
-        "${CMAKE_CURRENT_SOURCE_DIR}/MVS/Development/Samples"
-        "third_party/MVS/Development/Samples"
-        ${SCAN_TRACKING_HIK_MVS_SAMPLES}
+if(SCAN_TRACKING_SHOW_HIK_MVS_SAMPLES_IN_IDE)
+    file(GLOB_RECURSE SCAN_TRACKING_HIK_MVS_SAMPLES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/MVS/Development/Samples/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MVS/Development/Samples/*.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MVS/Development/Samples/*.cpp"
     )
+    if(SCAN_TRACKING_HIK_MVS_SAMPLES)
+        add_library(scan_tracking_third_party_hik_mvs_samples INTERFACE)
+        target_sources(scan_tracking_third_party_hik_mvs_samples INTERFACE ${SCAN_TRACKING_HIK_MVS_SAMPLES})
+        source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/MVS/Development/Samples" PREFIX "third_party/MVS/Development/Samples" FILES ${SCAN_TRACKING_HIK_MVS_SAMPLES})
+        set_target_properties(scan_tracking_third_party_hik_mvs_samples PROPERTIES FOLDER "third_party")
+        scan_tracking_add_ide_resource_target(
+            scan_tracking_third_party_hik_mvs_sample_resources
+            "${CMAKE_CURRENT_SOURCE_DIR}/MVS/Development/Samples"
+            "third_party/MVS/Development/Samples"
+            ${SCAN_TRACKING_HIK_MVS_SAMPLES}
+        )
+    endif()
 endif()
 
 file(GLOB_RECURSE SCAN_TRACKING_THIRD_PARTY_MISC_FILES CONFIGURE_DEPENDS

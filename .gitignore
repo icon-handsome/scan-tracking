@@ -63,6 +63,19 @@ third_party/opencv-3.4.3-vc14_vc15.exe
 # MVS: IDE samples/runtime bundles (headers under Development/ are tracked)
 third_party/MVS/Applications/
 third_party/MVS/MVS/
+# VS Open Folder: hide SDK sample/demo projects from Solution Explorer and debug targets
+third_party/MVS/Development/Samples/
+third_party/MVS/Development/MVFG/
+third_party/MVS/Development/DirectShow/
+third_party/MVS/Development/DotNet/
+third_party/Po_Kou_Ce_Liang/*.vcxproj
+third_party/Po_Kou_Ce_Liang/*.sln
+third_party/Hole/*.sln
+third_party/Hole/*.vcxproj
+third_party/Thicknessmeasurement/*.sln
+third_party/Thicknessmeasurement/*.vcxproj
+third_party/**/*.csproj
+third_party/**/*.vbproj
 # MVS: .NET / VS sample build output (local compile only)
 third_party/MVS/**/obj/
 third_party/MVS/**/objnetfx/

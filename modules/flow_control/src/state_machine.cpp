@@ -414,7 +414,7 @@ QString formatCxpCaptureTimestampTag(qint64 timestampMs)
         .toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
 }
 
-QString resolveSegmentCaptureFlatOutputRoot()
+QString resolveSegmentCaptureExportRoot()
 {
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
     const QString configuredRoot = configManager != nullptr
@@ -532,26 +532,24 @@ QString buildCxpCaptureFileName(const QString& cameraTag, const QString& timesta
     return QStringLiteral("%1_%2.bmp").arg(cameraTag, timestampTag);
 }
 
-SegmentCaptureCxpExportMeta saveSegmentCxp2dImagesToFlatOutput(
-    const scan_tracking::vision::MultiCameraCaptureBundle& bundle)
+SegmentCaptureCxpExportMeta saveSegmentCxp2dImagesToDirectory(
+    const scan_tracking::vision::MultiCameraCaptureBundle& bundle,
+    const QString& outputDir,
+    const QString& exportGroupId)
 {
     SegmentCaptureCxpExportMeta cxpExportMeta;
     cxpExportMeta.captureFileTimestamp = resolveCxpCaptureFileTimestamp(bundle);
+    cxpExportMeta.exportGroupId = exportGroupId;
 
-    const QString outputRoot = resolveSegmentCaptureFlatOutputRoot();
-    if (!ensureDirectoryTreeExists(outputRoot)) {
+    if (!ensureDirectoryTreeExists(outputDir)) {
         qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("[SegmentCaptureExport] 创建 2D 输出目录失败：") << outputRoot;
+            << QStringLiteral("[SegmentCaptureExport] 创建段级输出目录失败：") << outputDir;
         return cxpExportMeta;
     }
 
     if (bundle.hikCameraAResult.success() && bundle.hikCameraAResult.frame.isValid()) {
-        const QString leftTag =
-            resolveCxpExportCameraTag(bundle.hikCameraAResult, QStringLiteral("left"));
-        const QString leftTimestamp = formatCxpCaptureTimestampTag(
-            bundle.hikCameraAResult.frame.timestampMs);
-        const QString leftFileName = buildCxpCaptureFileName(leftTag, leftTimestamp);
-        const QString leftPath = QDir(outputRoot).filePath(leftFileName);
+        const QString leftFileName = QStringLiteral("cxp_left.bmp");
+        const QString leftPath = QDir(outputDir).filePath(leftFileName);
         const QString savedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
         const bool cxpLeftSaved = scan_tracking::vision::saveHikMonoFrameToBmp(
             bundle.hikCameraAResult.frame, leftPath);
@@ -561,7 +559,7 @@ SegmentCaptureCxpExportMeta saveSegmentCxp2dImagesToFlatOutput(
             bundle.hikCameraAResult, leftFileName, cxpLeftSaved, savedAt, savedFileBytes, savedFileMd5);
         if (cxpLeftSaved) {
             logSegmentCaptureCxpImageSaved(
-                QStringLiteral("左"), leftFileName, leftPath, cxpExportMeta.left);
+                QStringLiteral("左"), exportGroupId, leftPath, cxpExportMeta.left);
         } else {
             qWarning(LOG_FLOW).noquote()
                 << QStringLiteral("[SegmentCaptureExport] 左目 BMP 写入失败：") << leftPath
@@ -571,12 +569,8 @@ SegmentCaptureCxpExportMeta saveSegmentCxp2dImagesToFlatOutput(
     }
 
     if (bundle.hikCameraBResult.success() && bundle.hikCameraBResult.frame.isValid()) {
-        const QString rightTag =
-            resolveCxpExportCameraTag(bundle.hikCameraBResult, QStringLiteral("right"));
-        const QString rightTimestamp = formatCxpCaptureTimestampTag(
-            bundle.hikCameraBResult.frame.timestampMs);
-        const QString rightFileName = buildCxpCaptureFileName(rightTag, rightTimestamp);
-        const QString rightPath = QDir(outputRoot).filePath(rightFileName);
+        const QString rightFileName = QStringLiteral("cxp_right.bmp");
+        const QString rightPath = QDir(outputDir).filePath(rightFileName);
         const QString savedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
         const bool cxpRightSaved = scan_tracking::vision::saveHikMonoFrameToBmp(
             bundle.hikCameraBResult.frame, rightPath);
@@ -586,7 +580,7 @@ SegmentCaptureCxpExportMeta saveSegmentCxp2dImagesToFlatOutput(
             bundle.hikCameraBResult, rightFileName, cxpRightSaved, savedAt, savedFileBytes, savedFileMd5);
         if (cxpRightSaved) {
             logSegmentCaptureCxpImageSaved(
-                QStringLiteral("右"), rightFileName, rightPath, cxpExportMeta.right);
+                QStringLiteral("右"), exportGroupId, rightPath, cxpExportMeta.right);
         } else {
             qWarning(LOG_FLOW).noquote()
                 << QStringLiteral("[SegmentCaptureExport] 右目 BMP 写入失败：") << rightPath
@@ -598,55 +592,10 @@ SegmentCaptureCxpExportMeta saveSegmentCxp2dImagesToFlatOutput(
     return cxpExportMeta;
 }
 
-SegmentCaptureCxpExportMeta buildCxpExportMetaFromFlatOutput(
-    const scan_tracking::vision::MultiCameraCaptureBundle& bundle)
-{
-    SegmentCaptureCxpExportMeta cxpExportMeta;
-    cxpExportMeta.captureFileTimestamp = resolveCxpCaptureFileTimestamp(bundle);
-    const QString outputRoot = resolveSegmentCaptureFlatOutputRoot();
-
-    if (bundle.hikCameraAResult.success() && bundle.hikCameraAResult.frame.isValid()) {
-        const QString leftTag =
-            resolveCxpExportCameraTag(bundle.hikCameraAResult, QStringLiteral("left"));
-        const QString leftTimestamp = formatCxpCaptureTimestampTag(
-            bundle.hikCameraAResult.frame.timestampMs);
-        const QString leftFileName = buildCxpCaptureFileName(leftTag, leftTimestamp);
-        const QString leftPath = QDir(outputRoot).filePath(leftFileName);
-        const bool saved = QFileInfo::exists(leftPath);
-        const QString savedAt =
-            saved
-                ? QFileInfo(leftPath).lastModified().toString(Qt::ISODateWithMs)
-                : QString();
-        const qint64 savedFileBytes = saved ? QFileInfo(leftPath).size() : 0;
-        const QString savedFileMd5 = saved ? md5HexFromFile(leftPath) : QStringLiteral("(not-saved)");
-        cxpExportMeta.left = buildCxpImageMetaFromCapture(
-            bundle.hikCameraAResult, leftFileName, saved, savedAt, savedFileBytes, savedFileMd5);
-    }
-
-    if (bundle.hikCameraBResult.success() && bundle.hikCameraBResult.frame.isValid()) {
-        const QString rightTag =
-            resolveCxpExportCameraTag(bundle.hikCameraBResult, QStringLiteral("right"));
-        const QString rightTimestamp = formatCxpCaptureTimestampTag(
-            bundle.hikCameraBResult.frame.timestampMs);
-        const QString rightFileName = buildCxpCaptureFileName(rightTag, rightTimestamp);
-        const QString rightPath = QDir(outputRoot).filePath(rightFileName);
-        const bool saved = QFileInfo::exists(rightPath);
-        const QString savedAt =
-            saved
-                ? QFileInfo(rightPath).lastModified().toString(Qt::ISODateWithMs)
-                : QString();
-        const qint64 savedFileBytes = saved ? QFileInfo(rightPath).size() : 0;
-        const QString savedFileMd5 = saved ? md5HexFromFile(rightPath) : QStringLiteral("(not-saved)");
-        cxpExportMeta.right = buildCxpImageMetaFromCapture(
-            bundle.hikCameraBResult, rightFileName, saved, savedAt, savedFileBytes, savedFileMd5);
-    }
-
-    return cxpExportMeta;
-}
-
 QString buildSegmentCaptureExportMetaText(
     int pathId,
     int segmentIndex,
+    const QString& exportGroupDir,
     const scan_tracking::vision::MultiCameraCaptureBundle& bundle,
     const scan_tracking::mech_eye::PointCloudFrame& rawPointCloud,
     const scan_tracking::mech_eye::PointCloudFrame& comparisonPointCloud,
@@ -668,7 +617,7 @@ QString buildSegmentCaptureExportMetaText(
     text += QStringLiteral("cxpLeftKey=") + bundle.request.hikCameraAKey + QStringLiteral("\n");
     text += QStringLiteral("cxpRightKey=") + bundle.request.hikCameraBKey + QStringLiteral("\n");
     text += QStringLiteral("cxpCaptureFileTimestamp=") + cxpExportMeta.captureFileTimestamp + QStringLiteral("\n");
-    text += QStringLiteral("cxp2dOutputRoot=") + resolveSegmentCaptureFlatOutputRoot() + QStringLiteral("\n");
+    text += QStringLiteral("exportGroupDir=") + exportGroupDir + QStringLiteral("\n");
     text += QStringLiteral("cxpLeftFileName=") + cxpExportMeta.left.fileName + QStringLiteral("\n");
     text += QStringLiteral("cxpRightFileName=") + cxpExportMeta.right.fileName + QStringLiteral("\n");
     text += QStringLiteral("lbInvoked=") + QString(bundle.lbPoseResult.invoked ? "true" : "false") + QStringLiteral("\n");
@@ -1994,8 +1943,6 @@ void StateMachine::commitScanSegmentCaptureImmediate(
     m_progress = 100;
     publishIpcStatus();
 
-    exportSegmentCxp2dImages(segmentIndex, bundle);
-
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[SegmentCache] 原始点云已入内存（results/bundle 共享同一份点云），立即回写 PLC")
         << QStringLiteral(" [路径") << pathId << QStringLiteral("][段") << segmentIndex << QStringLiteral("]")
@@ -2010,21 +1957,36 @@ void StateMachine::commitScanSegmentCaptureImmediate(
 }
 
 void StateMachine::exportSegmentCxp2dImages(
+    int pathId,
     int segmentIndex,
     const scan_tracking::vision::MultiCameraCaptureBundle& bundle)
 {
-    if (segmentIndex <= 0) {
+    if (pathId <= 0 || segmentIndex <= 0) {
         return;
     }
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
     if (configManager == nullptr || !configManager->segmentCaptureExportConfig().enabled) {
         return;
     }
+    if (!ensureSegmentCaptureExportSessionRoot()) {
+        return;
+    }
 
-    const auto cxpExportMeta = saveSegmentCxp2dImagesToFlatOutput(bundle);
+    const QString groupDir =
+        segmentCaptureExportGroupDirectory(m_segmentCaptureExportSessionRoot, pathId, segmentIndex);
+    if (!ensureDirectoryTreeExists(groupDir)) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[SegmentCaptureExport] 创建段级目录失败：") << groupDir;
+        return;
+    }
+
+    const QString exportGroupId =
+        buildSegmentCaptureExportGroupId(pathId, segmentIndex, bundle.request.requestId);
+    const auto cxpExportMeta =
+        saveSegmentCxp2dImagesToDirectory(bundle, groupDir, exportGroupId);
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[SegmentCaptureExport] 段号=") << segmentIndex
-        << QStringLiteral(" 2D输出目录=") << resolveSegmentCaptureFlatOutputRoot()
+        << QStringLiteral(" 段级目录=") << groupDir
         << QStringLiteral(" 左=")
         << (cxpExportMeta.left.saved ? cxpExportMeta.left.fileName : QStringLiteral("(skip)"))
         << QStringLiteral(" 右=")
@@ -2065,7 +2027,7 @@ void StateMachine::commitBypassScanSegmentCapture(
     m_progress = 100;
     publishIpcStatus();
 
-    exportSegmentCxp2dImages(segmentIndex, bundle);
+    exportSegmentCxp2dImages(pathId, segmentIndex, bundle);
 
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[算法旁路] 采集完成，点云已丢弃不入缓存")
@@ -4723,9 +4685,10 @@ void StateMachine::persistSegmentCaptureExportGroup(
         return;
     }
 
-    SegmentCaptureCxpExportMeta cxpExportMeta = buildCxpExportMetaFromFlatOutput(bundle);
-    cxpExportMeta.exportGroupId =
+    const QString exportGroupId =
         buildSegmentCaptureExportGroupId(pathId, segmentIndex, bundle.request.requestId);
+    SegmentCaptureCxpExportMeta cxpExportMeta =
+        saveSegmentCxp2dImagesToDirectory(bundle, groupDir, exportGroupId);
     cxpExportMeta.sessionRoot = m_segmentCaptureExportSessionRoot;
 
     const QString matrixPath = QDir(groupDir).filePath(QStringLiteral("matrix.txt"));
@@ -4740,6 +4703,7 @@ void StateMachine::persistSegmentCaptureExportGroup(
             buildSegmentCaptureExportMetaText(
                 pathId,
                 segmentIndex,
+                groupDir,
                 bundle,
                 rawPointCloud,
                 comparisonPointCloud,
@@ -4787,7 +4751,7 @@ void StateMachine::persistSegmentCaptureExportGroup(
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[SegmentCaptureExport] 分组已写入") << groupDir
         << QStringLiteral(" group=") << cxpExportMeta.exportGroupId
-        << QStringLiteral(" 2D输出=") << resolveSegmentCaptureFlatOutputRoot()
+        << QStringLiteral(" 段级目录=") << groupDir
         << QStringLiteral(" CXP左=") << (cxpExportMeta.left.saved ? QStringLiteral("OK") : QStringLiteral("FAIL"))
         << QStringLiteral(" CXP右=") << (cxpExportMeta.right.saved ? QStringLiteral("OK") : QStringLiteral("FAIL"))
         << QStringLiteral(" 左pixelMd5=") << cxpExportMeta.left.pixelMd5

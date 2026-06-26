@@ -2,14 +2,14 @@
   "version": "0.2.1",
   "defaults": {
     "project": "app/CMakeLists.txt",
-    "projectTarget": "scan_tracking.exe",
+    "projectTarget": "scan_tracking",
     "name": "scan-tracking (IPC)"
   },
   "configurations": [
     {
       "type": "default",
       "project": "app/CMakeLists.txt",
-      "projectTarget": "scan_tracking.exe",
+      "projectTarget": "scan_tracking",
       "name": "scan-tracking (IPC)",
       "currentDir": "${cmake.buildDirectory}"
     }

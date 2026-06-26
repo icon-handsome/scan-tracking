@@ -91,11 +91,11 @@ struct FlowControlConfig {
     bool retainSegmentPly = true;
 };
 
-/// 每段扫描分组落盘：CXP 左右 2D 图（扁平 output/）+ 矩阵/meta（会话子目录）
+/// 每段扫描分组落盘：Mech PLY + CXP 2D + 矩阵/meta 均写入 output/session_*/pathN_segMM/
 struct SegmentCaptureExportConfig {
     bool enabled = false;
     QString outputRoot = QStringLiteral("output");
-    /// false 时不落盘任何 PLY（段级 raw/stitched、Trig_Inspection 融合点云）；矩阵与 2D 仍按 enabled 落盘
+    /// false 时不落盘任何 PLY（段级 raw/stitched、Trig_Inspection 融合点云）；矩阵、CXP 2D 与 meta 仍按 enabled 落盘
     bool saveRawPointCloud = true;
 };
 

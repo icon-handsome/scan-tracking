@@ -1385,13 +1385,9 @@
   ],
   "executionConfig": {
     "executeAllPaths": false,
-    "description": "路径1-5联调（跳过 path6 缺陷144段）：path1=柱面开孔(7) path2=内表面(19) path3=编号(1) path4=坡口(4) path5=厚度(8)",
+    "description": "路径1单路径联调：path1=柱面开孔(7段)，段级 Mech3D+CXP2D+矩阵落盘",
     "selectedPathIds": [
-      1,
-      2,
-      3,
-      4,
-      5
+      1
     ],
     "pathExecutionOrder": "sequential",
     "allowPathSkipOnError": false
