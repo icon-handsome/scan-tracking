@@ -1,0 +1,31 @@
+路径状态交互（Core → Qt，无需 Qt 新增 cmd）
+
+一、初始化（连接后一次）
+  cmd.get_config → payload.config.scanPaths[]
+    pathId, pathName, inspectionType, totalPoints, enabled
+  status.system → payload.scanPathProgress（断线恢复用）
+
+二、状态快照 status.system.scanPathProgress
+  enabledPathIds[]    本次启用路径
+  currentPathId       进行中路径，全完成为 0
+  currentPathName     进行中路径名
+  completedPathIds[]  已完成路径
+  pathCount           启用路径总数
+  allPathsComplete    是否全部完成
+
+三、事件（按 type 订阅）
+  event.path.started
+    pathId, pathName, pathIndex, pathCount, inspectionType, totalPoints
+
+  event.path.finished（路径扫完，UI 标 ✓）
+    同上 + resultCode=1
+
+  event.scan_paths.all_finished
+    completedPathIds[], pathCount
+
+  event.path.progress_reset
+    reason（如 cache_reset）
+
+四、UI 逻辑
+  started → 进行中；finished → 已完成；progress_reset → 全重置
+  勿用 event.scan.* 的 segmentIndex 推断路径（每路径段号从 1 重计）

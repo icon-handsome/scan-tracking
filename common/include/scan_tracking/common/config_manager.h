@@ -298,6 +298,7 @@ struct ScanPointConfig {
  */
 struct ScanPathConfig {
     int pathId;               // 路径唯一标识符
+    QString pathName;         // 路径显示名称（scan_paths JSON pathName）
     bool enabled;             // 是否启用此路径
     int totalPoints;          // 路径包含的点位总数
     InspectionType inspectionType = InspectionType::Bevel;  // 综合检测算法类型
@@ -358,6 +359,8 @@ public:
     BevelRecipe bevelRecipe() const;
     bool hasActiveBevelRecipe() const;
     InspectionType inspectionTypeForPath(int pathId) const;
+    /// 路径显示名（缺省为「路径{id}」）
+    QString pathNameForPath(int pathId) const;
     QString holeConfigPathForPath(int pathId) const;
     QString thicknessConfigPathForPath(int pathId) const;
     int innerScanSegmentIndexForPath(int pathId) const;

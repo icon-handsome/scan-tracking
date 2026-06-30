@@ -20,6 +20,7 @@
 #include "scan_tracking/common/config_manager.h"
 
 #include <cmath>
+#include <algorithm>
 
 #include <QtNetwork/QTcpServer>
 #include <QtNetwork/QTcpSocket>
@@ -634,6 +635,43 @@ void HmiTcpServer::handleCmdGetConfig(const QJsonObject& message)
     hmiObj[QLatin1String("emitPresetInspectionOnPathsComplete")] =
         cfgMgr->hmiConfig().emitPresetInspectionOnPathsComplete;
     configPayload[QLatin1String("hmi")] = hmiObj;
+
+    QJsonArray scanPathsArray;
+    const auto& pathsConfig = cfgMgr->scanPathsConfig();
+    const QVector<int> enabledIds = [&pathsConfig]() {
+        QVector<int> ids;
+        if (!pathsConfig.selectedPathIds.empty()) {
+            for (int pathId : pathsConfig.selectedPathIds) {
+                ids.append(pathId);
+            }
+        } else {
+            for (const auto& path : pathsConfig.scanPaths) {
+                if (path.enabled) {
+                    ids.append(path.pathId);
+                }
+            }
+        }
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        return ids;
+    }();
+    for (int pathId : enabledIds) {
+        for (const auto& path : pathsConfig.scanPaths) {
+            if (path.pathId != pathId) {
+                continue;
+            }
+            QJsonObject pathObj;
+            pathObj[QLatin1String("pathId")] = path.pathId;
+            pathObj[QLatin1String("pathName")] = cfgMgr->pathNameForPath(path.pathId);
+            pathObj[QLatin1String("inspectionType")] =
+                common::inspectionTypeToString(path.inspectionType);
+            pathObj[QLatin1String("totalPoints")] = path.totalPoints;
+            pathObj[QLatin1String("enabled")] = path.enabled;
+            scanPathsArray.append(pathObj);
+            break;
+        }
+    }
+    configPayload[QLatin1String("scanPaths")] = scanPathsArray;
     
     // 8. LbPose 配置
     QJsonObject lbPoseObj;
@@ -1286,7 +1324,55 @@ QJsonObject HmiTcpServer::buildSystemStatusPayload() const
         }
         payload[QLatin1String("enabledTriggers")] = enabledTriggers;
     }
+    payload[QLatin1String("scanPathProgress")] = buildScanPathProgressPayload();
     return payload;
+}
+
+namespace {
+
+QJsonObject buildScanPathEventPayload(const flow_control::ScanPathEventInfo& info)
+{
+    QJsonObject payload;
+    payload[QLatin1String("pathId")] = info.pathId;
+    payload[QLatin1String("pathName")] = info.pathName;
+    payload[QLatin1String("pathIndex")] = info.pathIndex;
+    payload[QLatin1String("pathCount")] = info.pathCount;
+    payload[QLatin1String("inspectionType")] = info.inspectionType;
+    payload[QLatin1String("totalPoints")] = info.totalPoints;
+    if (info.resultCode > 0) {
+        payload[QLatin1String("resultCode")] = info.resultCode;
+    }
+    return payload;
+}
+
+}  // namespace
+
+QJsonObject HmiTcpServer::buildScanPathProgressPayload() const
+{
+    QJsonObject obj;
+    if (!m_stateMachine) {
+        return obj;
+    }
+
+    const flow_control::ScanPathProgressSnapshot snapshot = m_stateMachine->scanPathProgressSnapshot();
+
+    QJsonArray enabledPathIds;
+    for (int pathId : snapshot.enabledPathIds) {
+        enabledPathIds.append(pathId);
+    }
+
+    QJsonArray completedPathIds;
+    for (int pathId : snapshot.completedPathIds) {
+        completedPathIds.append(pathId);
+    }
+
+    obj[QLatin1String("enabledPathIds")] = enabledPathIds;
+    obj[QLatin1String("currentPathId")] = snapshot.currentPathId;
+    obj[QLatin1String("currentPathName")] = snapshot.currentPathName;
+    obj[QLatin1String("completedPathIds")] = completedPathIds;
+    obj[QLatin1String("pathCount")] = snapshot.pathCount;
+    obj[QLatin1String("allPathsComplete")] = snapshot.allPathsComplete;
+    return obj;
 }
 
 void HmiTcpServer::pushPlcStatus()
@@ -1708,6 +1794,51 @@ void HmiTcpServer::connectStateMachineSignals()
         payload[QLatin1String("imageCount")] = imageCount;
         payload[QLatin1String("cloudFrameCount")] = cloudFrameCount;
         sendToClient(buildEnvelope(QLatin1String(msg_type::kEventScanFinished), nextEventId(), payload));
+    }, Qt::UniqueConnection);
+
+    connect(m_stateMachine, &flow_control::StateMachine::pathStarted, this,
+        [this](const flow_control::ScanPathEventInfo& info) {
+        sendToClient(buildEnvelope(
+            QLatin1String(msg_type::kEventPathStarted),
+            nextEventId(),
+            buildScanPathEventPayload(info)));
+        pushSystemStatus();
+    }, Qt::UniqueConnection);
+
+    connect(m_stateMachine, &flow_control::StateMachine::pathFinished, this,
+        [this](const flow_control::ScanPathEventInfo& info) {
+        sendToClient(buildEnvelope(
+            QLatin1String(msg_type::kEventPathFinished),
+            nextEventId(),
+            buildScanPathEventPayload(info)));
+        pushSystemStatus();
+    }, Qt::UniqueConnection);
+
+    connect(m_stateMachine, &flow_control::StateMachine::scanPathsAllFinished, this,
+        [this](const QVector<int>& completedPathIds, int pathCount) {
+        QJsonObject payload;
+        QJsonArray completedArray;
+        for (int pathId : completedPathIds) {
+            completedArray.append(pathId);
+        }
+        payload[QLatin1String("completedPathIds")] = completedArray;
+        payload[QLatin1String("pathCount")] = pathCount;
+        sendToClient(buildEnvelope(
+            QLatin1String(msg_type::kEventScanPathsAllFinished),
+            nextEventId(),
+            payload));
+        pushSystemStatus();
+    }, Qt::UniqueConnection);
+
+    connect(m_stateMachine, &flow_control::StateMachine::pathProgressReset, this,
+        [this](const QString& reason) {
+        QJsonObject payload;
+        payload[QLatin1String("reason")] = reason;
+        sendToClient(buildEnvelope(
+            QLatin1String(msg_type::kEventPathProgressReset),
+            nextEventId(),
+            payload));
+        pushSystemStatus();
     }, Qt::UniqueConnection);
 
     // TODO(hmi-demo): 综合检测结果改由 TrackingService::deliverInspectionResult → publishInspectionResult 直推，

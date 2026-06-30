@@ -3,6 +3,7 @@
 #include <QtCore/QMap>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QObject>
+#include <QtCore/QSet>
 #include <QtCore/QTimer>
 #include <QtCore/QVector>
 #include <QtCore/QtGlobal>
@@ -59,6 +60,27 @@ struct SegmentProcessOutcome {
     QString errorMessage;
     scan_tracking::mech_eye::CaptureResult captureResult;
     std::unique_ptr<scan_tracking::vision::MultiCameraCaptureBundle> bundle;
+};
+
+/// HMI 路径级进度事件字段（event.path.*）
+struct ScanPathEventInfo {
+    int pathId = 0;
+    QString pathName;
+    int pathIndex = 0;       ///< 在 enabledPathIds 中的序号，1-based
+    int pathCount = 0;       ///< 本次任务启用路径总数
+    QString inspectionType;  ///< snake_case，如 hole / bevel
+    int totalPoints = 0;
+    quint16 resultCode = 0;  ///< finished 时 1=成功
+};
+
+/// HMI status.system.scanPathProgress 快照
+struct ScanPathProgressSnapshot {
+    QVector<int> enabledPathIds;
+    int currentPathId = 0;
+    QString currentPathName;
+    QVector<int> completedPathIds;
+    int pathCount = 0;
+    bool allPathsComplete = false;
 };
 
 // 应用状态枚举
@@ -185,6 +207,9 @@ public:
 
     bool isSelfCheckSessionActive() const { return m_selfCheckSessionActive; }
 
+    /// 供 HMI status.system.scanPathProgress 使用的路径进度快照
+    ScanPathProgressSnapshot scanPathProgressSnapshot() const;
+
 signals:
     // 状态改变信号
     // @param newState 新的状态
@@ -201,6 +226,18 @@ signals:
 
     /// 扫描分段完成
     void scanFinished(int segmentIndex, quint16 resultCode, int imageCount, int cloudFrameCount);
+
+    /// 扫描路径开始（该路径首段 Trig_ScanSegment）
+    void pathStarted(const ScanPathEventInfo& info);
+
+    /// 扫描路径完成（该路径全部段缓存成功）
+    void pathFinished(const ScanPathEventInfo& info);
+
+    /// 所有启用路径扫描完成
+    void scanPathsAllFinished(const QVector<int>& completedPathIds, int pathCount);
+
+    /// 路径进度复位（Trig_ResultReset / 缓存清空）
+    void pathProgressReset(const QString& reason);
 
     /// 综合检测完成
     void inspectionFinished(quint16 resultCode, quint16 ngReasonWord0, quint16 ngReasonWord1,
@@ -564,6 +601,12 @@ private:
     bool isFirstPathStepPauseBlocking(QString* errorMessage) const;
     void clearFirstPathStepPauseLatch();
 
+    ScanPathEventInfo buildScanPathEventInfo(int pathId, quint16 resultCode = 0) const;
+    bool isPathCompleteForProgress(int pathId) const;
+    void maybeEmitPathStarted(int pathId);
+    void maybeEmitPathFinished(int pathId);
+    void clearPathProgressTracking(const QString& resetReason);
+
     void persistSegmentCaptureExportGroup(
         int pathId,
         int segmentIndex,
@@ -708,6 +751,9 @@ private:
     QMap<int, QMap<int, scan_tracking::vision::MultiCameraCaptureBundle>> m_pathSegmentCaptureBundles;  // 多路径视觉 bundle
     int m_currentPathId = 1;                                // 当前路径ID（自动递增）
     QSet<int> m_currentPathSegments;                        // 当前路径已缓存的段号集合（用于检测重复）
+    QSet<int> m_emittedPathStarted;                         // 本工件已推送 path.started 的路径
+    QSet<int> m_emittedPathFinished;                        // 本工件已推送 path.finished 的路径
+    bool m_emittedAllPathsFinished = false;                 // 本工件已推送 scan_paths.all_finished
     bool m_firstPathStepPauseLatched = false;               // 路径1联调：已达暂停点，拒绝后续扫描
     int m_firstPathStepPauseAtSegment = 0;                  // 路径1联调：已暂停的点位号
     mutable std::mutex m_segmentCacheMutex;

@@ -41,6 +41,7 @@ namespace scan_tracking::flow_control {
 
 // 定义流程控制模块的日志分类
 Q_LOGGING_CATEGORY(LOG_FLOW, "flow_control")
+Q_DECLARE_METATYPE(scan_tracking::flow_control::ScanPathEventInfo)
 
 namespace {
 
@@ -1205,6 +1206,7 @@ StateMachine::~StateMachine()
  */
 void StateMachine::start()
 {
+    qRegisterMetaType<scan_tracking::flow_control::ScanPathEventInfo>("ScanPathEventInfo");
     qInfo(LOG_FLOW) << QStringLiteral("状态机启动。");
     if (isAlgorithmBypassEnabled()) {
         qWarning(LOG_FLOW).noquote()
@@ -2091,6 +2093,7 @@ void StateMachine::commitScanSegmentCaptureImmediate(
     emit scanFinished(segmentIndex, 1, imageCount, cloudFrameCount);
 
     maybeLatchFirstPathStepPause(pathId, segmentIndex);
+    maybeEmitPathFinished(pathId);
 }
 
 void StateMachine::exportSegmentCxp2dImages(
@@ -2177,6 +2180,7 @@ void StateMachine::commitBypassScanSegmentCapture(
     emit scanFinished(segmentIndex, 1, imageCount, cloudFrameCount);
 
     maybeLatchFirstPathStepPause(pathId, segmentIndex);
+    maybeEmitPathFinished(pathId);
 }
 
 void StateMachine::registerRefinementJob()
@@ -2596,6 +2600,150 @@ bool StateMachine::isPathScanComplete(int pathId) const
         }
     }
     return true;
+}
+
+ScanPathEventInfo StateMachine::buildScanPathEventInfo(int pathId, quint16 resultCode) const
+{
+    ScanPathEventInfo info;
+    info.pathId = pathId;
+    info.resultCode = resultCode;
+    info.totalPoints = segmentTotalForPath(pathId);
+
+    const QVector<int> pathIds = enabledScanPathIds();
+    info.pathCount = pathIds.size();
+    const int index = pathIds.indexOf(pathId);
+    info.pathIndex = index >= 0 ? index + 1 : 0;
+
+    const auto* configMgr = scan_tracking::common::ConfigManager::instance();
+    if (configMgr != nullptr) {
+        info.pathName = configMgr->pathNameForPath(pathId);
+        info.inspectionType =
+            scan_tracking::common::inspectionTypeToString(configMgr->inspectionTypeForPath(pathId));
+    } else {
+        info.pathName = QStringLiteral("路径%1").arg(pathId);
+        info.inspectionType = QStringLiteral("bevel");
+    }
+    return info;
+}
+
+bool StateMachine::isPathCompleteForProgress(int pathId) const
+{
+    if (pathId <= 0 || pathId == kSelfCheckCacheBucketId) {
+        return false;
+    }
+    if (isAlgorithmBypassEnabled()) {
+        return pathId == m_currentPathId && isCurrentPathSegmentSetComplete();
+    }
+    return isPathScanComplete(pathId);
+}
+
+void StateMachine::maybeEmitPathStarted(int pathId)
+{
+    if (m_selfCheckSessionActive || pathId <= 0 || pathId == kSelfCheckCacheBucketId) {
+        return;
+    }
+
+    const QVector<int> pathIds = enabledScanPathIds();
+    if (!pathIds.contains(pathId) || m_emittedPathStarted.contains(pathId)) {
+        return;
+    }
+
+    m_emittedPathStarted.insert(pathId);
+    const ScanPathEventInfo info = buildScanPathEventInfo(pathId);
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[HMI路径] 开始 pathId=") << info.pathId
+        << QStringLiteral(" name=") << info.pathName
+        << QStringLiteral(" index=") << info.pathIndex << QLatin1Char('/') << info.pathCount;
+    emit pathStarted(info);
+}
+
+void StateMachine::maybeEmitPathFinished(int pathId)
+{
+    if (m_selfCheckSessionActive || pathId <= 0 || pathId == kSelfCheckCacheBucketId) {
+        return;
+    }
+
+    if (!isPathCompleteForProgress(pathId) || m_emittedPathFinished.contains(pathId)) {
+        return;
+    }
+
+    m_emittedPathFinished.insert(pathId);
+    ScanPathEventInfo info = buildScanPathEventInfo(pathId, 1);
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[HMI路径] 完成 pathId=") << info.pathId
+        << QStringLiteral(" name=") << info.pathName
+        << QStringLiteral(" index=") << info.pathIndex << QLatin1Char('/') << info.pathCount;
+    emit pathFinished(info);
+
+    const QVector<int> pathIds = enabledScanPathIds();
+    if (pathIds.isEmpty() || m_emittedAllPathsFinished) {
+        return;
+    }
+
+    QVector<int> completedPathIds;
+    completedPathIds.reserve(pathIds.size());
+    bool allDone = true;
+    for (int id : pathIds) {
+        if (isPathCompleteForProgress(id)) {
+            completedPathIds.append(id);
+        } else {
+            allDone = false;
+        }
+    }
+
+    if (allDone) {
+        m_emittedAllPathsFinished = true;
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[HMI路径] 全部启用路径扫描完成，共") << pathIds.size() << QStringLiteral("条");
+        emit scanPathsAllFinished(completedPathIds, pathIds.size());
+    }
+}
+
+void StateMachine::clearPathProgressTracking(const QString& resetReason)
+{
+    m_emittedPathStarted.clear();
+    m_emittedPathFinished.clear();
+    m_emittedAllPathsFinished = false;
+    if (!resetReason.isEmpty()) {
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[HMI路径] 进度复位 reason=") << resetReason;
+        emit pathProgressReset(resetReason);
+    }
+}
+
+ScanPathProgressSnapshot StateMachine::scanPathProgressSnapshot() const
+{
+    ScanPathProgressSnapshot snapshot;
+    snapshot.enabledPathIds = enabledScanPathIds();
+    snapshot.pathCount = snapshot.enabledPathIds.size();
+
+    if (m_selfCheckSessionActive || snapshot.pathCount == 0) {
+        return snapshot;
+    }
+
+    for (int pathId : snapshot.enabledPathIds) {
+        if (isPathCompleteForProgress(pathId)) {
+            snapshot.completedPathIds.append(pathId);
+        }
+    }
+
+    snapshot.allPathsComplete =
+        snapshot.pathCount > 0 && snapshot.completedPathIds.size() == snapshot.pathCount;
+
+    if (snapshot.allPathsComplete) {
+        snapshot.currentPathId = 0;
+        snapshot.currentPathName.clear();
+        return snapshot;
+    }
+
+    snapshot.currentPathId = m_currentPathId > 0 ? m_currentPathId : snapshot.enabledPathIds.front();
+    const auto* configMgr = scan_tracking::common::ConfigManager::instance();
+    if (configMgr != nullptr) {
+        snapshot.currentPathName = configMgr->pathNameForPath(snapshot.currentPathId);
+    } else {
+        snapshot.currentPathName = QStringLiteral("路径%1").arg(snapshot.currentPathId);
+    }
+    return snapshot;
 }
 
 bool StateMachine::hasPathReadyForInspection() const
@@ -4328,6 +4476,7 @@ void StateMachine::resetScanSegmentCache()
     m_currentPathId = 1;
     m_currentPathSegments.clear();
     clearFirstPathStepPauseLatch();
+    clearPathProgressTracking(QStringLiteral("cache_reset"));
 
     if (totalCacheSize > 0) {
         qInfo(LOG_FLOW).noquote()

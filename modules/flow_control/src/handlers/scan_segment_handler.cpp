@@ -109,6 +109,7 @@ void StateMachine::executeScanSegmentTask()
         << QStringLiteral(" 段总数=") << m_activeTask.scanSegmentTotal
         << QStringLiteral(" 需梅卡2D=") << needMechEye2D
         << QStringLiteral(" 超时ms=") << captureTimeoutMs;
+    maybeEmitPathStarted(pathIdForCapture);
     emit scanStarted(m_activeTask.scanSegmentIndex, m_activeTask.taskId);
 }
 

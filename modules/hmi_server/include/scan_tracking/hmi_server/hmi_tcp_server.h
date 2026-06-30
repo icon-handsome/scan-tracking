@@ -200,6 +200,8 @@ private:
     void pushSystemStatus();
 
     QJsonObject buildSystemStatusPayload() const;
+
+    QJsonObject buildScanPathProgressPayload() const;
     
     /// 向 Qt 端周期性推送 PLC 连接状态及内部部分寄存器运行状态
     void pushPlcStatus();

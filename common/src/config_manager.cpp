@@ -272,6 +272,16 @@ InspectionType ConfigManager::inspectionTypeForPath(int pathId) const
     return InspectionType::Bevel;
 }
 
+QString ConfigManager::pathNameForPath(int pathId) const
+{
+    for (const ScanPathConfig& path : m_scanPathsConfig.scanPaths) {
+        if (path.pathId == pathId) {
+            return path.pathName.isEmpty() ? QStringLiteral("路径%1").arg(pathId) : path.pathName;
+        }
+    }
+    return QStringLiteral("路径%1").arg(pathId);
+}
+
 QString ConfigManager::holeConfigPathForPath(int pathId) const
 {
     for (const ScanPathConfig& path : m_scanPathsConfig.scanPaths) {
@@ -1074,6 +1084,10 @@ void ConfigManager::loadScanPathsConfig(const QString& jsonFilePath)
         
         ScanPathConfig pathConfig;
         pathConfig.pathId = pathObj.value("pathId").toInt();
+        pathConfig.pathName = pathObj.value("pathName").toString().trimmed();
+        if (pathConfig.pathName.isEmpty()) {
+            pathConfig.pathName = QStringLiteral("路径%1").arg(pathConfig.pathId);
+        }
         pathConfig.enabled = pathObj.value("enabled").toBool(true);
         pathConfig.totalPoints = pathObj.value("totalPoints").toInt();
         pathConfig.inspectionType = inspectionTypeFromString(
