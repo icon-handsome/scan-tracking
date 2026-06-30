@@ -23,6 +23,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QTextStream>
+#include <QtCore/QRegularExpression>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -434,6 +435,142 @@ QString buildSegmentCaptureExportGroupId(int pathId, int segmentIndex, quint64 r
         .arg(pathId)
         .arg(segmentIndex, 2, 10, QChar('0'))
         .arg(requestId);
+}
+
+bool loadMergedPointCloudFromSessionExport(
+    const QString& sessionRoot,
+    int pathId,
+    const QString& plyFileName,
+    scan_tracking::mech_eye::PointCloudFrame* outCloud,
+    int* totalPointCount,
+    int* segmentCount,
+    QString* errorMessage)
+{
+    if (outCloud == nullptr) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("离线回放失败：输出点云指针为空。");
+        }
+        return false;
+    }
+
+    const QFileInfo sessionInfo(sessionRoot);
+    if (!sessionInfo.exists() || !sessionInfo.isDir()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("离线回放失败：session 目录不存在：%1").arg(sessionRoot);
+        }
+        return false;
+    }
+
+    struct SegmentEntry {
+        int segmentIndex = 0;
+        QString groupDir;
+    };
+    QList<SegmentEntry> segments;
+
+    const QRegularExpression dirPattern(
+        QStringLiteral("^path(%1)_seg(\\d+)$").arg(pathId));
+    const QDir sessionDir(sessionInfo.absoluteFilePath());
+    const QStringList entries =
+        sessionDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QString& entryName : entries) {
+        const QRegularExpressionMatch match = dirPattern.match(entryName);
+        if (!match.hasMatch()) {
+            continue;
+        }
+        SegmentEntry entry;
+        entry.segmentIndex = match.captured(2).toInt();
+        entry.groupDir = sessionDir.filePath(entryName);
+        segments.append(entry);
+    }
+
+    if (segments.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral(
+                "离线回放失败：session 中未找到 path%1_seg* 目录：%2").arg(pathId).arg(sessionRoot);
+        }
+        return false;
+    }
+
+    std::sort(segments.begin(), segments.end(), [](const SegmentEntry& a, const SegmentEntry& b) {
+        return a.segmentIndex < b.segmentIndex;
+    });
+
+    auto mergedPoints = std::make_shared<std::vector<float>>();
+    int mergedPointCount = 0;
+    int mergedSegmentCount = 0;
+
+    for (const SegmentEntry& entry : segments) {
+        const QString plyPath = QDir(entry.groupDir).filePath(plyFileName);
+        if (!QFileInfo::exists(plyPath)) {
+            if (errorMessage != nullptr) {
+                *errorMessage = QStringLiteral("离线回放失败：缺少点云文件：%1").arg(plyPath);
+            }
+            return false;
+        }
+
+        scan_tracking::mech_eye::PointCloudFrame segmentCloud;
+        if (!scan_tracking::mech_eye::loadPointCloudFrameFromPly(plyPath, &segmentCloud)) {
+            if (errorMessage != nullptr) {
+                *errorMessage = QStringLiteral("离线回放失败：无法加载点云：%1").arg(plyPath);
+            }
+            return false;
+        }
+        if (!segmentCloud.isValid() || !segmentCloud.pointsXYZ || segmentCloud.pointCount <= 0) {
+            if (errorMessage != nullptr) {
+                *errorMessage = QStringLiteral("离线回放失败：点云无效：%1").arg(plyPath);
+            }
+            return false;
+        }
+
+        const int availablePointCount =
+            static_cast<int>(segmentCloud.pointsXYZ->size() / 3);
+        const int pointCount = std::min(segmentCloud.pointCount, availablePointCount);
+        if (pointCount <= 0) {
+            if (errorMessage != nullptr) {
+                *errorMessage = QStringLiteral("离线回放失败：点云无有效点：%1").arg(plyPath);
+            }
+            return false;
+        }
+
+        mergedPoints->reserve(
+            mergedPoints->size() + static_cast<std::size_t>(pointCount * 3));
+        for (int index = 0; index < pointCount; ++index) {
+            const auto base = static_cast<std::size_t>(index * 3);
+            mergedPoints->push_back((*segmentCloud.pointsXYZ)[base]);
+            mergedPoints->push_back((*segmentCloud.pointsXYZ)[base + 1]);
+            mergedPoints->push_back((*segmentCloud.pointsXYZ)[base + 2]);
+        }
+
+        mergedPointCount += pointCount;
+        ++mergedSegmentCount;
+
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[Hole] 离线回放已加载段") << entry.segmentIndex
+            << QStringLiteral(" 点数=") << pointCount
+            << QStringLiteral(" 文件=") << plyPath;
+    }
+
+    if (mergedPointCount <= 0 || mergedSegmentCount <= 0) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("离线回放失败：合并点云为空。");
+        }
+        return false;
+    }
+
+    scan_tracking::mech_eye::PointCloudFrame mergedCloud;
+    mergedCloud.pointsXYZ = std::move(mergedPoints);
+    mergedCloud.pointCount = mergedPointCount;
+    mergedCloud.width = mergedPointCount;
+    mergedCloud.height = 1;
+
+    *outCloud = std::move(mergedCloud);
+    if (totalPointCount != nullptr) {
+        *totalPointCount = mergedPointCount;
+    }
+    if (segmentCount != nullptr) {
+        *segmentCount = mergedSegmentCount;
+    }
+    return true;
 }
 
 SegmentCaptureCxpImageMeta buildCxpImageMetaFromCapture(
@@ -3146,6 +3283,176 @@ tracking::InspectionResult StateMachine::runDebugInspectionOnCachedSegments() co
 
     return m_tracking->inspectPointCloud(
         mergedCloud, totalPointCount, inspectPathId, false);
+}
+
+tracking::InspectionResult StateMachine::runOfflineHoleInspectionFromSavedSession()
+{
+    tracking::InspectionResult failure;
+    failure.resultCode = 2;
+    failure.ngReasonWord0 = (1u << 4);
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr) {
+        failure.message = QStringLiteral("离线回放失败：ConfigManager 不可用。");
+        return failure;
+    }
+
+    const auto& holeConfig = configManager->holeConfig();
+    if (!holeConfig.offlineReplayEnabled) {
+        failure.message = QStringLiteral("离线回放未启用（[Hole] offlineReplayEnabled=false）。");
+        return failure;
+    }
+
+    if (holeConfig.offlineReplaySessionDir.trimmed().isEmpty()) {
+        failure.message = QStringLiteral("离线回放失败：未配置 offlineReplaySessionDir。");
+        return failure;
+    }
+
+    if (m_tracking == nullptr) {
+        failure.message = QStringLiteral("离线回放失败：Tracking 服务不可用。");
+        return failure;
+    }
+
+    const int pathId = holeConfig.offlineReplayPathId;
+    const auto inspectionType = configManager->inspectionTypeForPath(pathId);
+    if (inspectionType != scan_tracking::common::InspectionType::Hole) {
+        failure.message = QStringLiteral(
+            "离线回放失败：路径 %1 的 inspectionType 不是 hole。").arg(pathId);
+        return failure;
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Hole] 离线回放开始 pathId=") << pathId
+        << QStringLiteral(" session=") << holeConfig.offlineReplaySessionDir
+        << QStringLiteral(" ply=") << holeConfig.offlineReplayPlyFileName;
+
+    QString loadError;
+    scan_tracking::mech_eye::PointCloudFrame mergedCloud;
+    int totalPointCount = 0;
+    int segmentCount = 0;
+    if (!loadMergedPointCloudFromSessionExport(
+            holeConfig.offlineReplaySessionDir,
+            pathId,
+            holeConfig.offlineReplayPlyFileName,
+            &mergedCloud,
+            &totalPointCount,
+            &segmentCount,
+            &loadError)) {
+        failure.message = loadError.isEmpty()
+            ? QStringLiteral("离线回放失败：无法加载 session 点云。")
+            : loadError;
+        qWarning(LOG_FLOW).noquote() << failure.message;
+        return failure;
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Hole] 离线回放点云已合并 段数=") << segmentCount
+        << QStringLiteral(" 总点数=") << totalPointCount;
+
+    const tracking::InspectionResult result =
+        m_tracking->inspectPointCloud(mergedCloud, totalPointCount, pathId, false);
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Hole] 离线回放完成 resultCode=") << result.resultCode
+        << QStringLiteral(" message=") << result.message;
+
+    emit inspectionFinished(
+        result.resultCode,
+        result.ngReasonWord0,
+        result.ngReasonWord1,
+        result.measureItemCount,
+        result.measurement,
+        result.message);
+
+    return result;
+}
+
+tracking::InspectionResult StateMachine::runOfflineInternalSurfaceInspectionFromFile(
+    bool emitInspectionSignal)
+{
+    tracking::InspectionResult failure;
+    failure.resultCode = 2;
+    failure.ngReasonWord0 = (1u << 4);
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr) {
+        failure.message = QStringLiteral("离线回放失败：ConfigManager 不可用。");
+        return failure;
+    }
+
+    const auto& surfaceConfig = configManager->internalSurfaceConfig();
+    if (!surfaceConfig.offlineReplayEnabled) {
+        failure.message =
+            QStringLiteral("离线回放未启用（[InternalSurface] offlineReplayEnabled=false）。");
+        return failure;
+    }
+
+    if (surfaceConfig.offlineReplayPointCloudPath.trimmed().isEmpty()) {
+        failure.message = QStringLiteral("离线回放失败：未配置 offlineReplayPointCloudPath。");
+        return failure;
+    }
+
+    if (m_tracking == nullptr) {
+        failure.message = QStringLiteral("离线回放失败：Tracking 服务不可用。");
+        return failure;
+    }
+
+    const int pathId = surfaceConfig.offlineReplayPathId;
+    const auto inspectionType = configManager->inspectionTypeForPath(pathId);
+    if (inspectionType != scan_tracking::common::InspectionType::InternalSurface) {
+        failure.message = QStringLiteral(
+            "离线回放失败：路径 %1 的 inspectionType 不是 internal_surface。").arg(pathId);
+        return failure;
+    }
+
+    const QString cloudPath = surfaceConfig.offlineReplayPointCloudPath;
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[InternalSurface] 离线回放开始 pathId=") << pathId
+        << QStringLiteral(" cloud=") << cloudPath;
+
+    if (!QFileInfo::exists(cloudPath)) {
+        failure.message = QStringLiteral("离线回放失败：点云文件不存在：%1").arg(cloudPath);
+        qWarning(LOG_FLOW).noquote() << failure.message;
+        return failure;
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[InternalSurface] 离线回放从文件执行测量（不加载整帧到内存）");
+
+    const tracking::InspectionResult result =
+        m_tracking->inspectInternalSurfaceFromScanFile(cloudPath, pathId, false);
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[InternalSurface] 离线回放完成 resultCode=") << result.resultCode
+        << QStringLiteral(" message=") << result.message;
+
+    if (emitInspectionSignal) {
+        emit inspectionFinished(
+            result.resultCode,
+            result.ngReasonWord0,
+            result.ngReasonWord1,
+            result.measureItemCount,
+            result.measurement,
+            result.message);
+    }
+
+    return result;
+}
+
+void StateMachine::deliverOfflineInternalSurfaceInspectionResult(
+    const tracking::InspectionResult& result)
+{
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[InternalSurface] 离线回放完成 resultCode=") << result.resultCode
+        << QStringLiteral(" message=") << result.message;
+
+    emit inspectionFinished(
+        result.resultCode,
+        result.ngReasonWord0,
+        result.ngReasonWord1,
+        result.measureItemCount,
+        result.measurement,
+        result.message);
 }
 
 /**

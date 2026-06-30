@@ -58,10 +58,21 @@ QString buildComparisonPlyPath(
 bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absolutePath);
 
 /**
+ * @brief 将 TXT 点云（每行 x y z）流式转换为 binary PLY，避免整帧驻留内存
+ */
+bool convertTxtPointCloudToPly(const QString& txtPath, const QString& plyPath);
+
+/**
  * @brief 从 PLY 文件加载点云
  * @note 支持 binary_little_endian 与 legacy ASCII；可识别 x,y,z 或 x,y,z,nx,ny,nz 属性
  */
 bool loadPointCloudFrameFromPly(const QString& absolutePath, PointCloudFrame* outFrame);
+
+/**
+ * @brief 从 TXT 文件加载点云（每行 x y z，空格分隔）
+ * @note 跳过空行与无效点；不读取法向
+ */
+bool loadPointCloudFrameFromTxt(const QString& absolutePath, PointCloudFrame* outFrame);
 
 /**
  * @brief 释放 PointCloudFrame 中的大数组，保留 pointCount/width/height 等元数据

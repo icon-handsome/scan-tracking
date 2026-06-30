@@ -1,0 +1,90 @@
+=== tasklist /FI "IMAGENAME eq scan-tracking.exe" ===
+��Ϣ: û�����е�����ƥ��ָ����׼��
+=== dir D:\work\LY\deploy_debug\logs ===
+ ������ D �еľ��� Software
+ �������к��� 64C7-3C13
+
+ D:\work\LY\deploy_debug\logs ��Ŀ¼
+
+2026/06/26  16:20    <DIR>          .
+2026/06/26  16:20    <DIR>          ..
+2026/06/22  21:33         1,966,854 scan_tracking_2026-06-22.txt
+2026/06/23  17:43         2,451,455 scan_tracking_2026-06-23.txt
+2026/06/24  20:46         3,032,260 scan_tracking_2026-06-24.txt
+2026/06/25  10:45           906,620 scan_tracking_2026-06-25.txt
+2026/06/26  16:20           297,765 scan_tracking_2026-06-26.txt
+2026/06/22  16:43            48,615 scan_tracking_run_2026-06-22_16-41-04.txt
+2026/06/22  16:48            25,549 scan_tracking_run_2026-06-22_16-48-27.txt
+2026/06/22  16:49            21,548 scan_tracking_run_2026-06-22_16-48-57.txt
+2026/06/22  17:01            21,501 scan_tracking_run_2026-06-22_16-57-16.txt
+2026/06/22  17:02            21,366 scan_tracking_run_2026-06-22_17-02-11.txt
+2026/06/22  17:06            17,842 scan_tracking_run_2026-06-22_17-06-33.txt
+2026/06/22  17:26            46,926 scan_tracking_run_2026-06-22_17-24-20.txt
+2026/06/22  18:00            17,442 scan_tracking_run_2026-06-22_17-50-56.txt
+2026/06/22  18:27            26,978 scan_tracking_run_2026-06-22_18-20-00.txt
+2026/06/22  18:36            27,878 scan_tracking_run_2026-06-22_18-29-50.txt
+2026/06/22  18:47            15,931 scan_tracking_run_2026-06-22_18-47-39.txt
+2026/06/22  18:54            26,997 scan_tracking_run_2026-06-22_18-48-53.txt
+2026/06/22  18:56            41,163 scan_tracking_run_2026-06-22_18-54-51.txt
+2026/06/22  19:10            16,289 scan_tracking_run_2026-06-22_19-10-14.txt
+2026/06/22  19:37           183,882 scan_tracking_run_2026-06-22_19-10-57.txt
+2026/06/22  19:56           180,453 scan_tracking_run_2026-06-22_19-44-13.txt
+2026/06/22  20:19           180,932 scan_tracking_run_2026-06-22_20-01-27.txt
+2026/06/22  20:23           181,716 scan_tracking_run_2026-06-22_20-21-01.txt
+2026/06/22  20:48           185,072 scan_tracking_run_2026-06-22_20-24-47.txt
+2026/06/22  21:33             9,654 scan_tracking_run_2026-06-22_21-33-03.txt
+2026/06/22  21:33             9,654 scan_tracking_run_2026-06-22_21-33-30.txt
+2026/06/23  09:47            16,928 scan_tracking_run_2026-06-23_09-47-06.txt
+2026/06/23  10:40            45,858 scan_tracking_run_2026-06-23_10-35-38.txt
+2026/06/23  11:56           187,198 scan_tracking_run_2026-06-23_11-33-25.txt
+2026/06/23  14:17           169,536 scan_tracking_run_2026-06-23_14-15-40.txt
+2026/06/23  16:34            13,802 scan_tracking_run_2026-06-23_16-34-05.txt
+2026/06/23  16:34            13,802 scan_tracking_run_2026-06-23_16-34-25.txt
+2026/06/23  17:43         2,005,834 scan_tracking_run_2026-06-23_16-41-00.txt
+2026/06/24  11:14            15,267 scan_tracking_run_2026-06-24_11-03-01.txt
+2026/06/24  12:14            12,871 scan_tracking_run_2026-06-24_12-14-03.txt
+2026/06/24  12:18            15,629 scan_tracking_run_2026-06-24_12-18-16.txt
+2026/06/24  12:25            15,629 scan_tracking_run_2026-06-24_12-24-52.txt
+2026/06/24  12:27            15,270 scan_tracking_run_2026-06-24_12-27-19.txt
+2026/06/24  14:24           402,198 scan_tracking_run_2026-06-24_13-49-58.txt
+2026/06/24  15:03           371,107 scan_tracking_run_2026-06-24_14-25-38.txt
+2026/06/24  15:41           417,763 scan_tracking_run_2026-06-24_15-04-02.txt
+2026/06/24  17:27           433,669 scan_tracking_run_2026-06-24_16-20-22.txt
+2026/06/24  17:54            29,020 scan_tracking_run_2026-06-24_17-28-29.txt
+2026/06/24  18:11            27,354 scan_tracking_run_2026-06-24_17-54-45.txt
+2026/06/24  18:30            21,409 scan_tracking_run_2026-06-24_18-23-41.txt
+2026/06/24  19:02           413,323 scan_tracking_run_2026-06-24_18-30-32.txt
+2026/06/24  20:01           427,459 scan_tracking_run_2026-06-24_19-18-14.txt
+2026/06/24  20:46           417,683 scan_tracking_run_2026-06-24_20-19-38.txt
+2026/06/25  09:05            16,631 scan_tracking_run_2026-06-25_09-05-37.txt
+2026/06/25  09:49           413,404 scan_tracking_run_2026-06-25_09-05-54.txt
+2026/06/25  10:09            43,651 scan_tracking_run_2026-06-25_09-49-53.txt
+2026/06/25  10:45           433,729 scan_tracking_run_2026-06-25_10-13-08.txt
+2026/06/26  11:44            17,728 scan_tracking_run_2026-06-26_11-22-11.txt
+2026/06/26  12:12           185,149 scan_tracking_run_2026-06-26_11-51-28.txt
+2026/06/26  14:09            15,010 scan_tracking_run_2026-06-26_14-08-57.txt
+2026/06/26  14:09            12,219 scan_tracking_run_2026-06-26_14-09-35.txt
+2026/06/26  14:56            16,463 scan_tracking_run_2026-06-26_14-56-20.txt
+2026/06/26  16:03            13,382 scan_tracking_run_2026-06-26_16-03-08.txt
+2026/06/26  16:03            13,382 scan_tracking_run_2026-06-26_16-03-34.txt
+2026/06/26  16:04            13,021 scan_tracking_run_2026-06-26_16-04-15.txt
+2026/06/26  16:20            13,021 scan_tracking_run_2026-06-26_16-20-03.txt
+              61 ���ļ�     16,657,741 �ֽ�
+               2 ��Ŀ¼ 155,329,785,856 �����ֽ�
+=== findstr InternalSurface D:\work\LY\deploy_debug\logs\scan_tracking_2026-06-26.txt ===
+[2026-06-26 16:03:08.616] [INF] [config] [InternalSurface] 离线回放已启用 pathId= 2  cloud= D:/work/LY/deploy_debug/testdata/neibiaomiao/inner_surface_full.txt  delayMs= 5000
+[2026-06-26 16:03:10.252] [INF] [app] [InternalSurface] 离线回放已调度： 5000 ms 后加载点云并执行内表面检测；关闭请设 offlineReplayEnabled=false
+[2026-06-26 16:03:15.266] [INF] [flow_control] [InternalSurface] 离线回放开始 pathId= 2  cloud= D:/work/LY/deploy_debug/testdata/neibiaomiao/inner_surface_full.txt
+[2026-06-26 16:03:18.056] [INF] [flow_control] [InternalSurface] 离线回放点云已加载 总点数= 271871
+[2026-06-26 16:03:34.441] [INF] [config] [InternalSurface] 离线回放已启用 pathId= 2  cloud= D:/work/LY/deploy_debug/testdata/neibiaomiao/inner_surface_full.txt  delayMs= 5000
+[2026-06-26 16:03:36.088] [INF] [app] [InternalSurface] 离线回放已调度： 5000 ms 后加载点云并执行内表面检测；关闭请设 offlineReplayEnabled=false
+[2026-06-26 16:03:41.091] [INF] [flow_control] [InternalSurface] 离线回放开始 pathId= 2  cloud= D:/work/LY/deploy_debug/testdata/neibiaomiao/inner_surface_full.txt
+[2026-06-26 16:03:43.685] [INF] [flow_control] [InternalSurface] 离线回放点云已加载 总点数= 271871
+[2026-06-26 16:04:15.453] [INF] [config] [InternalSurface] 离线回放已启用 pathId= 2  cloud= D:/work/LY/deploy_debug/testdata/neibiaomiao/inner_surface_full.txt  delayMs= 5000
+[2026-06-26 16:04:17.073] [INF] [app] [InternalSurface] 离线回放已调度： 5000 ms 后加载点云并执行内表面检测；关闭请设 offlineReplayEnabled=false
+[2026-06-26 16:04:22.088] [INF] [flow_control] [InternalSurface] 离线回放开始 pathId= 2  cloud= D:/work/LY/deploy_debug/testdata/neibiaomiao/inner_surface_full.txt
+[2026-06-26 16:04:24.705] [INF] [flow_control] [InternalSurface] 离线回放点云已加载 总点数= 271871
+[2026-06-26 16:20:03.969] [INF] [config] [InternalSurface] 离线回放已启用 pathId= 2  cloud= D:/work/LY/deploy_debug/testdata/neibiaomiao/inner_surface_full.txt  delayMs= 5000
+[2026-06-26 16:20:05.642] [INF] [app] [InternalSurface] 离线回放已调度： 5000 ms 后加载点云并执行内表面检测；关闭请设 offlineReplayEnabled=false
+[2026-06-26 16:20:10.645] [INF] [flow_control] [InternalSurface] 离线回放开始 pathId= 2  cloud= D:/work/LY/deploy_debug/testdata/neibiaomiao/inner_surface_full.txt
+[2026-06-26 16:20:13.274] [INF] [flow_control] [InternalSurface] 离线回放点云已加载 总点数= 271871

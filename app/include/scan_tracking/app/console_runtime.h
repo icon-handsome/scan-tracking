@@ -12,6 +12,9 @@
 
 #include <QtCore/QCoreApplication>
 #include <memory>
+#include <thread>
+
+#include <QtCore/QMetaObject>
 
 class QTimer;
 
@@ -69,6 +72,14 @@ private:
 
     void stopAutoLatencyBundleTest();
 
+    /* [Hole] 离线回放：启动后从 session 目录加载点云并跑 Hole 检测 */
+    void scheduleOfflineHoleReplay();
+    void triggerOfflineHoleReplay();
+
+    /* [InternalSurface] 离线回放：启动后从 TXT/PLY 加载点云并跑内表面检测 */
+    void scheduleOfflineInternalSurfaceReplay();
+    void triggerOfflineInternalSurfaceReplay();
+
     // ---- 自动延时测试状态 ----
     qint64 m_autoLatencyTriggerMs = 0;   // 本次触发时刻（epoch ms），用于计算墙钟耗时
     bool m_autoLatencyTestPending = false; // 是否有采集尚未完成
@@ -76,6 +87,9 @@ private:
     int m_autoLatencyIntervalMs = 20000; // 触发间隔（ms）
     quint32 m_latencyBundleSeq = 0;        // 轮次序号，taskId = 90001 + round
     QTimer* m_autoLatencyTimer = nullptr;
+    QTimer* m_offlineHoleReplayTimer = nullptr;
+    QTimer* m_offlineInternalSurfaceReplayTimer = nullptr;
+    bool m_offlineInternalSurfaceReplayInFlight = false;
 
     // ---- 业务模块（unique_ptr 持有，析构顺序与声明顺序相反） ----
     QCoreApplication& application_;

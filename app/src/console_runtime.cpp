@@ -24,6 +24,8 @@
 #include <QtCore/QString>
 #include <QtCore/QTimer>
 
+#include <thread>
+
 #include "scan_tracking/common/application_info.h"
 #include "scan_tracking/common/config_manager.h"
 #include "scan_tracking/common/logger.h"
@@ -577,6 +579,8 @@ void ConsoleRuntime::initVisionFlowModules(
 
     // 全模块就绪后，可选启动 [Debug] 自动延时测试
     scheduleAutoLatencyBundleTest();
+    scheduleOfflineHoleReplay();
+    scheduleOfflineInternalSurfaceReplay();
 }
 
 void ConsoleRuntime::stopAutoLatencyBundleTest()
@@ -640,6 +644,112 @@ void ConsoleRuntime::scheduleAutoLatencyBundleTest()
             << "[LatencyTest] 单次模式已调度：" << m_autoLatencyIntervalMs
             << "ms 后触发一次（Mech 2D + 海康 A/B）；关闭请设 autoLatencyBundleTestEnabled=false";
     }
+}
+
+void ConsoleRuntime::scheduleOfflineHoleReplay()
+{
+    if (stateMachine_ == nullptr) {
+        return;
+    }
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr || !configManager->holeConfig().offlineReplayEnabled) {
+        return;
+    }
+
+    const int delayMs = configManager->holeConfig().offlineReplayDelayMs;
+    if (m_offlineHoleReplayTimer == nullptr) {
+        m_offlineHoleReplayTimer = new QTimer(&application_);
+        QObject::connect(m_offlineHoleReplayTimer, &QTimer::timeout, &application_, [this]() {
+            triggerOfflineHoleReplay();
+        });
+    }
+
+    m_offlineHoleReplayTimer->setSingleShot(true);
+    m_offlineHoleReplayTimer->setInterval(delayMs > 0 ? delayMs : 5000);
+    m_offlineHoleReplayTimer->start();
+
+    qInfo(appLog).noquote()
+        << QStringLiteral("[Hole] 离线回放已调度：") << (delayMs > 0 ? delayMs : 5000)
+        << QStringLiteral("ms 后从 session 加载点云并执行 Hole 检测；关闭请设 offlineReplayEnabled=false");
+}
+
+void ConsoleRuntime::triggerOfflineHoleReplay()
+{
+    if (stateMachine_ == nullptr) {
+        qWarning(appLog) << QStringLiteral("[Hole] 离线回放跳过：StateMachine 不可用。");
+        return;
+    }
+
+    const tracking::InspectionResult result = stateMachine_->runOfflineHoleInspectionFromSavedSession();
+    qInfo(appLog).noquote()
+        << QStringLiteral("[Hole] 离线回放结果 resultCode=") << result.resultCode
+        << QStringLiteral(" message=") << result.message;
+}
+
+void ConsoleRuntime::scheduleOfflineInternalSurfaceReplay()
+{
+    if (stateMachine_ == nullptr) {
+        return;
+    }
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr || !configManager->internalSurfaceConfig().offlineReplayEnabled) {
+        return;
+    }
+
+    const int delayMs = configManager->internalSurfaceConfig().offlineReplayDelayMs;
+    if (m_offlineInternalSurfaceReplayTimer == nullptr) {
+        m_offlineInternalSurfaceReplayTimer = new QTimer(&application_);
+        QObject::connect(
+            m_offlineInternalSurfaceReplayTimer,
+            &QTimer::timeout,
+            &application_,
+            [this]() { triggerOfflineInternalSurfaceReplay(); });
+    }
+
+    m_offlineInternalSurfaceReplayTimer->setSingleShot(true);
+    m_offlineInternalSurfaceReplayTimer->setInterval(delayMs > 0 ? delayMs : 5000);
+    m_offlineInternalSurfaceReplayTimer->start();
+
+    qInfo(appLog).noquote()
+        << QStringLiteral("[InternalSurface] 离线回放已调度：") << (delayMs > 0 ? delayMs : 5000)
+        << QStringLiteral(
+               "ms 后加载点云并执行内表面检测；关闭请设 offlineReplayEnabled=false");
+}
+
+void ConsoleRuntime::triggerOfflineInternalSurfaceReplay()
+{
+    if (stateMachine_ == nullptr) {
+        qWarning(appLog) << QStringLiteral("[InternalSurface] 离线回放跳过：StateMachine 不可用。");
+        return;
+    }
+
+    if (m_offlineInternalSurfaceReplayInFlight) {
+        qWarning(appLog) << QStringLiteral("[InternalSurface] 离线回放仍在执行，跳过重复触发。");
+        return;
+    }
+
+    m_offlineInternalSurfaceReplayInFlight = true;
+    qInfo(appLog).noquote()
+        << QStringLiteral("[InternalSurface] 离线回放后台线程启动（避免主线程大点云处理崩溃）");
+
+    auto* stateMachine = stateMachine_.get();
+    std::thread([this, stateMachine]() {
+        const tracking::InspectionResult result =
+            stateMachine->runOfflineInternalSurfaceInspectionFromFile(false);
+
+        QMetaObject::invokeMethod(
+            &application_,
+            [this, stateMachine, result]() {
+                m_offlineInternalSurfaceReplayInFlight = false;
+                stateMachine->deliverOfflineInternalSurfaceInspectionResult(result);
+                qInfo(appLog).noquote()
+                    << QStringLiteral("[InternalSurface] 离线回放结果 resultCode=")
+                    << result.resultCode << QStringLiteral(" message=") << result.message;
+            },
+            Qt::QueuedConnection);
+    }).detach();
 }
 
 void ConsoleRuntime::triggerAutoLatencyBundleTest()

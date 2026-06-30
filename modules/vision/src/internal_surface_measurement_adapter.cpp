@@ -9,13 +9,18 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
+#include <QtCore/QLoggingCategory>
 
 #include "MeasurementAlgorithm.h"
 #include "scan_tracking/common/config_manager.h"
 #include "scan_tracking/mech_eye/point_cloud_io.h"
 #include "scan_tracking/mech_eye/point_cloud_processor.h"
 
+Q_LOGGING_CATEGORY(LOG_INTERNAL_SURFACE_ADAPTER, "vision.internal_surface")
+
 namespace scan_tracking::vision::internal_surface {
+
+QString resolveInternalSurfaceConfigPath();
 
 namespace {
 
@@ -65,35 +70,25 @@ bool isPositiveFinite(double value)
     return std::isfinite(value) && value > 0.0;
 }
 
-}  // namespace
-
-QString resolveInternalSurfaceConfigPath()
+class ScopedCurrentDir
 {
-    const QString envRoot = localPathFromEnv("SCAN_TRACKING_INTERNAL_SURFACE_CONFIG_DIR");
-    if (!envRoot.isEmpty()) {
-        const QFileInfo envConfig(QDir(envRoot).filePath(QStringLiteral("algorithm_config.json")));
-        if (envConfig.exists()) {
-            return envConfig.absoluteFilePath();
-        }
+public:
+    explicit ScopedCurrentDir(const QString& dir)
+    {
+        previous_ = QDir::currentPath();
+        QDir::setCurrent(dir);
     }
 
-    const auto* configManager = scan_tracking::common::ConfigManager::instance();
-    const QString configured = configManager != nullptr
-        ? configManager->internalSurfaceConfig().configPath
-        : QStringLiteral("internal_surface/config/algorithm_config.json");
-
-    const QString resolved = resolveConfiguredPath(configured.trimmed());
-    if (QFileInfo::exists(resolved)) {
-        return resolved;
+    ~ScopedCurrentDir()
+    {
+        QDir::setCurrent(previous_);
     }
 
-    const QFileInfo fallback(QDir(QCoreApplication::applicationDirPath())
-                                 .filePath(QStringLiteral("internal_surface/config/algorithm_config.json")));
-    return fallback.absoluteFilePath();
-}
+private:
+    QString previous_;
+};
 
-InternalSurfaceInspectionResult runInternalSurfaceMeasurement(
-    const scan_tracking::mech_eye::PointCloudFrame& cloud)
+InternalSurfaceInspectionResult runMeasurementWithPreparedScanPly(const QString& scanPlyPath)
 {
     InternalSurfaceInspectionResult result;
 
@@ -103,8 +98,8 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurement(
         return result;
     }
 
-    if (!cloud.isValid()) {
-        result.message = QStringLiteral("内表面测量缺少有效输入点云。");
+    if (!QFileInfo::exists(scanPlyPath)) {
+        result.message = QStringLiteral("内表面测量扫描点云不存在：%1").arg(scanPlyPath);
         return result;
     }
 
@@ -113,13 +108,12 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurement(
         ? configManager->internalSurfaceConfig()
         : scan_tracking::common::InternalSurfaceConfig{};
 
-    const QString scanCloudPath = buildTempScanCloudPath();
-    if (!scan_tracking::mech_eye::savePointCloudFrameToPly(cloud, scanCloudPath)) {
-        result.message = QStringLiteral("内表面测量临时点云保存失败：%1").arg(scanCloudPath);
-        return result;
-    }
-
     result.invoked = true;
+
+    qInfo(LOG_INTERNAL_SURFACE_ADAPTER).noquote()
+        << QStringLiteral("[InternalSurface] 开始测量 config=") << configPath
+        << QStringLiteral(" scan=") << scanPlyPath
+        << QStringLiteral(" templateType=") << surfaceConfig.templateType;
 
     try {
         std::lock_guard<std::mutex> pclGuard(
@@ -127,13 +121,16 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurement(
 
         MeasurementInput input;
         input.configPath = configPath.toLocal8Bit().toStdString();
-        input.scanCloudPath = scanCloudPath.toLocal8Bit().toStdString();
+        input.scanCloudPath = QFileInfo(scanPlyPath).absoluteFilePath().toLocal8Bit().toStdString();
         input.templateType = surfaceConfig.templateType;
+
+        const ScopedCurrentDir algorithmCwd(QFileInfo(configPath).absolutePath());
 
         MeasurementResult algoResult;
         if (!RunMeasurement(input, &algoResult)) {
             result.message = QStringLiteral("内表面测量算法失败：%1")
                                  .arg(QString::fromLocal8Bit(algoResult.message));
+            qWarning(LOG_INTERNAL_SURFACE_ADAPTER).noquote() << result.message;
             return result;
         }
 
@@ -177,6 +174,82 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurement(
     }
 
     return result;
+}
+
+}  // namespace
+
+QString resolveInternalSurfaceConfigPath()
+{
+    const QString envRoot = localPathFromEnv("SCAN_TRACKING_INTERNAL_SURFACE_CONFIG_DIR");
+    if (!envRoot.isEmpty()) {
+        const QFileInfo envConfig(QDir(envRoot).filePath(QStringLiteral("algorithm_config.json")));
+        if (envConfig.exists()) {
+            return envConfig.absoluteFilePath();
+        }
+    }
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    const QString configured = configManager != nullptr
+        ? configManager->internalSurfaceConfig().configPath
+        : QStringLiteral("internal_surface/config/algorithm_config.json");
+
+    const QString resolved = resolveConfiguredPath(configured.trimmed());
+    if (QFileInfo::exists(resolved)) {
+        return resolved;
+    }
+
+    const QFileInfo fallback(QDir(QCoreApplication::applicationDirPath())
+                                 .filePath(QStringLiteral("internal_surface/config/algorithm_config.json")));
+    return fallback.absoluteFilePath();
+}
+
+InternalSurfaceInspectionResult runInternalSurfaceMeasurement(
+    const scan_tracking::mech_eye::PointCloudFrame& cloud)
+{
+    InternalSurfaceInspectionResult result;
+
+    if (!cloud.isValid()) {
+        result.message = QStringLiteral("内表面测量缺少有效输入点云。");
+        return result;
+    }
+
+    const QString scanCloudPath = buildTempScanCloudPath();
+    if (!scan_tracking::mech_eye::savePointCloudFrameToPly(cloud, scanCloudPath)) {
+        result.message = QStringLiteral("内表面测量临时点云保存失败：%1").arg(scanCloudPath);
+        return result;
+    }
+
+    return runMeasurementWithPreparedScanPly(scanCloudPath);
+}
+
+InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
+    const QString& scanCloudPath)
+{
+    InternalSurfaceInspectionResult result;
+
+    const QString resolved = resolveConfiguredPath(scanCloudPath.trimmed());
+    if (resolved.trimmed().isEmpty() || !QFileInfo::exists(resolved)) {
+        result.message = QStringLiteral("内表面测量扫描点云不存在：%1").arg(scanCloudPath);
+        return result;
+    }
+
+    const QString suffix = QFileInfo(resolved).suffix().toLower();
+    if (suffix == QStringLiteral("ply") || suffix == QStringLiteral("pcd")) {
+        return runMeasurementWithPreparedScanPly(resolved);
+    }
+
+    if (suffix != QStringLiteral("txt")) {
+        result.message = QStringLiteral("内表面测量不支持的点云格式：%1").arg(resolved);
+        return result;
+    }
+
+    const QString convertedPlyPath = buildTempScanCloudPath();
+    if (!scan_tracking::mech_eye::convertTxtPointCloudToPly(resolved, convertedPlyPath)) {
+        result.message = QStringLiteral("内表面测量 TXT 转 PLY 失败：%1").arg(resolved);
+        return result;
+    }
+
+    return runMeasurementWithPreparedScanPly(convertedPlyPath);
 }
 
 }  // namespace scan_tracking::vision::internal_surface

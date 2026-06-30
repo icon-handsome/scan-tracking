@@ -1,0 +1,78 @@
+
+=== tasklist /FI "IMAGENAME eq scan-tracking.exe" ===
+��Ϣ: û�����е�����ƥ��ָ����׼��
+
+=== powershell -NoProfile -Command "Get-ChildItem 'D:\work\LY\deploy_debug\logs\scan_tracking_run_*.txt' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { $_.FullName; Get-Content -LiteralPath $_.FullName -Tail 20 -Encoding UTF8 }" ===
+D:\work\LY\deploy_debug\logs\scan_tracking_run_2026-06-26_16-43-59.txt
+   ���ͼ�ֱ���: 2400 x 1800 
+   2D �ع�ģʽ: Auto 
+   2D �ع�ʱ��: 999 ms
+   3D ����: 0 
+   3D �ع���������: 3 
+   ��ȷ�Χ: 100  -  2000  mm
+   ����ƽ��: Normal 
+   ����ȥ��: Off 
+   ��Ⱥ��ȥ��: Off
+[2026-06-26 16:44:02.894] [INF] [mech_eye.worker] === MechEye �������ڲ� ===
+   fx= 2285.39  fy= 2285.39 
+   cx= 1374.45  cy= 885.818 
+   ����ϵ��: k1= 0  k2= 0  p1= 0  p2= 0  k3= 0
+[2026-06-26 16:44:02.894] [INF] [app] "[÷��] ״̬ =" 3 "���������: RUM3525CA510C029"
+[2026-06-26 16:44:02.894] [INF] [flow_control] [MechEye] ���״̬���: 3 "���������: RUM3525CA510C029"
+[2026-06-26 16:44:06.425] [INF] [app] [InternalSurface] ���߻طź�̨�߳��������������̴߳���ƴ���������
+[2026-06-26 16:44:06.426] [INF] [flow_control] [InternalSurface] ���߻طſ�ʼ pathId= 2  cloud= D:/work/LY/deploy_debug/testdata/neibiaomiao/inner_surface_full.txt
+[2026-06-26 16:44:06.427] [INF] [flow_control] [InternalSurface] ���߻طŴ��ļ�ִ�в�������������֡���ڴ棩
+[2026-06-26 16:44:11.573] [INF] [mech_eye.point_cloud_io] TXT ��ת��Ϊ PLY�� D:/work/LY/deploy_debug/testdata/neibiaomiao/inner_surface_full.txt  ->  D:/work/LY/deploy_debug/internal_surface/tmp/internal_surface_input_20260626_164406_428.ply  pointCount= 271871
+[2026-06-26 16:44:11.573] [INF] [vision.internal_surface] [InternalSurface] ��ʼ���� config= D:/work/LY/deploy_debug/internal_surface/config/algorithm_config.json  scan= D:/work/LY/deploy_debug/internal_surface/tmp/internal_surface_input_20260626_164406_428.ply  templateType= 1
+
+=== wevtutil qe Application /c:3 /rd:true /f:text /q:"*[System[(EventID=1000) and TimeCreated[timediff(@SystemTime) <= 1800000]]]" ===
+Event[0]:
+  Log Name: Application
+  Source: Application Error
+  Date: 2026-06-26T16:48:48.2200000Z
+  Event ID: 1000
+  Task: Ӧ�ó�������¼�
+  Level: ����
+  Opcode: ��Ϣ
+  Keyword: ����
+  User: N/A
+  User Name: N/A
+  Computer: VC3000X
+  Description: 
+����Ӧ�ó�������: scan-tracking.exe���汾: 0.0.0.0��ʱ���: 0x6a3e3bb0
+����ģ������: ucrtbased.dll���汾: 10.0.26100.8249��ʱ���: 0xd90e398d
+�쳣����: 0xc0000005
+����ƫ����: 0x0000000000080ada
+������� ID: 0x2588
+����Ӧ�ó�������ʱ��: 0x01dd0547eebe80ae
+����Ӧ�ó���·��: D:\work\LY\deploy_debug\scan-tracking.exe
+����ģ��·��: D:\work\LY\deploy_debug\ucrtbased.dll
+���� ID: 5c7ec166-ec36-4808-8631-cf634f5a5bdb
+��������ȫ��: 
+�����������Ӧ�ó��� ID: 
+
+Event[1]:
+  Log Name: Application
+  Source: Application Error
+  Date: 2026-06-26T16:20:13.2910000Z
+  Event ID: 1000
+  Task: Ӧ�ó�������¼�
+  Level: ����
+  Opcode: ��Ϣ
+  Keyword: ����
+  User: N/A
+  User Name: N/A
+  Computer: VC3000X
+  Description: 
+����Ӧ�ó�������: scan-tracking.exe���汾: 0.0.0.0��ʱ���: 0x6a3e3193
+����ģ������: Qt5Cored.dll���汾: 5.15.2.0��ʱ���: 0x5fa4dd3a
+�쳣����: 0xc0000005
+����ƫ����: 0x000000000004d58a
+������� ID: 0x25fc
+����Ӧ�ó�������ʱ��: 0x01dd054496f0e745
+����Ӧ�ó���·��: D:\work\LY\deploy_debug\scan-tracking.exe
+����ģ��·��: D:\work\LY\deploy_debug\Qt5Cored.dll
+���� ID: 406ef11b-db05-491c-a888-e8fc0c645adf
+��������ȫ��: 
+�����������Ӧ�ó��� ID: 
+

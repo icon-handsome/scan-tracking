@@ -130,6 +130,24 @@ public:
      */
     tracking::InspectionResult runDebugInspectionOnCachedSegments() const;
 
+    /**
+     * @brief 一次性联调：从 [Hole] offlineReplaySessionDir 加载落盘点云并跑 Hole 检测
+     *
+     * 不写 PLC、不占用 PLC 任务槽；结果写入日志。
+     */
+    tracking::InspectionResult runOfflineHoleInspectionFromSavedSession();
+
+    /**
+     * @brief 一次性联调：从 [InternalSurface] offlineReplayPointCloudPath 加载点云并跑内表面检测
+     *
+     * 不写 PLC、不占用 PLC 任务槽；结果写入日志。
+     */
+    tracking::InspectionResult runOfflineInternalSurfaceInspectionFromFile(
+        bool emitInspectionSignal = true);
+
+    void deliverOfflineInternalSurfaceInspectionResult(
+        const tracking::InspectionResult& result);
+
     // 设置报警
     // @param level 报警级别
     // @param code 报警代码

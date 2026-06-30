@@ -515,6 +515,11 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("configPath", "hole/config/default.json");
     settings.setValue("icpRmsMaxMm", 5.0);
     settings.setValue("cylinderRmsMaxMm", 3.0);
+    settings.setValue("offlineReplayEnabled", false);
+    settings.setValue("offlineReplaySessionDir", QString());
+    settings.setValue("offlineReplayPathId", 1);
+    settings.setValue("offlineReplayDelayMs", 5000);
+    settings.setValue("offlineReplayPlyFileName", "pointcloud_stitched.ply");
     settings.endGroup();
 
     settings.beginGroup("InternalSurface");
@@ -522,6 +527,10 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("templateType", 1);
     settings.setValue("minDepthMm", 0.0);
     settings.setValue("minVolumeM3", 0.0);
+    settings.setValue("offlineReplayEnabled", false);
+    settings.setValue("offlineReplayPointCloudPath", QString());
+    settings.setValue("offlineReplayPathId", 2);
+    settings.setValue("offlineReplayDelayMs", 5000);
     settings.endGroup();
 
     settings.beginGroup("SelfCheck");
@@ -833,7 +842,32 @@ void ConfigManager::load(const QString& filePath)
         settings.value("icpRmsMaxMm", 5.0).toDouble();
     m_holeConfig.cylinderRmsMaxMm =
         settings.value("cylinderRmsMaxMm", 3.0).toDouble();
+    m_holeConfig.offlineReplayEnabled =
+        settings.value("offlineReplayEnabled", false).toBool();
+    m_holeConfig.offlineReplaySessionDir = resolveConfigRelativePath(
+        settings.value("offlineReplaySessionDir").toString(),
+        m_configFilePath);
+    m_holeConfig.offlineReplayPathId =
+        qMax(1, settings.value("offlineReplayPathId", 1).toInt());
+    m_holeConfig.offlineReplayDelayMs =
+        qMax(0, settings.value("offlineReplayDelayMs", 5000).toInt());
+    m_holeConfig.offlineReplayPlyFileName =
+        settings.value("offlineReplayPlyFileName", QStringLiteral("pointcloud_stitched.ply"))
+            .toString()
+            .trimmed();
+    if (m_holeConfig.offlineReplayPlyFileName.isEmpty()) {
+        m_holeConfig.offlineReplayPlyFileName = QStringLiteral("pointcloud_stitched.ply");
+    }
     settings.endGroup();
+
+    if (m_holeConfig.offlineReplayEnabled) {
+        qInfo(LOG_CONFIG).noquote()
+            << QStringLiteral("[Hole] 离线回放已启用 pathId=")
+            << m_holeConfig.offlineReplayPathId
+            << QStringLiteral(" session=") << m_holeConfig.offlineReplaySessionDir
+            << QStringLiteral(" ply=") << m_holeConfig.offlineReplayPlyFileName
+            << QStringLiteral(" delayMs=") << m_holeConfig.offlineReplayDelayMs;
+    }
 
     settings.beginGroup("Thickness");
     m_thicknessConfig.configPath = settings.value(
@@ -847,7 +881,24 @@ void ConfigManager::load(const QString& filePath)
     m_internalSurfaceConfig.templateType = settings.value("templateType", 1).toInt();
     m_internalSurfaceConfig.minDepthMm = settings.value("minDepthMm", 0.0).toDouble();
     m_internalSurfaceConfig.minVolumeM3 = settings.value("minVolumeM3", 0.0).toDouble();
+    m_internalSurfaceConfig.offlineReplayEnabled =
+        settings.value("offlineReplayEnabled", false).toBool();
+    m_internalSurfaceConfig.offlineReplayPointCloudPath = resolveConfigRelativePath(
+        settings.value("offlineReplayPointCloudPath").toString(),
+        QCoreApplication::applicationDirPath());
+    m_internalSurfaceConfig.offlineReplayPathId =
+        qMax(1, settings.value("offlineReplayPathId", 2).toInt());
+    m_internalSurfaceConfig.offlineReplayDelayMs =
+        qMax(0, settings.value("offlineReplayDelayMs", 5000).toInt());
     settings.endGroup();
+
+    if (m_internalSurfaceConfig.offlineReplayEnabled) {
+        qInfo(LOG_CONFIG).noquote()
+            << QStringLiteral("[InternalSurface] 离线回放已启用 pathId=")
+            << m_internalSurfaceConfig.offlineReplayPathId
+            << QStringLiteral(" cloud=") << m_internalSurfaceConfig.offlineReplayPointCloudPath
+            << QStringLiteral(" delayMs=") << m_internalSurfaceConfig.offlineReplayDelayMs;
+    }
 
     settings.beginGroup("SelfCheck");
     m_selfCheckConfig.totalPoints = settings.value("totalPoints", 2).toInt();

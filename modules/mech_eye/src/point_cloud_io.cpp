@@ -14,6 +14,7 @@
 #include <QFileInfo>
 #include <QImage>
 #include <QLoggingCategory>
+#include <QRegularExpression>
 #include <QTextStream>
 
 #include <cmath>
@@ -433,6 +434,195 @@ bool loadPointCloudFrameFromPly(const QString& absolutePath, PointCloudFrame* ou
         << QStringLiteral(" format=")
         << (header.format == PlyStorageFormat::BinaryLittleEndian ? QStringLiteral("binary")
                                                                     : QStringLiteral("ascii"));
+
+    return true;
+}
+
+bool convertTxtPointCloudToPly(const QString& txtPath, const QString& plyPath)
+{
+    if (txtPath.trimmed().isEmpty() || plyPath.trimmed().isEmpty()) {
+        return false;
+    }
+
+    QFile txtFile(txtPath);
+    if (!txtFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning(LOG_POINT_CLOUD_IO).noquote()
+            << QStringLiteral("convertTxtPointCloudToPly：无法打开") << txtPath;
+        return false;
+    }
+
+    auto countValidPoints = [](QTextStream& stream) -> int {
+        int validCount = 0;
+        while (!stream.atEnd()) {
+            const QString line = stream.readLine().trimmed();
+            if (line.isEmpty()) {
+                continue;
+            }
+            const QStringList tokens = line.split(QRegularExpression(QStringLiteral("\\s+")),
+                                                  Qt::SkipEmptyParts);
+            if (tokens.size() < 3) {
+                continue;
+            }
+            const float x = tokens[0].toFloat();
+            const float y = tokens[1].toFloat();
+            const float z = tokens[2].toFloat();
+            if (isFinitePoint(x, y, z)) {
+                ++validCount;
+            }
+        }
+        return validCount;
+    };
+
+    QTextStream countStream(&txtFile);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    countStream.setEncoding(QStringConverter::Utf8);
+#else
+    countStream.setCodec("UTF-8");
+#endif
+    const int validCount = countValidPoints(countStream);
+    if (validCount <= 0) {
+        qWarning(LOG_POINT_CLOUD_IO).noquote()
+            << QStringLiteral("convertTxtPointCloudToPly：无有效点") << txtPath;
+        return false;
+    }
+
+    const QFileInfo plyInfo(plyPath);
+    QDir().mkpath(plyInfo.absolutePath());
+
+    QFile plyFile(plyPath);
+    if (!plyFile.open(QIODevice::WriteOnly)) {
+        qWarning(LOG_POINT_CLOUD_IO).noquote()
+            << QStringLiteral("convertTxtPointCloudToPly：无法写入") << plyPath;
+        return false;
+    }
+
+    const QByteArray header = QByteArrayLiteral("ply\n")
+        + QByteArrayLiteral("format binary_little_endian 1.0\n")
+        + QByteArrayLiteral("element vertex ")
+        + QByteArray::number(validCount)
+        + QByteArrayLiteral("\nproperty float x\nproperty float y\nproperty float z\nend_header\n");
+    if (plyFile.write(header) != header.size()) {
+        return false;
+    }
+
+    if (!txtFile.seek(0)) {
+        return false;
+    }
+
+    QTextStream writeStream(&txtFile);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    writeStream.setEncoding(QStringConverter::Utf8);
+#else
+    writeStream.setCodec("UTF-8");
+#endif
+
+    std::vector<float> vertexBuffer;
+    vertexBuffer.reserve(4096);
+    auto flushVertices = [&]() -> bool {
+        if (vertexBuffer.empty()) {
+            return true;
+        }
+        const qint64 bytes = static_cast<qint64>(vertexBuffer.size() * sizeof(float));
+        if (plyFile.write(reinterpret_cast<const char*>(vertexBuffer.data()), bytes) != bytes) {
+            return false;
+        }
+        vertexBuffer.clear();
+        return true;
+    };
+
+    while (!writeStream.atEnd()) {
+        const QString line = writeStream.readLine().trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        const QStringList tokens = line.split(QRegularExpression(QStringLiteral("\\s+")),
+                                              Qt::SkipEmptyParts);
+        if (tokens.size() < 3) {
+            continue;
+        }
+        const float x = tokens[0].toFloat();
+        const float y = tokens[1].toFloat();
+        const float z = tokens[2].toFloat();
+        if (!isFinitePoint(x, y, z)) {
+            continue;
+        }
+        vertexBuffer.push_back(x);
+        vertexBuffer.push_back(y);
+        vertexBuffer.push_back(z);
+        if (vertexBuffer.size() >= 4096 * 3 && !flushVertices()) {
+            return false;
+        }
+    }
+
+    if (!flushVertices()) {
+        return false;
+    }
+
+    qInfo(LOG_POINT_CLOUD_IO).noquote()
+        << QStringLiteral("TXT 已转换为 PLY：") << txtPath
+        << QStringLiteral(" -> ") << plyPath
+        << QStringLiteral(" pointCount=") << validCount;
+    return true;
+}
+
+bool loadPointCloudFrameFromTxt(const QString& absolutePath, PointCloudFrame* outFrame)
+{
+    if (outFrame == nullptr || absolutePath.trimmed().isEmpty()) {
+        return false;
+    }
+
+    QFile file(absolutePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning(LOG_POINT_CLOUD_IO).noquote()
+            << QStringLiteral("loadPointCloudFrameFromTxt：无法打开") << absolutePath;
+        return false;
+    }
+
+    auto points = std::make_shared<std::vector<float>>();
+    points->reserve(300000 * 3);
+
+    QTextStream stream(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    stream.setEncoding(QStringConverter::Utf8);
+#else
+    stream.setCodec("UTF-8");
+#endif
+
+    while (!stream.atEnd()) {
+        const QString line = stream.readLine().trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+
+        const QStringList tokens = line.split(QRegularExpression(QStringLiteral("\\s+")),
+                                              Qt::SkipEmptyParts);
+        if (tokens.size() < 3) {
+            continue;
+        }
+
+        const float x = tokens[0].toFloat();
+        const float y = tokens[1].toFloat();
+        const float z = tokens[2].toFloat();
+        if (!isFinitePoint(x, y, z)) {
+            continue;
+        }
+
+        points->push_back(x);
+        points->push_back(y);
+        points->push_back(z);
+    }
+
+    file.close();
+
+    if (!assignLoadedPointCloud(outFrame, std::move(points), nullptr, false)) {
+        qWarning(LOG_POINT_CLOUD_IO).noquote()
+            << QStringLiteral("loadPointCloudFrameFromTxt：无有效点") << absolutePath;
+        return false;
+    }
+
+    qInfo(LOG_POINT_CLOUD_IO).noquote()
+        << QStringLiteral("TXT 已加载：") << absolutePath
+        << QStringLiteral(" pointCount=") << outFrame->pointCount;
 
     return true;
 }

@@ -156,6 +156,12 @@ struct HoleConfig {
     QString configPath = QStringLiteral("hole/config/default.json");
     double icpRmsMaxMm = 5.0;
     double cylinderRmsMaxMm = 3.0;
+    /// 一次性联调：启动后从 session 落盘目录加载点云并直接跑 Hole，无需 PLC Trig_Inspection
+    bool offlineReplayEnabled = false;
+    QString offlineReplaySessionDir;
+    int offlineReplayPathId = 1;
+    int offlineReplayDelayMs = 5000;
+    QString offlineReplayPlyFileName = QStringLiteral("pointcloud_stitched.ply");
 };
 
 /// 厚度测量算法配置（[Thickness]）
@@ -170,6 +176,11 @@ struct InternalSurfaceConfig {
     int templateType = 1;
     double minDepthMm = 0.0;
     double minVolumeM3 = 0.0;
+    /// 一次性联调：启动后从 TXT/PLY 加载点云并直接跑内表面，无需 PLC Trig_Inspection
+    bool offlineReplayEnabled = false;
+    QString offlineReplayPointCloudPath;
+    int offlineReplayPathId = 2;
+    int offlineReplayDelayMs = 5000;
 };
 
 /// 扫描仪编码标记点距离自检（[SelfCheck]）

@@ -24,4 +24,8 @@ QString resolveInternalSurfaceConfigPath();
 InternalSurfaceInspectionResult runInternalSurfaceMeasurement(
     const scan_tracking::mech_eye::PointCloudFrame& cloud);
 
+/// 离线联调：直接从扫描点云文件（.txt/.ply）执行内表面测量，避免大点云载入内存
+InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
+    const QString& scanCloudPath);
+
 }  // namespace scan_tracking::vision::internal_surface

@@ -111,6 +111,12 @@ public:
         int inspectionPathId = 0,
         bool notifyListener = true) const;
 
+    /// 内表面离线联调：从磁盘点云文件执行测量（不经过 PointCloudFrame 内存路径）
+    InspectionResult inspectInternalSurfaceFromScanFile(
+        const QString& scanCloudPath,
+        int inspectionPathId = 0,
+        bool notifyListener = true) const;
+
     /// 执行厚度综合检测（inner/outer 双点云，按路径 inspectionType=thickness）
     InspectionResult inspectThicknessPointClouds(
         const scan_tracking::mech_eye::PointCloudFrame& innerCloud,
