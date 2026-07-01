@@ -147,6 +147,39 @@ void StateMachine::executeInspectionTask()
 
         trackingResult = m_tracking->inspectBevelPointCloudFramesAveraged(
             segmentClouds, totalPointCount, m_activeTask.inspectionPathId);
+    } else if (inspectionType == scan_tracking::common::InspectionType::Hole) {
+        QList<scan_tracking::mech_eye::PointCloudFrame> segmentClouds;
+        int totalPointCount = 0;
+        if (!loadSegmentPointCloudsForInspection(
+                &segmentClouds, &totalPointCount, &segmentCount, &loadError)) {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("Trig_Inspection 加载 Hole 分段点云失败：") << loadError
+                << multiPathCacheStatusText();
+            writeInspectionResult({2, 1u << 4, 0, 0});
+            if (m_inspectionResultPublisher) {
+                tracking::InspectionResult failure;
+                failure.resultCode = 2;
+                failure.ngReasonWord0 = (1u << 4);
+                failure.message = loadError.isEmpty()
+                    ? QStringLiteral("综合检测失败：无法加载 Hole 分段点云。")
+                    : loadError;
+                m_inspectionResultPublisher(failure);
+            }
+            completeActiveTask(
+                kInspectionResProcessingFail,
+                protocol::AckState::Completed,
+                false);
+            clearActiveTask();
+            m_ipcState = protocol::IpcState::Ready;
+            m_currentStage = protocol::Stage::Idle;
+            m_progress = 0;
+            setState(AppState::Ready);
+            publishIpcStatus();
+            return;
+        }
+
+        trackingResult = m_tracking->inspectHolePointCloudFrames(
+            segmentClouds, totalPointCount, m_activeTask.inspectionPathId);
     } else {
         scan_tracking::mech_eye::PointCloudFrame mergedCloud;
         int totalPointCount = 0;

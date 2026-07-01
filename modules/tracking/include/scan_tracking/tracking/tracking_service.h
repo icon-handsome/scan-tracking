@@ -142,6 +142,13 @@ public:
         int inspectionPathId = 0,
         bool notifyListener = true) const;
 
+    /// Hole 正式检测：逐扫描分段 preprocess 后合并（与 demo mergeFrames 一致）
+    InspectionResult inspectHolePointCloudFrames(
+        const QList<scan_tracking::mech_eye::PointCloudFrame>& segmentClouds,
+        int sourcePointCount,
+        int inspectionPathId = 0,
+        bool notifyListener = true) const;
+
     /// 执行厚度综合检测（inner/outer 双点云，按路径 inspectionType=thickness）
     InspectionResult inspectThicknessPointClouds(
         const scan_tracking::mech_eye::PointCloudFrame& innerCloud,

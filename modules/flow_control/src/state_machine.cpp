@@ -2759,7 +2759,7 @@ void StateMachine::applySegmentRefinementOutcome(const SegmentProcessOutcome& ou
  * 
  * 关键步骤：
  * 1. 检查跟踪服务是否可用
- * 2. 坡口：逐分段测量取均值；其余类型：合并点云后 inspectPointCloud
+ * 2. 坡口：逐分段测量取均值；Hole：逐分段 preprocess 后合并；其余类型：合并点云后 inspectPointCloud
  * 3. 将检测结果写入 PLC
  * 4. 根据检测结果决定任务成功或失败
  * 5. 清空点云缓存（检测完成后不再需要原始点云）
@@ -3727,6 +3727,23 @@ tracking::InspectionResult StateMachine::runDebugInspectionOnCachedSegments() co
         }
 
         return m_tracking->inspectBevelPointCloudFramesAveraged(
+            segmentClouds, totalPointCount, inspectPathId, false);
+    }
+
+    if (inspectionType == scan_tracking::common::InspectionType::Hole) {
+        QList<scan_tracking::mech_eye::PointCloudFrame> segmentClouds;
+        int totalPointCount = 0;
+        int segmentCount = 0;
+        if (!mutableSelf->loadSegmentPointCloudsForInspection(
+                &segmentClouds, &totalPointCount, &segmentCount, &loadError)) {
+            failure.ngReasonWord0 = (1u << 4);
+            failure.message = loadError.isEmpty()
+                ? QStringLiteral("调试综合检测失败：无法加载 Hole 分段点云。")
+                : loadError;
+            return failure;
+        }
+
+        return m_tracking->inspectHolePointCloudFrames(
             segmentClouds, totalPointCount, inspectPathId, false);
     }
 

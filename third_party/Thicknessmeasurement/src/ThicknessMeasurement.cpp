@@ -171,25 +171,12 @@ bool FindNearestPoint(
 }
 }  // namespace
 
-Eigen::Vector3d ToEigen(const Point3d& point)
-{
-    return Eigen::Vector3d(point.x, point.y, point.z);
-}
-
-std::string ThicknessMethodToString(ThicknessMethod method)
-{
-    switch (method)
-    {
-    case ThicknessMethodNearestBetweenSurfaces:
-        return "nearest_between_surfaces";
-    case ThicknessMethodTangentPlaneProjection:
-        return "tangent_plane_projection";
-    default:
-        return "unknown";
-    }
-}
-
-bool MeasureThickness(const ThicknessConfig& config, ThicknessResult* result, std::string* error)
+bool MeasureThicknessOnScanClouds(
+    const ThicknessConfig& config,
+    const CloudT::ConstPtr& innerScanCloud,
+    const CloudT::ConstPtr& outerScanCloud,
+    ThicknessResult* result,
+    std::string* error)
 {
     if (result == NULL)
     {
@@ -200,15 +187,13 @@ bool MeasureThickness(const ThicknessConfig& config, ThicknessResult* result, st
         return false;
     }
 
-    CloudT::Ptr innerTemplateCloud(new CloudT);
-    CloudT::Ptr outerTemplateCloud(new CloudT);
-    CloudT::Ptr innerScanCloud(new CloudT);
-    CloudT::Ptr outerScanCloud(new CloudT);
-    if (!LoadCloud(config.pointCloud.innerTemplateCloudPath, innerTemplateCloud, error)
-        || !LoadCloud(config.pointCloud.outerTemplateCloudPath, outerTemplateCloud, error)
-        || !LoadCloud(config.pointCloud.innerScanCloudPath, innerScanCloud, error)
-        || !LoadCloud(config.pointCloud.outerScanCloudPath, outerScanCloud, error))
+    if (innerScanCloud == NULL || outerScanCloud == NULL
+        || innerScanCloud->empty() || outerScanCloud->empty())
     {
+        if (error != NULL)
+        {
+            *error = "scan point cloud is null or empty";
+        }
         return false;
     }
 
@@ -257,6 +242,41 @@ bool MeasureThickness(const ThicknessConfig& config, ThicknessResult* result, st
     result->projectedPoints[1] = FromEigen(innerNearest);
     result->thickness = (outerNearest - innerNearest).norm();
     return true;
+}
+
+bool MeasureThickness(const ThicknessConfig& config, ThicknessResult* result, std::string* error)
+{
+    CloudT::Ptr innerTemplateCloud(new CloudT);
+    CloudT::Ptr outerTemplateCloud(new CloudT);
+    CloudT::Ptr innerScanCloud(new CloudT);
+    CloudT::Ptr outerScanCloud(new CloudT);
+    if (!LoadCloud(config.pointCloud.innerTemplateCloudPath, innerTemplateCloud, error)
+        || !LoadCloud(config.pointCloud.outerTemplateCloudPath, outerTemplateCloud, error)
+        || !LoadCloud(config.pointCloud.innerScanCloudPath, innerScanCloud, error)
+        || !LoadCloud(config.pointCloud.outerScanCloudPath, outerScanCloud, error))
+    {
+        return false;
+    }
+
+    return MeasureThicknessOnScanClouds(config, innerScanCloud, outerScanCloud, result, error);
+}
+
+bool MeasureThicknessFromScanClouds(
+    const ThicknessConfig& config,
+    const ThicknessPointCloudConstPtr& innerScanCloud,
+    const ThicknessPointCloudConstPtr& outerScanCloud,
+    ThicknessResult* result,
+    std::string* error)
+{
+    CloudT::Ptr innerTemplateCloud(new CloudT);
+    CloudT::Ptr outerTemplateCloud(new CloudT);
+    if (!LoadCloud(config.pointCloud.innerTemplateCloudPath, innerTemplateCloud, error)
+        || !LoadCloud(config.pointCloud.outerTemplateCloudPath, outerTemplateCloud, error))
+    {
+        return false;
+    }
+
+    return MeasureThicknessOnScanClouds(config, innerScanCloud, outerScanCloud, result, error);
 }
 
 bool SaveResult(const std::string& path, const ThicknessResult& result, std::string* error)

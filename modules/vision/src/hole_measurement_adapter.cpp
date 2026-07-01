@@ -1,22 +1,22 @@
 #include "scan_tracking/vision/hole_measurement_adapter.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <mutex>
+#include <vector>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QLoggingCategory>
 
-#include <pcl/common/transforms.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
 #include "HeadMeasure/Config.h"
 #include "HeadMeasure/MeasurePipeline.h"
+#include "scan_tracking/common/config_manager.h"
 #include "scan_tracking/mech_eye/point_cloud_processor.h"
 
 namespace scan_tracking::vision::hole {
@@ -25,101 +25,8 @@ namespace {
 
 Q_LOGGING_CATEGORY(LOG_HOLE, "vision.hole")
 
-// ICP / SOR 在百万级点云上易 OOM 或触发 PCL 索引溢出，IPC 在线路径目标 ≤ 2 万点。
-constexpr int kHolePreprocessTargetPoints = 20000;
-constexpr int kHoleStrideFirstThreshold = 350000;
-constexpr int kHoleStrideFirstTarget = 180000;
-
-bool isPointInCropBox(const pcl::PointXYZ& point, const hm::CropBox& box)
-{
-    return point.x >= box.min.x() && point.x <= box.max.x()
-        && point.y >= box.min.y() && point.y <= box.max.y()
-        && point.z >= box.min.z() && point.z <= box.max.z();
-}
-
-void forceUnorganizedCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
-{
-    if (!cloud || cloud->empty()) {
-        return;
-    }
-    cloud->width = static_cast<std::uint32_t>(cloud->size());
-    cloud->height = 1;
-}
-
-pcl::PointCloud<pcl::PointXYZ>::Ptr subsampleByStride(
-    const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& cloud,
-    int targetPoints)
-{
-    auto output = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-    if (!cloud || cloud->empty() || targetPoints <= 0) {
-        return output;
-    }
-
-    const int pointCount = static_cast<int>(cloud->size());
-    if (pointCount <= targetPoints) {
-        output->points = cloud->points;
-        forceUnorganizedCloud(output);
-        return output;
-    }
-
-    const int stride = std::max(1, (pointCount + targetPoints - 1) / targetPoints);
-    output->points.reserve(static_cast<std::size_t>(targetPoints));
-    for (int index = 0; index < pointCount; index += stride) {
-        output->points.push_back(cloud->points[static_cast<std::size_t>(index)]);
-    }
-    forceUnorganizedCloud(output);
-    return output;
-}
-
-pcl::PointCloud<pcl::PointXYZ>::Ptr downsampleLargeCloudForHolePipeline(
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
-    double /*voxelLeafMm*/)
-{
-    if (!cloud || cloud->empty()) {
-        return cloud;
-    }
-
-    forceUnorganizedCloud(cloud);
-
-    if (static_cast<int>(cloud->size()) > kHoleStrideFirstThreshold) {
-        const int beforeCount = static_cast<int>(cloud->size());
-        pcl::PointCloud<pcl::PointXYZ>::Ptr strided =
-            subsampleByStride(cloud, kHoleStrideFirstTarget);
-        cloud.reset();
-        cloud = strided;
-        qInfo(LOG_HOLE).noquote()
-            << QStringLiteral("[Hole] 路径合并点云等间隔预抽样")
-            << QStringLiteral(" ") << beforeCount
-            << QStringLiteral(" -> ") << static_cast<int>(cloud->size());
-    }
-
-    if (static_cast<int>(cloud->size()) > kHolePreprocessTargetPoints * 2) {
-        const int beforeCount = static_cast<int>(cloud->size());
-        pcl::PointCloud<pcl::PointXYZ>::Ptr strided =
-            subsampleByStride(cloud, kHolePreprocessTargetPoints * 2);
-        cloud.reset();
-        cloud = strided;
-        qInfo(LOG_HOLE).noquote()
-            << QStringLiteral("[Hole] 路径合并点云等间隔预抽样(二次)")
-            << QStringLiteral(" ") << beforeCount
-            << QStringLiteral(" -> ") << static_cast<int>(cloud->size());
-    }
-
-    if (static_cast<int>(cloud->size()) > kHolePreprocessTargetPoints) {
-        const int beforeCount = static_cast<int>(cloud->size());
-        cloud = subsampleByStride(cloud, kHolePreprocessTargetPoints);
-        qInfo(LOG_HOLE).noquote()
-            << QStringLiteral("[Hole] 路径合并点云等间隔收尾抽样")
-            << QStringLiteral(" ") << beforeCount
-            << QStringLiteral(" -> ") << static_cast<int>(cloud->size());
-    }
-
-    return cloud;
-}
-
 pcl::PointCloud<pcl::PointXYZ>::Ptr toPclPointCloud(
-    const scan_tracking::mech_eye::PointCloudFrame& frame,
-    const std::vector<hm::CropBox>* cropBoxes)
+    const scan_tracking::mech_eye::PointCloudFrame& frame)
 {
     auto cloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
 
@@ -134,10 +41,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr toPclPointCloud(
         return cloud;
     }
 
-    const bool useCrop = cropBoxes != nullptr && !cropBoxes->empty();
-    cloud->points.reserve(useCrop
-        ? static_cast<std::size_t>(std::min(pointCount, 2'000'000))
-        : static_cast<std::size_t>(pointCount));
+    cloud->points.reserve(static_cast<std::size_t>(pointCount));
     bool allFinite = true;
     for (int index = 0; index < pointCount; ++index) {
         const auto base = static_cast<std::size_t>(index * 3);
@@ -148,21 +52,6 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr toPclPointCloud(
             allFinite = false;
             continue;
         }
-
-        if (useCrop) {
-            const pcl::PointXYZ point(x, y, z);
-            bool inside = false;
-            for (const auto& box : *cropBoxes) {
-                if (isPointInCropBox(point, box)) {
-                    inside = true;
-                    break;
-                }
-            }
-            if (!inside) {
-                continue;
-            }
-        }
-
         cloud->points.emplace_back(x, y, z);
     }
 
@@ -218,7 +107,6 @@ QString resolvePathRelativeToConfigFile(const QString& configFilePath, const QSt
         return relativeToConfig.absoluteFilePath();
     }
 
-    // CMake 将模板部署到 hole/template/，配置在 hole/config/ 下
     const QFileInfo relativeToHoleRoot(
         QDir(configInfo.absolutePath()).filePath(QStringLiteral("../") + pathValue));
     if (relativeToHoleRoot.exists()) {
@@ -242,39 +130,10 @@ bool isFiniteDouble(double value)
     return std::isfinite(value);
 }
 
-}  // namespace
-
-QString resolveHoleConfigPath(int inspectionPathId)
-{
-    const QString envRoot = localPathFromEnv("SCAN_TRACKING_HOLE_CONFIG_DIR");
-    if (!envRoot.isEmpty()) {
-        const QFileInfo envConfig(QDir(envRoot).filePath(QStringLiteral("default.json")));
-        if (envConfig.exists()) {
-            return envConfig.absoluteFilePath();
-        }
-    }
-
-    const auto* configManager = scan_tracking::common::ConfigManager::instance();
-    QString configured;
-    if (configManager != nullptr) {
-        configured = inspectionPathId > 0
-            ? configManager->holeConfigPathForPath(inspectionPathId)
-            : configManager->holeConfig().configPath;
-    }
-
-    const QString resolved = resolveConfiguredPath(configured.trimmed());
-    if (QFileInfo::exists(resolved)) {
-        return resolved;
-    }
-
-    const QFileInfo fallback(
-        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("hole/config/default.json")));
-    return fallback.absoluteFilePath();
-}
-
-HoleInspectionResult runHoleMeasurement(
-    const scan_tracking::mech_eye::PointCloudFrame& cloud,
-    int inspectionPathId)
+HoleInspectionResult runHoleMeasurementWithScanClouds(
+    const std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr>& scanClouds,
+    int inspectionPathId,
+    int rawPointCount)
 {
     HoleInspectionResult result;
 
@@ -300,8 +159,6 @@ HoleInspectionResult runHoleMeasurement(
 
         hm::MeasureConfig measureConfig = hm::loadConfig(configPath.toLocal8Bit().toStdString());
         measureConfig = prepareMeasureConfig(configPath, measureConfig);
-        // IPC 已在外部降采样，跳过 pipeline 内 SOR 以免百万点邻域搜索崩溃。
-        measureConfig.statisticalMeanK = 0;
 
         if (measureConfig.templateCloud.empty()) {
             result.message = QStringLiteral("Hole 测量配置缺少 template_cloud。");
@@ -313,41 +170,41 @@ HoleInspectionResult runHoleMeasurement(
             return result;
         }
 
-        const int rawPointCount = cloud.pointCount;
-        auto pclCloud = toPclPointCloud(
-            cloud,
-            measureConfig.cropBoxes.empty() ? nullptr : &measureConfig.cropBoxes);
-        if (pclCloud->empty()) {
-            if (!measureConfig.cropBoxes.empty()) {
-                qWarning(LOG_HOLE).noquote()
-                    << QStringLiteral("[Hole] crop_boxes 裁剪后为空，回退全量点云 rawPoints=")
-                    << rawPointCount;
-                pclCloud = toPclPointCloud(cloud, nullptr);
+        std::vector<hm::CloudConstPtr> rawScans;
+        rawScans.reserve(scanClouds.size());
+        int convertedPointCount = 0;
+        for (const auto& scanCloud : scanClouds) {
+            if (!scanCloud || scanCloud->empty()) {
+                continue;
             }
-            if (pclCloud->empty()) {
-                result.message = QStringLiteral("Hole 测量缺少有效输入点云。");
-                return result;
-            }
+            rawScans.push_back(scanCloud);
+            convertedPointCount += static_cast<int>(scanCloud->size());
+        }
+
+        if (rawScans.empty()) {
+            result.message = QStringLiteral("Hole 测量缺少有效输入点云。");
+            return result;
         }
 
         qInfo(LOG_HOLE).noquote()
             << QStringLiteral("[Hole] 开始测量 pathId=") << inspectionPathId
-            << QStringLiteral(" 原始点数=") << rawPointCount
-            << QStringLiteral(" 裁剪后=") << static_cast<int>(pclCloud->size());
-
-        pclCloud = downsampleLargeCloudForHolePipeline(
-            std::move(pclCloud),
-            measureConfig.voxelLeafMm);
-
-        qInfo(LOG_HOLE).noquote()
-            << QStringLiteral("[Hole] 预处理后点数=") << static_cast<int>(pclCloud->size())
-            << QStringLiteral(" 模板=") << QString::fromStdString(measureConfig.templateCloud);
-
-        auto transformedCloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-        pcl::transformPointCloud(*pclCloud, *transformedCloud, measureConfig.poseCorrection);
+            << QStringLiteral(" 原始点数=") << (rawPointCount > 0 ? rawPointCount : convertedPointCount)
+            << QStringLiteral(" 分段数=") << rawScans.size()
+            << QStringLiteral(" 模板=") << QString::fromStdString(measureConfig.templateCloud)
+            << QStringLiteral(" voxel_leaf_mm=") << measureConfig.voxelLeafMm
+            << QStringLiteral(" statistical_mean_k=") << measureConfig.statisticalMeanK;
 
         hm::MeasurePipeline pipeline(measureConfig);
-        result.measureResult = pipeline.runWithPreprocessedScanCloud(transformedCloud);
+        if (rawScans.size() == 1) {
+            qInfo(LOG_HOLE) << QStringLiteral("[Hole] 调用 runWithScanCloud（与 demo 单帧一致）");
+            result.measureResult = pipeline.runWithScanCloud(rawScans.front());
+        } else {
+            qInfo(LOG_HOLE).noquote()
+                << QStringLiteral("[Hole] 调用 runWithScanClouds（与 demo mergeFrames 一致） frameCount=")
+                << rawScans.size();
+            result.measureResult = pipeline.runWithScanClouds(rawScans);
+        }
+
         result.icpRmsMm = result.measureResult.icpFit.rmsMm;
         result.cylinderRmsMm = result.measureResult.cylinderFit.rmsMm;
 
@@ -397,6 +254,63 @@ HoleInspectionResult runHoleMeasurement(
     }
 
     return result;
+}
+
+}  // namespace
+
+QString resolveHoleConfigPath(int inspectionPathId)
+{
+    const QString envRoot = localPathFromEnv("SCAN_TRACKING_HOLE_CONFIG_DIR");
+    if (!envRoot.isEmpty()) {
+        const QFileInfo envConfig(QDir(envRoot).filePath(QStringLiteral("default.json")));
+        if (envConfig.exists()) {
+            return envConfig.absoluteFilePath();
+        }
+    }
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    QString configured;
+    if (configManager != nullptr) {
+        configured = inspectionPathId > 0
+            ? configManager->holeConfigPathForPath(inspectionPathId)
+            : configManager->holeConfig().configPath;
+    }
+
+    const QString resolved = resolveConfiguredPath(configured.trimmed());
+    if (QFileInfo::exists(resolved)) {
+        return resolved;
+    }
+
+    const QFileInfo fallback(
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("hole/config/default.json")));
+    return fallback.absoluteFilePath();
+}
+
+HoleInspectionResult runHoleMeasurement(
+    const scan_tracking::mech_eye::PointCloudFrame& cloud,
+    int inspectionPathId)
+{
+    const auto pclCloud = toPclPointCloud(cloud);
+    return runHoleMeasurementWithScanClouds({pclCloud}, inspectionPathId, cloud.pointCount);
+}
+
+HoleInspectionResult runHoleMeasurementFromSegmentFrames(
+    const QList<scan_tracking::mech_eye::PointCloudFrame>& segmentClouds,
+    int inspectionPathId,
+    int sourcePointCount)
+{
+    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> scanClouds;
+    scanClouds.reserve(static_cast<std::size_t>(segmentClouds.size()));
+    for (const auto& segmentCloud : segmentClouds) {
+        auto pclCloud = toPclPointCloud(segmentCloud);
+        if (pclCloud && !pclCloud->empty()) {
+            scanClouds.push_back(std::move(pclCloud));
+        }
+    }
+    return runHoleMeasurementWithScanClouds(
+        scanClouds,
+        inspectionPathId,
+        sourcePointCount > 0 ? sourcePointCount : 0);
 }
 
 }  // namespace scan_tracking::vision::hole

@@ -2,8 +2,8 @@
 
 // 厚度测量算法适配层。
 //
-// 从分段缓存取 inner/outer 两帧点云，执行 direct_raw 厚度测量，
-// 输出厚度与兼容字段，供 TrackingService / StateMachine 写寄存器与 HMI 上报。
+// 从分段缓存取 inner/outer 两帧点云，调用 MeasureThicknessFromScanClouds
+// （与 third_party demo 的 MeasureThickness 核心逻辑一致），输出厚度供 Tracking 上报。
 
 #include <QtCore/QString>
 

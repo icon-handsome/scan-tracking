@@ -2,9 +2,10 @@
 
 // HeadMeasure 柱面/开孔测量算法适配层。
 //
-// 将 Mech-Eye 点云帧转换为 PCL 格式，调用 third_party/Hole MeasurePipeline，
-// 输出内径、圆度、直边、开孔等尺寸，供 TrackingService / StateMachine 写寄存器与 HMI 上报。
+// 调用 MeasurePipeline::runWithScanCloud / runWithScanClouds（与 demo 的 preprocess +
+// mergeFrames 一致），输出内径、圆度、直边、开孔等尺寸。
 
+#include <QtCore/QList>
 #include <QtCore/QString>
 
 #include "HeadMeasure/Types.h"
@@ -26,5 +27,11 @@ QString resolveHoleConfigPath(int inspectionPathId = 0);
 HoleInspectionResult runHoleMeasurement(
     const scan_tracking::mech_eye::PointCloudFrame& cloud,
     int inspectionPathId = 0);
+
+/// 正式检测：多扫描分段逐帧 preprocess 后合并（与 demo mergeFrames 一致）
+HoleInspectionResult runHoleMeasurementFromSegmentFrames(
+    const QList<scan_tracking::mech_eye::PointCloudFrame>& segmentClouds,
+    int inspectionPathId = 0,
+    int sourcePointCount = 0);
 
 }  // namespace scan_tracking::vision::hole

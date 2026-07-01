@@ -162,30 +162,52 @@ CloudPtr preprocess(const CloudConstPtr& input, const MeasureConfig& cfg)
     return filtered;
 }
 
-CloudPtr mergeFrames(const std::vector<std::string>& paths, const MeasureConfig& cfg) 
+CloudPtr mergePreprocessedScans(
+    const std::vector<CloudConstPtr>& rawScans,
+    const MeasureConfig& cfg)
 {
     CloudPtr merged(new Cloud);
-    for (std::size_t i = 0; i < paths.size(); ++i)
-	{
-		CloudPtr frame = loadCloud(paths[i]);
+    for (std::size_t i = 0; i < rawScans.size(); ++i)
+    {
+        const CloudConstPtr& frame = rawScans[i];
+        if (!frame || frame->empty())
+        {
+            continue;
+        }
 
-		PointT min_pt, max_pt;
-		pcl::getMinMax3D(*frame, min_pt, max_pt);
-		std::cout << "����?�?�?: "
-			      << "X: [" << min_pt.x << ", " << max_pt.x << "], "
-			      << "Y: [" << min_pt.y << ", " << max_pt.y << "], "
-			      << "Z: [" << min_pt.z << ", " << max_pt.z << "]" << std::endl;
+        PointT min_pt;
+        PointT max_pt;
+        pcl::getMinMax3D(*frame, min_pt, max_pt);
+        std::cout << "frame_bounds index=" << i
+                  << " X: [" << min_pt.x << ", " << max_pt.x << "], "
+                  << "Y: [" << min_pt.y << ", " << max_pt.y << "], "
+                  << "Z: [" << min_pt.z << ", " << max_pt.z << "]" << std::endl;
 
-		CloudPtr current = preprocess(frame, cfg);
-		*merged += *current;
-		std::cout << "frame_loaded path=" << paths[i] << " points_after_preprocess=" << current->size() << std::endl;
+        CloudPtr current = preprocess(frame, cfg);
+        *merged += *current;
+        std::cout << "frame_preprocessed index=" << i
+                  << " points_after_preprocess=" << current->size() << std::endl;
     }
     if (merged->empty())
-	{
+    {
         throw std::runtime_error("merged cloud is empty");
     }
     return merged;
 }
+
+CloudPtr mergeFrames(const std::vector<std::string>& paths, const MeasureConfig& cfg) 
+{
+    std::vector<CloudConstPtr> rawScans;
+    rawScans.reserve(paths.size());
+    for (std::size_t i = 0; i < paths.size(); ++i)
+    {
+        rawScans.push_back(loadCloud(paths[i]));
+        std::cout << "frame_loaded path=" << paths[i]
+                  << " points=" << rawScans.back()->size() << std::endl;
+    }
+    return mergePreprocessedScans(rawScans, cfg);
+}
+
 
 int nearestPoint(const CloudConstPtr& cloud, const Eigen::Vector3d& query, double maxDistMm, PointT &best_pnt)
 {
@@ -2309,6 +2331,18 @@ MeasureResult MeasurePipeline::runWithScanCloud(const CloudConstPtr& rawScan)
 
     CloudPtr scan = preprocess(rawScan, config_);
     std::cout << "preprocessed_points=" << scan->size() << '\n';
+    return runPipelineWithPreprocessedScan(scan);
+}
+
+MeasureResult MeasurePipeline::runWithScanClouds(const std::vector<CloudConstPtr>& rawScans)
+{
+    if (rawScans.empty())
+    {
+        throw std::runtime_error("input scan clouds are empty");
+    }
+
+    CloudPtr scan = mergePreprocessedScans(rawScans, config_);
+    std::cout << "merged_preprocessed_points=" << scan->size() << '\n';
     return runPipelineWithPreprocessedScan(scan);
 }
 
