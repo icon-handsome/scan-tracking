@@ -66,7 +66,8 @@ BevelInspectionResult runBevelMeasurement(
     const scan_tracking::mech_eye::PointCloudFrame& cloud,
     const scan_tracking::common::BevelRecipe& recipe,
     float angleTolDeg,
-    float lengthTolMm);
+    float lengthTolMm,
+    int maxInputPointCount = 200000);
 
 /// 从 PCD/PLY/TXT 点云文件执行坡口测量（PCL 加载与释放在 Po_Kou 模块内完成）。
 BevelInspectionResult runBevelMeasurementFromPointCloudFile(

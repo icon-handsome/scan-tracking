@@ -59,13 +59,19 @@ CloudT::Ptr reownCloudPoints(const CloudT::ConstPtr& input)
     return output;
 }
 
+std::vector<CloudT::Ptr>& adoptedPclIntermediateCloudLeaks()
+{
+    // PCL 滤波/IO 在 Windows DLL 堆上分配点云；进程退出时若析构 static 容器会触发 aligned_free 崩溃。
+    static std::vector<CloudT::Ptr>* leaks = new std::vector<CloudT::Ptr>();
+    return *leaks;
+}
+
 void adoptPclIntermediateCloud(CloudT::Ptr& cloud)
 {
     if (!cloud) {
         return;
     }
-    static std::vector<CloudT::Ptr> adoptedPclClouds;
-    adoptedPclClouds.push_back(cloud);
+    adoptedPclIntermediateCloudLeaks().push_back(cloud);
     cloud.reset();
 }
 

@@ -13,6 +13,7 @@
 #include <string>
 
 #include <QtCore/QJsonObject>
+#include <QtCore/QList>
 #include <QtCore/QMetaType>
 #include <QtCore/QString>
 #include <QtCore/QtGlobal>
@@ -125,6 +126,19 @@ public:
     /// 坡口离线/文件路径测量：PCL 在 Po_Kou 模块内加载，避免跨模块堆释放崩溃
     InspectionResult inspectBevelPointCloudFile(
         const QString& cloudPath,
+        int inspectionPathId = 0,
+        bool notifyListener = true) const;
+
+    /// 坡口离线目录回放：逐文件测量后取均值（与 Po_Kou demo 一致，不合并大点云）
+    InspectionResult inspectBevelPointCloudFilesAveraged(
+        const QStringList& cloudFiles,
+        int inspectionPathId = 0,
+        bool notifyListener = true) const;
+
+    /// 坡口正式检测：逐扫描分段测量后取均值（不合并大点云）
+    InspectionResult inspectBevelPointCloudFramesAveraged(
+        const QList<scan_tracking::mech_eye::PointCloudFrame>& segmentClouds,
+        int sourcePointCount,
         int inspectionPathId = 0,
         bool notifyListener = true) const;
 

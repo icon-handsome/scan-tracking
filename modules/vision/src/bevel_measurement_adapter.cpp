@@ -520,7 +520,8 @@ BevelInspectionResult runBevelMeasurement(
     const scan_tracking::mech_eye::PointCloudFrame& cloud,
     const scan_tracking::common::BevelRecipe& recipe,
     float angleTolDeg,
-    float lengthTolMm)
+    float lengthTolMm,
+    int maxInputPointCount)
 {
     BevelInspectionResult result;
     if (!cloud.isValid() || cloud.pointCount <= 0) {
@@ -534,7 +535,9 @@ BevelInspectionResult runBevelMeasurement(
         return result;
     }
 
-    xyz = limitXyzPointCountByStride(xyz, kBevelOfflineReplayMaxInputPoints);
+    if (maxInputPointCount > 0) {
+        xyz = limitXyzPointCountByStride(xyz, maxInputPointCount);
+    }
     return invokeBevelAlgorithmFromXyzBuffer(xyz, recipe, angleTolDeg, lengthTolMm);
 }
 

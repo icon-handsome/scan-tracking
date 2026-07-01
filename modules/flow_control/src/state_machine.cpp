@@ -2759,7 +2759,7 @@ void StateMachine::applySegmentRefinementOutcome(const SegmentProcessOutcome& ou
  * 
  * 关键步骤：
  * 1. 检查跟踪服务是否可用
- * 2. 调用 inspectPointCloud 进行坡口测量
+ * 2. 坡口：逐分段测量取均值；其余类型：合并点云后 inspectPointCloud
  * 3. 将检测结果写入 PLC
  * 4. 根据检测结果决定任务成功或失败
  * 5. 清空点云缓存（检测完成后不再需要原始点云）
@@ -3296,15 +3296,15 @@ const protocol::TriggerDefinition* StateMachine::selectPendingTrigger(
     return nullptr;
 }
 
-bool StateMachine::loadMergedPointCloudForInspection(
-    scan_tracking::mech_eye::PointCloudFrame* outCloud,
+bool StateMachine::loadSegmentPointCloudsForInspection(
+    QList<scan_tracking::mech_eye::PointCloudFrame>* outSegments,
     int* totalPointCount,
     int* segmentCount,
     QString* errorMessage)
 {
-    if (outCloud == nullptr) {
+    if (outSegments == nullptr) {
         if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("综合检测失败：输出点云指针为空。");
+            *errorMessage = QStringLiteral("综合检测失败：输出分段列表指针为空。");
         }
         return false;
     }
@@ -3350,9 +3350,10 @@ bool StateMachine::loadMergedPointCloudForInspection(
         return false;
     }
 
-    auto mergedPoints = std::make_shared<std::vector<float>>();
+    outSegments->clear();
     int mergedPointCount = 0;
     int mergedSegmentCount = 0;
+    auto mergedPoints = std::make_shared<std::vector<float>>();
 
     {
         std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
@@ -3387,6 +3388,7 @@ bool StateMachine::loadMergedPointCloudForInspection(
                 continue;
             }
 
+            outSegments->push_back(cloud);
             mergedPoints->reserve(
                 mergedPoints->size() + static_cast<std::size_t>(pointCount * 3));
             for (int index = 0; index < pointCount; ++index) {
@@ -3409,20 +3411,18 @@ bool StateMachine::loadMergedPointCloudForInspection(
         return false;
     }
 
-    scan_tracking::mech_eye::PointCloudFrame mergedCloud;
-    mergedCloud.pointsXYZ = std::move(mergedPoints);
-    mergedCloud.pointCount = mergedPointCount;
-    mergedCloud.width = mergedPointCount;
-    mergedCloud.height = 1;
-
     if (scan_tracking::common::segmentCaptureExportEnabled() && m_poseStitchRunRootDirectory.isEmpty()) {
         ensurePoseStitchRunRootDirectory();
     }
     if (scan_tracking::common::segmentCaptureExportEnabled()) {
+        scan_tracking::mech_eye::PointCloudFrame mergedCloud;
+        mergedCloud.pointsXYZ = mergedPoints;
+        mergedCloud.pointCount = mergedPointCount;
+        mergedCloud.width = mergedPointCount;
+        mergedCloud.height = 1;
         persistMergedInspectionPointCloudToDisk(inspectPathId, mergedSegmentCount, mergedCloud);
     }
 
-    *outCloud = std::move(mergedCloud);
     if (totalPointCount != nullptr) {
         *totalPointCount = mergedPointCount;
     }
@@ -3431,8 +3431,74 @@ bool StateMachine::loadMergedPointCloudForInspection(
     }
 
     qInfo(LOG_FLOW).noquote()
-        << QStringLiteral("[多路径] 路径级点云合并 pathId=") << inspectPathId
+        << QStringLiteral("[多路径] 路径级点云分段就绪 pathId=") << inspectPathId
         << QStringLiteral(" 参与段数=") << mergedSegmentCount
+        << QStringLiteral(" 总点数=") << mergedPointCount;
+
+    return true;
+}
+
+bool StateMachine::loadMergedPointCloudForInspection(
+    scan_tracking::mech_eye::PointCloudFrame* outCloud,
+    int* totalPointCount,
+    int* segmentCount,
+    QString* errorMessage)
+{
+    if (outCloud == nullptr) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("综合检测失败：输出点云指针为空。");
+        }
+        return false;
+    }
+
+    QList<scan_tracking::mech_eye::PointCloudFrame> segments;
+    if (!loadSegmentPointCloudsForInspection(
+            &segments, totalPointCount, segmentCount, errorMessage)) {
+        return false;
+    }
+
+    auto mergedPoints = std::make_shared<std::vector<float>>();
+    int mergedPointCount = 0;
+    for (const auto& segmentCloud : segments) {
+        if (!segmentCloud.isValid() || !segmentCloud.pointsXYZ || segmentCloud.pointCount <= 0) {
+            continue;
+        }
+
+        const int availablePointCount =
+            static_cast<int>(segmentCloud.pointsXYZ->size() / 3);
+        const int pointCount = std::min(segmentCloud.pointCount, availablePointCount);
+        if (pointCount <= 0) {
+            continue;
+        }
+
+        mergedPoints->reserve(
+            mergedPoints->size() + static_cast<std::size_t>(pointCount * 3));
+        for (int index = 0; index < pointCount; ++index) {
+            const auto base = static_cast<std::size_t>(index * 3);
+            mergedPoints->push_back((*segmentCloud.pointsXYZ)[base]);
+            mergedPoints->push_back((*segmentCloud.pointsXYZ)[base + 1]);
+            mergedPoints->push_back((*segmentCloud.pointsXYZ)[base + 2]);
+        }
+        mergedPointCount += pointCount;
+    }
+
+    if (mergedPointCount <= 0) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("综合检测失败：合并点云为空。");
+        }
+        return false;
+    }
+
+    scan_tracking::mech_eye::PointCloudFrame mergedCloud;
+    mergedCloud.pointsXYZ = std::move(mergedPoints);
+    mergedCloud.pointCount = mergedPointCount;
+    mergedCloud.width = mergedPointCount;
+    mergedCloud.height = 1;
+    *outCloud = std::move(mergedCloud);
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[多路径] 路径级点云合并 pathId=") << m_activeTask.inspectionPathId
+        << QStringLiteral(" 参与段数=") << (segmentCount != nullptr ? *segmentCount : segments.size())
         << QStringLiteral(" 总点数=") << mergedPointCount;
 
     return true;
@@ -3645,6 +3711,23 @@ tracking::InspectionResult StateMachine::runDebugInspectionOnCachedSegments() co
             outerPointCount,
             inspectPathId,
             false);
+    }
+
+    if (inspectionType == scan_tracking::common::InspectionType::Bevel) {
+        QList<scan_tracking::mech_eye::PointCloudFrame> segmentClouds;
+        int totalPointCount = 0;
+        int segmentCount = 0;
+        if (!mutableSelf->loadSegmentPointCloudsForInspection(
+                &segmentClouds, &totalPointCount, &segmentCount, &loadError)) {
+            failure.ngReasonWord0 = (1u << 4);
+            failure.message = loadError.isEmpty()
+                ? QStringLiteral("调试综合检测失败：无法加载坡口分段点云。")
+                : loadError;
+            return failure;
+        }
+
+        return m_tracking->inspectBevelPointCloudFramesAveraged(
+            segmentClouds, totalPointCount, inspectPathId, false);
     }
 
     scan_tracking::mech_eye::PointCloudFrame mergedCloud;
@@ -3868,46 +3951,10 @@ tracking::InspectionResult StateMachine::runOfflineBevelInspectionFromDataDir()
     }
 
     qInfo(LOG_FLOW).noquote()
-        << QStringLiteral("[Bevel] 离线回放将先合并后一次性测量，文件数=") << cloudFiles.size();
-
-    auto mergedPoints = std::make_shared<std::vector<float>>();
-    int totalPointCount = 0;
-
-    for (const QString& cloudPath : cloudFiles) {
-        const QFileInfo sourceInfo(cloudPath);
-        std::vector<float> xyz;
-        const bool loaded = sourceInfo.suffix().toLower() == QStringLiteral("ply")
-            ? scan_tracking::mech_eye::loadPointCloudXyzFromPly(
-                  sourceInfo.absoluteFilePath(), &xyz, 0)
-            : scan_tracking::mech_eye::loadPointCloudXyzFromPcd(
-                  sourceInfo.absoluteFilePath(), &xyz, 0);
-        if (!loaded || xyz.empty()) {
-            failure.message = QStringLiteral("离线回放失败：无法解析点云：%1").arg(cloudPath);
-            qWarning(LOG_FLOW).noquote() << failure.message;
-            return failure;
-        }
-
-        mergedPoints->reserve(mergedPoints->size() + xyz.size());
-        mergedPoints->insert(mergedPoints->end(), xyz.begin(), xyz.end());
-        totalPointCount += static_cast<int>(xyz.size() / 3);
-
-        qInfo(LOG_FLOW).noquote()
-            << QStringLiteral("[Bevel] 离线回放已加载文件") << cloudPath
-            << QStringLiteral(" 点数=") << (xyz.size() / 3);
-    }
-
-    scan_tracking::mech_eye::PointCloudFrame mergedCloud;
-    mergedCloud.pointsXYZ = std::move(mergedPoints);
-    mergedCloud.pointCount = totalPointCount;
-    mergedCloud.width = totalPointCount;
-    mergedCloud.height = 1;
-
-    qInfo(LOG_FLOW).noquote()
-        << QStringLiteral("[Bevel] 离线回放点云已合并 总点数=") << totalPointCount
-        << QStringLiteral(" 文件数=") << cloudFiles.size();
+        << QStringLiteral("[Bevel] 离线回放将逐文件测量后取均值，文件数=") << cloudFiles.size();
 
     const tracking::InspectionResult result =
-        m_tracking->inspectPointCloud(mergedCloud, totalPointCount, pathId, false);
+        m_tracking->inspectBevelPointCloudFilesAveraged(cloudFiles, pathId, false);
 
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[Bevel] 离线回放完成 resultCode=") << result.resultCode

@@ -180,6 +180,42 @@ scan_tracking::common::InspectionType resolveInspectionType(
     return scan_tracking::common::InspectionType::Bevel;
 }
 
+scan_tracking::vision::bevel::BevelInspectionResult aggregateBevelDetections(
+    const scan_tracking::common::BevelRecipe& recipe,
+    const scan_tracking::vision::bevel::BevelSolveOptions& solveOptions,
+    double angleSum,
+    double lengthSum,
+    double icpFitnessSum,
+    int measuredCount,
+    const QString& unitLabel)
+{
+    scan_tracking::vision::bevel::BevelInspectionResult aggregated;
+    aggregated.invoked = true;
+    aggregated.ok = true;
+    aggregated.bevelType = recipe.bevelType;
+    aggregated.angleDeg = static_cast<float>(angleSum / measuredCount);
+    aggregated.lengthMm = static_cast<float>(lengthSum / measuredCount);
+    aggregated.icpFitness = static_cast<float>(icpFitnessSum / measuredCount);
+
+    const bool angleOk =
+        aggregated.angleDeg >= static_cast<float>(solveOptions.standardAngleMinDeg) &&
+        aggregated.angleDeg <= static_cast<float>(solveOptions.standardAngleMaxDeg);
+    const bool lengthOk =
+        aggregated.lengthMm >= static_cast<float>(solveOptions.standardLengthMin) &&
+        aggregated.lengthMm <= static_cast<float>(solveOptions.standardLengthMax);
+    aggregated.qualityCode = (angleOk ? 0 : 1) | (lengthOk ? 0 : 2);
+    aggregated.message = QStringLiteral(
+        "坡口测量完成（%1）：angle=%2 deg, length=%3 mm, bevelType=%4, "
+        "icpFitness=%5, qualityCode=%6。")
+                             .arg(unitLabel)
+                             .arg(aggregated.angleDeg, 0, 'f', 3)
+                             .arg(aggregated.lengthMm, 0, 'f', 3)
+                             .arg(aggregated.bevelType)
+                             .arg(aggregated.icpFitness, 0, 'f', 6)
+                             .arg(aggregated.qualityCode);
+    return aggregated;
+}
+
 }  // namespace
 
 void appendInspectionMeasurementFields(QJsonObject& payload, const InspectionMeasurement& measurement)
@@ -625,6 +661,262 @@ InspectionResult TrackingService::inspectBevelPointCloudFile(
                          .arg(detection.lengthMm, 0, 'f', 3)
                          .arg(detection.bevelType)
                          .arg(detection.icpFitness, 0, 'f', 6);
+    result.measureItemCount = countMeasuredItems(result.measurement);
+    return deliverInspectionResult(result, notifyListener);
+}
+
+InspectionResult TrackingService::inspectBevelPointCloudFilesAveraged(
+    const QStringList& cloudFiles,
+    int inspectionPathId,
+    bool notifyListener) const
+{
+    ensureInspectionMeasurementMetaTypeRegistered();
+
+    InspectionResult result;
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    const scan_tracking::common::InspectionType inspectionType =
+        resolveInspectionType(configManager, inspectionPathId);
+    if (inspectionType != scan_tracking::common::InspectionType::Bevel) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral(
+            "坡口文件测量失败：路径 %1 的 inspectionType 不是 bevel。").arg(inspectionPathId);
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    if (configManager == nullptr || !configManager->hasActiveBevelRecipe()) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral("请先通过 HMI 设置坡口配方（cmd.set_bevel_recipe）。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    if (cloudFiles.isEmpty()) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral("坡口文件测量失败：点云文件列表为空。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    const scan_tracking::common::BevelRecipe recipe = configManager->bevelRecipe();
+    const scan_tracking::common::BevelConfig& bevelConfig = configManager->bevelConfig();
+    const scan_tracking::vision::bevel::BevelSolveOptions solveOptions =
+        scan_tracking::vision::bevel::buildBevelSolveOptions(
+            recipe, bevelConfig.angleTolDeg, bevelConfig.lengthTolMm);
+
+    double angleSum = 0.0;
+    double lengthSum = 0.0;
+    double icpFitnessSum = 0.0;
+    int measuredCount = 0;
+
+    for (int index = 0; index < cloudFiles.size(); ++index) {
+        const QString& cloudPath = cloudFiles.at(index);
+        const auto detection = scan_tracking::vision::bevel::runBevelMeasurementFromPointCloudFile(
+            cloudPath, recipe, bevelConfig.angleTolDeg, bevelConfig.lengthTolMm);
+
+        if (!detection.invoked) {
+            result.resultCode = 2;
+            result.ngReasonWord0 = (1u << 4);
+            result.message = detection.message.isEmpty()
+                ? QStringLiteral("坡口测量适配层未启动。")
+                : detection.message;
+            return deliverInspectionResult(result, notifyListener);
+        }
+
+        if (!detection.ok) {
+            result.resultCode = 2;
+            result.ngReasonWord0 = (1u << 5);
+            result.message = QStringLiteral("坡口测量算法失败（文件 %1/%2）：%3")
+                                 .arg(index + 1)
+                                 .arg(cloudFiles.size())
+                                 .arg(detection.message.isEmpty()
+                                          ? QStringLiteral("未知错误")
+                                          : detection.message);
+            return deliverInspectionResult(result, notifyListener);
+        }
+
+        angleSum += static_cast<double>(detection.angleDeg);
+        lengthSum += static_cast<double>(detection.lengthMm);
+        icpFitnessSum += static_cast<double>(detection.icpFitness);
+        ++measuredCount;
+
+        qInfo(LOG_TRACKING).noquote()
+            << QStringLiteral("[Bevel] 单文件测量 Cloud") << (index + 1) << QLatin1Char('/')
+            << cloudFiles.size()
+            << QStringLiteral(" file=") << cloudPath
+            << QStringLiteral(" angleDeg=") << detection.angleDeg
+            << QStringLiteral(" lengthMm=") << detection.lengthMm
+            << QStringLiteral(" icpFitness=") << detection.icpFitness;
+    }
+
+    const auto aggregated = aggregateBevelDetections(
+        recipe,
+        solveOptions,
+        angleSum,
+        lengthSum,
+        icpFitnessSum,
+        measuredCount,
+        QStringLiteral("%1 文件均值").arg(measuredCount));
+
+    qInfo(LOG_TRACKING).noquote()
+        << QStringLiteral("[Bevel] 多文件均值结果")
+        << QStringLiteral(" fileCount=") << measuredCount
+        << QStringLiteral(" angleDeg=") << aggregated.angleDeg
+        << QStringLiteral(" lengthMm=") << aggregated.lengthMm
+        << QStringLiteral(" icpFitness=") << aggregated.icpFitness
+        << QStringLiteral(" qualityCode=") << aggregated.qualityCode;
+
+    result.sourcePointCount = 0;
+    result.measurement = measurementFromBevelResult(aggregated);
+
+    if (aggregated.qualityCode != 0) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 6);
+        result.message = aggregated.message;
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    result.resultCode = 1;
+    result.message = QStringLiteral(
+        "坡口测量通过（%1 文件均值）：angle=%2 deg, length=%3 mm, bevelType=%4, "
+        "icpFitness=%5, qualityCode=0。")
+                         .arg(measuredCount)
+                         .arg(aggregated.angleDeg, 0, 'f', 3)
+                         .arg(aggregated.lengthMm, 0, 'f', 3)
+                         .arg(aggregated.bevelType)
+                         .arg(aggregated.icpFitness, 0, 'f', 6);
+    result.measureItemCount = countMeasuredItems(result.measurement);
+    return deliverInspectionResult(result, notifyListener);
+}
+
+InspectionResult TrackingService::inspectBevelPointCloudFramesAveraged(
+    const QList<scan_tracking::mech_eye::PointCloudFrame>& segmentClouds,
+    int sourcePointCount,
+    int inspectionPathId,
+    bool notifyListener) const
+{
+    ensureInspectionMeasurementMetaTypeRegistered();
+
+    InspectionResult result;
+    result.sourcePointCount = sourcePointCount;
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    const scan_tracking::common::InspectionType inspectionType =
+        resolveInspectionType(configManager, inspectionPathId);
+    if (inspectionType != scan_tracking::common::InspectionType::Bevel) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral(
+            "坡口分段测量失败：路径 %1 的 inspectionType 不是 bevel。").arg(inspectionPathId);
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    if (configManager == nullptr || !configManager->hasActiveBevelRecipe()) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral("请先通过 HMI 设置坡口配方（cmd.set_bevel_recipe）。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    if (segmentClouds.isEmpty()) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral("坡口分段测量失败：点云分段列表为空。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    const scan_tracking::common::BevelRecipe recipe = configManager->bevelRecipe();
+    const scan_tracking::common::BevelConfig& bevelConfig = configManager->bevelConfig();
+    const scan_tracking::vision::bevel::BevelSolveOptions solveOptions =
+        scan_tracking::vision::bevel::buildBevelSolveOptions(
+            recipe, bevelConfig.angleTolDeg, bevelConfig.lengthTolMm);
+
+    double angleSum = 0.0;
+    double lengthSum = 0.0;
+    double icpFitnessSum = 0.0;
+    int measuredCount = 0;
+
+    for (int index = 0; index < segmentClouds.size(); ++index) {
+        const auto& segmentCloud = segmentClouds.at(index);
+        const auto detection = scan_tracking::vision::bevel::runBevelMeasurement(
+            segmentCloud,
+            recipe,
+            bevelConfig.angleTolDeg,
+            bevelConfig.lengthTolMm,
+            0);
+
+        if (!detection.invoked) {
+            result.resultCode = 2;
+            result.ngReasonWord0 = (1u << 4);
+            result.message = detection.message.isEmpty()
+                ? QStringLiteral("坡口测量适配层未启动。")
+                : detection.message;
+            return deliverInspectionResult(result, notifyListener);
+        }
+
+        if (!detection.ok) {
+            result.resultCode = 2;
+            result.ngReasonWord0 = (1u << 5);
+            result.message = QStringLiteral("坡口测量算法失败（分段 %1/%2）：%3")
+                                 .arg(index + 1)
+                                 .arg(segmentClouds.size())
+                                 .arg(detection.message.isEmpty()
+                                          ? QStringLiteral("未知错误")
+                                          : detection.message);
+            return deliverInspectionResult(result, notifyListener);
+        }
+
+        angleSum += static_cast<double>(detection.angleDeg);
+        lengthSum += static_cast<double>(detection.lengthMm);
+        icpFitnessSum += static_cast<double>(detection.icpFitness);
+        ++measuredCount;
+
+        qInfo(LOG_TRACKING).noquote()
+            << QStringLiteral("[Bevel] 单分段测量 Segment") << (index + 1) << QLatin1Char('/')
+            << segmentClouds.size()
+            << QStringLiteral(" pointCount=") << segmentCloud.pointCount
+            << QStringLiteral(" angleDeg=") << detection.angleDeg
+            << QStringLiteral(" lengthMm=") << detection.lengthMm
+            << QStringLiteral(" icpFitness=") << detection.icpFitness;
+    }
+
+    const auto aggregated = aggregateBevelDetections(
+        recipe,
+        solveOptions,
+        angleSum,
+        lengthSum,
+        icpFitnessSum,
+        measuredCount,
+        QStringLiteral("%1 分段均值").arg(measuredCount));
+
+    qInfo(LOG_TRACKING).noquote()
+        << QStringLiteral("[Bevel] 多分段均值结果")
+        << QStringLiteral(" segmentCount=") << measuredCount
+        << QStringLiteral(" sourcePointCount=") << sourcePointCount
+        << QStringLiteral(" angleDeg=") << aggregated.angleDeg
+        << QStringLiteral(" lengthMm=") << aggregated.lengthMm
+        << QStringLiteral(" icpFitness=") << aggregated.icpFitness
+        << QStringLiteral(" qualityCode=") << aggregated.qualityCode;
+
+    result.measurement = measurementFromBevelResult(aggregated);
+
+    if (aggregated.qualityCode != 0) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 6);
+        result.message = aggregated.message;
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    result.resultCode = 1;
+    result.message = QStringLiteral(
+        "坡口测量通过（%1 分段均值）：angle=%2 deg, length=%3 mm, bevelType=%4, "
+        "icpFitness=%5, qualityCode=0。")
+                         .arg(measuredCount)
+                         .arg(aggregated.angleDeg, 0, 'f', 3)
+                         .arg(aggregated.lengthMm, 0, 'f', 3)
+                         .arg(aggregated.bevelType)
+                         .arg(aggregated.icpFitness, 0, 'f', 6);
     result.measureItemCount = countMeasuredItems(result.measurement);
     return deliverInspectionResult(result, notifyListener);
 }

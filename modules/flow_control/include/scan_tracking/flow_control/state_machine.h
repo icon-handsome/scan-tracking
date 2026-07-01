@@ -514,6 +514,13 @@ private:
         int* segmentCount,
         QString* errorMessage);
 
+    // 坡口检测：从内存缓存按分段取出点云（不合并，供逐段测量取均值）
+    bool loadSegmentPointCloudsForInspection(
+        QList<scan_tracking::mech_eye::PointCloudFrame>* outSegments,
+        int* totalPointCount,
+        int* segmentCount,
+        QString* errorMessage);
+
     // 厚度检测：按路径配置段号加载 inner/outer 两帧点云
     bool loadThicknessPointCloudsForInspection(
         scan_tracking::mech_eye::PointCloudFrame* outInnerCloud,

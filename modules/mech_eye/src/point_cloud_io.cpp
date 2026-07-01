@@ -36,6 +36,20 @@ namespace scan_tracking::mech_eye {
 
 namespace {
 
+using PclXyzCloud = pcl::PointCloud<pcl::PointXYZ>;
+using PclXyzCloudPtr = pcl::PointCloud<pcl::PointXYZ>::Ptr;
+
+/** PCL IO 在 Windows DLL 堆分配点云；析构时若由 exe 释放会触发 aligned_free 崩溃。 */
+void adoptLoadedPclCloud(PclXyzCloudPtr& cloud)
+{
+    if (!cloud) {
+        return;
+    }
+    static std::vector<PclXyzCloudPtr>* leaks = new std::vector<PclXyzCloudPtr>();
+    leaks->push_back(cloud);
+    cloud.reset();
+}
+
 /** @brief 判断三维坐标是否为有限值（非 NaN/Inf） */
 bool isFinitePoint(float x, float y, float z)
 {
@@ -707,6 +721,8 @@ bool loadPointCloudFrameFromPcd(const QString& absolutePath, PointCloudFrame* ou
                 << QStringLiteral("loadPointCloudFrameFromPcd：无有效点") << absolutePath;
             return false;
         }
+
+        adoptLoadedPclCloud(pclCloud);
     }
 
     auto points = std::make_shared<std::vector<float>>(std::move(xyz));
@@ -821,6 +837,8 @@ bool loadPointCloudXyzFromPcd(
             << QStringLiteral("loadPointCloudXyzFromPcd：无有效点") << absolutePath;
         return false;
     }
+
+    adoptLoadedPclCloud(pclCloud);
 
     qInfo(LOG_POINT_CLOUD_IO).noquote()
         << QStringLiteral("PCD xyz 已提取：") << absolutePath
