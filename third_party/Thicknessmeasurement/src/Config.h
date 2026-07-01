@@ -29,14 +29,6 @@ struct PreprocessConfig
     double leafSize;
 };
 
-struct IcpConfig
-{
-    int maxIterations;
-    double maxCorrespondenceDistance;
-    double transformationEpsilon;
-    double euclideanFitnessEpsilon;
-};
-
 struct CylinderConfig
 {
     Point3d axisPoint;
@@ -58,7 +50,6 @@ struct ThicknessConfig
 {
     PointCloudConfig pointCloud;
     PreprocessConfig preprocess;
-    IcpConfig icp;
     ThicknessMethod thicknessMethod;
     CylinderConfig templateCylinder;
     std::vector<Point3d> templateFeaturePoints;

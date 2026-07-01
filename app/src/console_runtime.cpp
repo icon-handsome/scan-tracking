@@ -22,6 +22,7 @@
 #include <QtCore/QPointer>
 #include <QtCore/QSettings>
 #include <QtCore/QString>
+#include <QtCore/QEventLoop>
 #include <QtCore/QTimer>
 
 #include <thread>
@@ -79,7 +80,10 @@ ConsoleRuntime::ConsoleRuntime(QCoreApplication& application)
 {
 }
 
-ConsoleRuntime::~ConsoleRuntime() = default;
+ConsoleRuntime::~ConsoleRuntime()
+{
+    printShutdownStatus();
+}
 
 int ConsoleRuntime::run()
 {
@@ -581,12 +585,30 @@ void ConsoleRuntime::initVisionFlowModules(
     scheduleAutoLatencyBundleTest();
     scheduleOfflineHoleReplay();
     scheduleOfflineInternalSurfaceReplay();
+    scheduleOfflineBevelReplay();
+    scheduleOfflineThicknessReplay();
 }
 
 void ConsoleRuntime::stopAutoLatencyBundleTest()
 {
     if (m_autoLatencyTimer != nullptr) {
         m_autoLatencyTimer->stop();
+    }
+}
+
+void ConsoleRuntime::stopOfflineReplayTimers()
+{
+    if (m_offlineHoleReplayTimer != nullptr) {
+        m_offlineHoleReplayTimer->stop();
+    }
+    if (m_offlineInternalSurfaceReplayTimer != nullptr) {
+        m_offlineInternalSurfaceReplayTimer->stop();
+    }
+    if (m_offlineBevelReplayTimer != nullptr) {
+        m_offlineBevelReplayTimer->stop();
+    }
+    if (m_offlineThicknessReplayTimer != nullptr) {
+        m_offlineThicknessReplayTimer->stop();
     }
 }
 
@@ -607,6 +629,9 @@ void ConsoleRuntime::scheduleAutoLatencyBundleTest()
     }
 
     QSettings settings(iniPath, QSettings::IniFormat);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    settings.setIniCodec("UTF-8");
+#endif
     settings.beginGroup(QStringLiteral("Debug"));
     // autoLatencyBundleTestEnabled / DelayMs / Periodic 控制延时测试行为
     const bool enabled = settings.value(QStringLiteral("autoLatencyBundleTestEnabled"), false).toBool();
@@ -676,8 +701,10 @@ void ConsoleRuntime::scheduleOfflineHoleReplay()
 
 void ConsoleRuntime::triggerOfflineHoleReplay()
 {
-    if (stateMachine_ == nullptr) {
-        qWarning(appLog) << QStringLiteral("[Hole] 离线回放跳过：StateMachine 不可用。");
+    if (m_shutdownCompleted || stateMachine_ == nullptr) {
+        if (!m_shutdownCompleted) {
+            qWarning(appLog) << QStringLiteral("[Hole] 离线回放跳过：StateMachine 不可用。");
+        }
         return;
     }
 
@@ -690,11 +717,20 @@ void ConsoleRuntime::triggerOfflineHoleReplay()
 void ConsoleRuntime::scheduleOfflineInternalSurfaceReplay()
 {
     if (stateMachine_ == nullptr) {
+        qWarning(appLog) << QStringLiteral("[InternalSurface] 离线回放未调度：StateMachine 不可用。");
         return;
     }
 
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
-    if (configManager == nullptr || !configManager->internalSurfaceConfig().offlineReplayEnabled) {
+    if (configManager == nullptr) {
+        qWarning(appLog) << QStringLiteral("[InternalSurface] 离线回放未调度：ConfigManager 不可用。");
+        return;
+    }
+    if (!configManager->internalSurfaceConfig().offlineReplayEnabled) {
+        qInfo(appLog).noquote()
+            << QStringLiteral("[InternalSurface] 离线回放未启用（config=")
+            << configManager->configFilePath()
+            << QStringLiteral(" [InternalSurface] offlineReplayEnabled=false）");
         return;
     }
 
@@ -720,8 +756,10 @@ void ConsoleRuntime::scheduleOfflineInternalSurfaceReplay()
 
 void ConsoleRuntime::triggerOfflineInternalSurfaceReplay()
 {
-    if (stateMachine_ == nullptr) {
-        qWarning(appLog) << QStringLiteral("[InternalSurface] 离线回放跳过：StateMachine 不可用。");
+    if (m_shutdownCompleted || stateMachine_ == nullptr) {
+        if (!m_shutdownCompleted) {
+            qWarning(appLog) << QStringLiteral("[InternalSurface] 离线回放跳过：StateMachine 不可用。");
+        }
         return;
     }
 
@@ -735,21 +773,140 @@ void ConsoleRuntime::triggerOfflineInternalSurfaceReplay()
         << QStringLiteral("[InternalSurface] 离线回放后台线程启动（避免主线程大点云处理崩溃）");
 
     auto* stateMachine = stateMachine_.get();
-    std::thread([this, stateMachine]() {
-        const tracking::InspectionResult result =
-            stateMachine->runOfflineInternalSurfaceInspectionFromFile(false);
+    const QPointer<scan_tracking::flow_control::StateMachine> stateMachineWeak(stateMachine);
+    bool* inFlightFlag = &m_offlineInternalSurfaceReplayInFlight;
+    std::thread([stateMachineWeak, inFlightFlag]() {
+        tracking::InspectionResult result;
+        result.resultCode = 2;
+        result.message = QStringLiteral("内表面离线回放已取消：应用正在退出。");
+        if (stateMachineWeak) {
+            result = stateMachineWeak->runOfflineInternalSurfaceInspectionFromFile(false);
+        }
+
+        QCoreApplication* app = QCoreApplication::instance();
+        if (app == nullptr) {
+            return;
+        }
 
         QMetaObject::invokeMethod(
-            &application_,
-            [this, stateMachine, result]() {
-                m_offlineInternalSurfaceReplayInFlight = false;
-                stateMachine->deliverOfflineInternalSurfaceInspectionResult(result);
+            app,
+            [stateMachineWeak, result, inFlightFlag]() {
+                if (!stateMachineWeak) {
+                    return;
+                }
+                if (inFlightFlag != nullptr) {
+                    *inFlightFlag = false;
+                }
+                stateMachineWeak->deliverOfflineInternalSurfaceInspectionResult(result);
                 qInfo(appLog).noquote()
                     << QStringLiteral("[InternalSurface] 离线回放结果 resultCode=")
-                    << result.resultCode << QStringLiteral(" message=") << result.message;
+                    << result.resultCode << QStringLiteral(" message=") << result.message
+                    << QStringLiteral(" depthMm=") << result.measurement.headDepthMm
+                    << QStringLiteral(" volumeM3=") << result.measurement.headVolumeM3;
             },
             Qt::QueuedConnection);
     }).detach();
+}
+
+void ConsoleRuntime::scheduleOfflineBevelReplay()
+{
+    if (stateMachine_ == nullptr) {
+        qWarning(appLog) << QStringLiteral("[Bevel] 离线回放未调度：StateMachine 不可用。");
+        return;
+    }
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr) {
+        qWarning(appLog) << QStringLiteral("[Bevel] 离线回放未调度：ConfigManager 不可用。");
+        return;
+    }
+    if (!configManager->bevelConfig().offlineReplayEnabled) {
+        qInfo(appLog).noquote()
+            << QStringLiteral("[Bevel] 离线回放未启用（config=")
+            << configManager->configFilePath()
+            << QStringLiteral(" [Bevel] offlineReplayEnabled=false）");
+        return;
+    }
+
+    const int delayMs = configManager->bevelConfig().offlineReplayDelayMs;
+    if (m_offlineBevelReplayTimer == nullptr) {
+        m_offlineBevelReplayTimer = new QTimer(&application_);
+        QObject::connect(m_offlineBevelReplayTimer, &QTimer::timeout, &application_, [this]() {
+            triggerOfflineBevelReplay();
+        });
+    }
+
+    m_offlineBevelReplayTimer->setSingleShot(true);
+    m_offlineBevelReplayTimer->setInterval(delayMs > 0 ? delayMs : 5000);
+    m_offlineBevelReplayTimer->start();
+
+    qInfo(appLog).noquote()
+        << QStringLiteral("[Bevel] 离线回放已调度：") << (delayMs > 0 ? delayMs : 5000)
+        << QStringLiteral("ms 后加载 PCD/PLY 点云并执行坡口测量；关闭请设 offlineReplayEnabled=false");
+}
+
+void ConsoleRuntime::triggerOfflineBevelReplay()
+{
+    if (m_shutdownCompleted || stateMachine_ == nullptr) {
+        if (!m_shutdownCompleted) {
+            qWarning(appLog) << QStringLiteral("[Bevel] 离线回放跳过：StateMachine 不可用。");
+        }
+        return;
+    }
+
+    // 与 Trig_Inspection 一致：PCL 算法须在主线程串行执行（持 pointCloudAlgorithmMutex）。
+    const tracking::InspectionResult result = stateMachine_->runOfflineBevelInspectionFromDataDir();
+    stateMachine_->deliverOfflineBevelInspectionResult(result);
+}
+
+void ConsoleRuntime::scheduleOfflineThicknessReplay()
+{
+    if (stateMachine_ == nullptr) {
+        qWarning(appLog) << QStringLiteral("[Thickness] 离线回放未调度：StateMachine 不可用。");
+        return;
+    }
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr) {
+        qWarning(appLog) << QStringLiteral("[Thickness] 离线回放未调度：ConfigManager 不可用。");
+        return;
+    }
+    if (!configManager->thicknessConfig().offlineReplayEnabled) {
+        qInfo(appLog).noquote()
+            << QStringLiteral("[Thickness] 离线回放未启用（config=")
+            << configManager->configFilePath()
+            << QStringLiteral(" [Thickness] offlineReplayEnabled=false）");
+        return;
+    }
+
+    const int delayMs = configManager->thicknessConfig().offlineReplayDelayMs;
+    if (m_offlineThicknessReplayTimer == nullptr) {
+        m_offlineThicknessReplayTimer = new QTimer(&application_);
+        QObject::connect(m_offlineThicknessReplayTimer, &QTimer::timeout, &application_, [this]() {
+            triggerOfflineThicknessReplay();
+        });
+    }
+
+    m_offlineThicknessReplayTimer->setSingleShot(true);
+    m_offlineThicknessReplayTimer->setInterval(delayMs > 0 ? delayMs : 5000);
+    m_offlineThicknessReplayTimer->start();
+
+    qInfo(appLog).noquote()
+        << QStringLiteral("[Thickness] 离线回放已调度：") << (delayMs > 0 ? delayMs : 5000)
+        << QStringLiteral("ms 后加载 inner/outer 点云并执行厚度测量；关闭请设 offlineReplayEnabled=false");
+}
+
+void ConsoleRuntime::triggerOfflineThicknessReplay()
+{
+    if (m_shutdownCompleted || stateMachine_ == nullptr) {
+        if (!m_shutdownCompleted) {
+            qWarning(appLog) << QStringLiteral("[Thickness] 离线回放跳过：StateMachine 不可用。");
+        }
+        return;
+    }
+
+    const tracking::InspectionResult result = stateMachine_->runOfflineThicknessInspectionFromDataDir();
+    stateMachine_->deliverOfflineThicknessInspectionResult(result);
 }
 
 void ConsoleRuntime::triggerAutoLatencyBundleTest()
@@ -936,7 +1093,22 @@ void ConsoleRuntime::printStartupStatus()
 
 void ConsoleRuntime::printShutdownStatus()
 {
+    if (m_shutdownCompleted) {
+        return;
+    }
+    m_shutdownCompleted = true;
+
     stopAutoLatencyBundleTest();
+    stopOfflineReplayTimers();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    // 先释放检测结果 std::function，避免析构阶段 _Getimpl 访问已失效目标
+    if (stateMachine_) {
+        stateMachine_->stop();
+    }
+    if (trackingService_) {
+        trackingService_->clearInspectionResultNotifier();
+    }
 
     // 关闭顺序按依赖逆序执行，避免退出过程中还有异步请求落到已析构对象上。
     // HmiTcpServer 必须最先停止：它持有所有其他服务的裸指针，
@@ -946,8 +1118,10 @@ void ConsoleRuntime::printShutdownStatus()
         hmiTcpServer_.reset();
     }
     if (stateMachine_) {
-        stateMachine_->stop();
         stateMachine_.reset();
+    }
+    if (trackingService_) {
+        trackingService_.reset();
     }
     if (visionPipelineService_) {
         visionPipelineService_->stop();

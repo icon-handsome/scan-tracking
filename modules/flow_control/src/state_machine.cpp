@@ -574,6 +574,236 @@ bool loadMergedPointCloudFromSessionExport(
     return true;
 }
 
+bool listOfflineReplayCloudFiles(
+    const QString& dataPath,
+    QStringList* outFiles,
+    QString* errorMessage)
+{
+    if (outFiles == nullptr) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("离线回放失败：输出文件列表指针为空。");
+        }
+        return false;
+    }
+
+    const QFileInfo pathInfo(dataPath);
+    if (!pathInfo.exists()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("离线回放失败：点云路径不存在：%1").arg(dataPath);
+        }
+        return false;
+    }
+
+    QStringList cloudFiles;
+    if (pathInfo.isFile()) {
+        const QString suffix = pathInfo.suffix().toLower();
+        if (suffix != QStringLiteral("pcd") && suffix != QStringLiteral("ply")) {
+            if (errorMessage != nullptr) {
+                *errorMessage = QStringLiteral("离线回放失败：不支持的点云文件格式：%1").arg(dataPath);
+            }
+            return false;
+        }
+        cloudFiles.append(pathInfo.absoluteFilePath());
+    } else if (pathInfo.isDir()) {
+        const QDir dataDir(pathInfo.absoluteFilePath());
+        cloudFiles = dataDir.entryList(
+            {QStringLiteral("*.pcd"),
+             QStringLiteral("*.PCD"),
+             QStringLiteral("*.ply"),
+             QStringLiteral("*.PLY")},
+            QDir::Files,
+            QDir::Name);
+        for (int index = 0; index < cloudFiles.size(); ++index) {
+            cloudFiles[index] = dataDir.filePath(cloudFiles[index]);
+        }
+    } else {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("离线回放失败：点云路径无效：%1").arg(dataPath);
+        }
+        return false;
+    }
+
+    if (cloudFiles.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage =
+                QStringLiteral("离线回放失败：目录中未找到 PCD/PLY 点云文件：%1").arg(dataPath);
+        }
+        return false;
+    }
+
+    *outFiles = std::move(cloudFiles);
+    return true;
+}
+
+QString resolveCloudPathUnderDataDir(const QString& dataDir, const QString& configuredPath)
+{
+    if (configuredPath.trimmed().isEmpty()) {
+        return QString();
+    }
+
+    const QFileInfo configuredInfo(configuredPath);
+    if (configuredInfo.isAbsolute()) {
+        return configuredInfo.absoluteFilePath();
+    }
+
+    const QFileInfo dataDirInfo(dataDir);
+    if (dataDirInfo.isDir()) {
+        return QDir(dataDirInfo.absoluteFilePath()).filePath(configuredPath);
+    }
+    return configuredInfo.absoluteFilePath();
+}
+
+bool filenameLooksLikeInnerCloud(const QString& filePath)
+{
+    const QString name = QFileInfo(filePath).completeBaseName().toLower();
+    return name.contains(QStringLiteral("inner"))
+        || name.contains(QStringLiteral("nei"))
+        || name.contains(QStringLiteral("内"));
+}
+
+bool filenameLooksLikeOuterCloud(const QString& filePath)
+{
+    const QString name = QFileInfo(filePath).completeBaseName().toLower();
+    return name.contains(QStringLiteral("outer"))
+        || name.contains(QStringLiteral("wai"))
+        || name.contains(QStringLiteral("外"));
+}
+
+bool loadPointCloudFrameFromPath(
+    const QString& absolutePath,
+    scan_tracking::mech_eye::PointCloudFrame* outFrame,
+    QString* errorMessage)
+{
+    if (outFrame == nullptr) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("离线回放失败：输出点云指针为空。");
+        }
+        return false;
+    }
+
+    const QString suffix = QFileInfo(absolutePath).suffix().toLower();
+    const bool loaded = suffix == QStringLiteral("ply")
+        ? scan_tracking::mech_eye::loadPointCloudFrameFromPly(absolutePath, outFrame)
+        : suffix == QStringLiteral("pcd")
+            ? scan_tracking::mech_eye::loadPointCloudFrameFromPcd(absolutePath, outFrame)
+            : false;
+    if (!loaded || !outFrame->isValid()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("离线回放失败：无法加载点云：%1").arg(absolutePath);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool resolveOfflineThicknessCloudPair(
+    const scan_tracking::common::ThicknessConfig& thicknessConfig,
+    QString* outInnerPath,
+    QString* outOuterPath,
+    QString* errorMessage)
+{
+    if (outInnerPath == nullptr || outOuterPath == nullptr) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("离线回放失败：输出路径指针为空。");
+        }
+        return false;
+    }
+
+    const QString dataDir = thicknessConfig.offlineReplayDataDir.trimmed();
+    if (dataDir.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("离线回放失败：未配置 offlineReplayDataDir。");
+        }
+        return false;
+    }
+
+    const QString configuredInner =
+        resolveCloudPathUnderDataDir(dataDir, thicknessConfig.offlineReplayInnerCloudFile);
+    const QString configuredOuter =
+        resolveCloudPathUnderDataDir(dataDir, thicknessConfig.offlineReplayOuterCloudFile);
+    if (!configuredInner.isEmpty() && !configuredOuter.isEmpty()) {
+        if (!QFileInfo::exists(configuredInner)) {
+            if (errorMessage != nullptr) {
+                *errorMessage =
+                    QStringLiteral("离线回放失败：内表面点云不存在：%1").arg(configuredInner);
+            }
+            return false;
+        }
+        if (!QFileInfo::exists(configuredOuter)) {
+            if (errorMessage != nullptr) {
+                *errorMessage =
+                    QStringLiteral("离线回放失败：外表面点云不存在：%1").arg(configuredOuter);
+            }
+            return false;
+        }
+        *outInnerPath = configuredInner;
+        *outOuterPath = configuredOuter;
+        return true;
+    }
+    if (!configuredInner.isEmpty() || !configuredOuter.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral(
+                "离线回放失败：须同时配置 offlineReplayInnerCloudFile 与 offlineReplayOuterCloudFile。");
+        }
+        return false;
+    }
+
+    QStringList cloudFiles;
+    if (!listOfflineReplayCloudFiles(dataDir, &cloudFiles, errorMessage)) {
+        return false;
+    }
+
+    QString innerPath;
+    QString outerPath;
+    for (const QString& cloudPath : cloudFiles) {
+        if (filenameLooksLikeInnerCloud(cloudPath)) {
+            if (!innerPath.isEmpty()) {
+                if (errorMessage != nullptr) {
+                    *errorMessage = QStringLiteral(
+                        "离线回放失败：目录内匹配到多个内表面点云文件。");
+                }
+                return false;
+            }
+            innerPath = cloudPath;
+            continue;
+        }
+        if (filenameLooksLikeOuterCloud(cloudPath)) {
+            if (!outerPath.isEmpty()) {
+                if (errorMessage != nullptr) {
+                    *errorMessage = QStringLiteral(
+                        "离线回放失败：目录内匹配到多个外表面点云文件。");
+                }
+                return false;
+            }
+            outerPath = cloudPath;
+        }
+    }
+
+    if (!innerPath.isEmpty() && !outerPath.isEmpty()) {
+        *outInnerPath = innerPath;
+        *outOuterPath = outerPath;
+        return true;
+    }
+
+    if (cloudFiles.size() != 2) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral(
+                "离线回放失败：目录 %1 中须恰好 2 个 PCD/PLY 点云，或在文件名中含 inner/outer（内/外）关键字；"
+                "也可显式配置 offlineReplayInnerCloudFile / offlineReplayOuterCloudFile。当前文件数=%2")
+                                     .arg(dataDir)
+                                     .arg(cloudFiles.size());
+        }
+        return false;
+    }
+
+    *outInnerPath = cloudFiles.at(0);
+    *outOuterPath = cloudFiles.at(1);
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Thickness] 离线回放：目录内无 inner/outer 关键字，按文件名排序取前两个点云：")
+        << cloudFiles.at(0) << cloudFiles.at(1);
+    return true;
+}
+
 SegmentCaptureCxpImageMeta buildCxpImageMetaFromCapture(
     const scan_tracking::vision::HikPoseCaptureResult& result,
     const QString& fileName,
@@ -3587,12 +3817,251 @@ tracking::InspectionResult StateMachine::runOfflineInternalSurfaceInspectionFrom
     return result;
 }
 
+tracking::InspectionResult StateMachine::runOfflineBevelInspectionFromDataDir()
+{
+    tracking::InspectionResult failure;
+    failure.resultCode = 2;
+    failure.ngReasonWord0 = (1u << 4);
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr) {
+        failure.message = QStringLiteral("离线回放失败：ConfigManager 不可用。");
+        return failure;
+    }
+
+    const auto& bevelConfig = configManager->bevelConfig();
+    if (!bevelConfig.offlineReplayEnabled) {
+        failure.message = QStringLiteral("离线回放未启用（[Bevel] offlineReplayEnabled=false）。");
+        return failure;
+    }
+
+    if (bevelConfig.offlineReplayDataDir.trimmed().isEmpty()) {
+        failure.message = QStringLiteral("离线回放失败：未配置 offlineReplayDataDir。");
+        return failure;
+    }
+
+    if (m_tracking == nullptr) {
+        failure.message = QStringLiteral("离线回放失败：Tracking 服务不可用。");
+        return failure;
+    }
+
+    const int pathId = bevelConfig.offlineReplayPathId;
+    const auto inspectionType = configManager->inspectionTypeForPath(pathId);
+    if (inspectionType != scan_tracking::common::InspectionType::Bevel) {
+        failure.message = QStringLiteral(
+            "离线回放失败：路径 %1 的 inspectionType 不是 bevel。").arg(pathId);
+        return failure;
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Bevel] 离线回放开始 pathId=") << pathId
+        << QStringLiteral(" dataDir=") << bevelConfig.offlineReplayDataDir;
+
+    QStringList cloudFiles;
+    QString loadError;
+    if (!listOfflineReplayCloudFiles(bevelConfig.offlineReplayDataDir, &cloudFiles, &loadError)) {
+        failure.message = loadError.isEmpty()
+            ? QStringLiteral("离线回放失败：无法枚举点云文件。")
+            : loadError;
+        qWarning(LOG_FLOW).noquote() << failure.message;
+        return failure;
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Bevel] 离线回放将先合并后一次性测量，文件数=") << cloudFiles.size();
+
+    auto mergedPoints = std::make_shared<std::vector<float>>();
+    int totalPointCount = 0;
+
+    for (const QString& cloudPath : cloudFiles) {
+        const QFileInfo sourceInfo(cloudPath);
+        std::vector<float> xyz;
+        const bool loaded = sourceInfo.suffix().toLower() == QStringLiteral("ply")
+            ? scan_tracking::mech_eye::loadPointCloudXyzFromPly(
+                  sourceInfo.absoluteFilePath(), &xyz, 0)
+            : scan_tracking::mech_eye::loadPointCloudXyzFromPcd(
+                  sourceInfo.absoluteFilePath(), &xyz, 0);
+        if (!loaded || xyz.empty()) {
+            failure.message = QStringLiteral("离线回放失败：无法解析点云：%1").arg(cloudPath);
+            qWarning(LOG_FLOW).noquote() << failure.message;
+            return failure;
+        }
+
+        mergedPoints->reserve(mergedPoints->size() + xyz.size());
+        mergedPoints->insert(mergedPoints->end(), xyz.begin(), xyz.end());
+        totalPointCount += static_cast<int>(xyz.size() / 3);
+
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[Bevel] 离线回放已加载文件") << cloudPath
+            << QStringLiteral(" 点数=") << (xyz.size() / 3);
+    }
+
+    scan_tracking::mech_eye::PointCloudFrame mergedCloud;
+    mergedCloud.pointsXYZ = std::move(mergedPoints);
+    mergedCloud.pointCount = totalPointCount;
+    mergedCloud.width = totalPointCount;
+    mergedCloud.height = 1;
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Bevel] 离线回放点云已合并 总点数=") << totalPointCount
+        << QStringLiteral(" 文件数=") << cloudFiles.size();
+
+    const tracking::InspectionResult result =
+        m_tracking->inspectPointCloud(mergedCloud, totalPointCount, pathId, false);
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Bevel] 离线回放完成 resultCode=") << result.resultCode
+        << QStringLiteral(" bevelType=") << result.measurement.bevelType
+        << QStringLiteral(" angleDeg=") << result.measurement.headAngleTol
+        << QStringLiteral(" lengthMm=") << result.measurement.bluntHeightTol
+        << QStringLiteral(" icpFitness=") << result.measurement.icpFitness
+        << QStringLiteral(" qualityCode=") << result.measurement.qualityCode
+        << QStringLiteral(" message=") << result.message;
+
+    return result;
+}
+
+tracking::InspectionResult StateMachine::runOfflineThicknessInspectionFromDataDir()
+{
+    tracking::InspectionResult failure;
+    failure.resultCode = 2;
+    failure.ngReasonWord0 = (1u << 4);
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr) {
+        failure.message = QStringLiteral("离线回放失败：ConfigManager 不可用。");
+        return failure;
+    }
+
+    const auto& thicknessConfig = configManager->thicknessConfig();
+    if (!thicknessConfig.offlineReplayEnabled) {
+        failure.message = QStringLiteral("离线回放未启用（[Thickness] offlineReplayEnabled=false）。");
+        return failure;
+    }
+
+    if (m_tracking == nullptr) {
+        failure.message = QStringLiteral("离线回放失败：Tracking 服务不可用。");
+        return failure;
+    }
+
+    const int pathId = thicknessConfig.offlineReplayPathId;
+    const auto inspectionType = configManager->inspectionTypeForPath(pathId);
+    if (inspectionType != scan_tracking::common::InspectionType::Thickness) {
+        failure.message = QStringLiteral(
+            "离线回放失败：路径 %1 的 inspectionType 不是 thickness。").arg(pathId);
+        return failure;
+    }
+
+    QString innerPath;
+    QString outerPath;
+    QString loadError;
+    if (!resolveOfflineThicknessCloudPair(thicknessConfig, &innerPath, &outerPath, &loadError)) {
+        failure.message = loadError.isEmpty()
+            ? QStringLiteral("离线回放失败：无法解析 inner/outer 点云路径。")
+            : loadError;
+        qWarning(LOG_FLOW).noquote() << failure.message;
+        return failure;
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Thickness] 离线回放开始 pathId=") << pathId
+        << QStringLiteral(" inner=") << innerPath
+        << QStringLiteral(" outer=") << outerPath;
+
+    scan_tracking::mech_eye::PointCloudFrame innerCloud;
+    scan_tracking::mech_eye::PointCloudFrame outerCloud;
+    if (!loadPointCloudFrameFromPath(innerPath, &innerCloud, &loadError)) {
+        failure.message = loadError;
+        qWarning(LOG_FLOW).noquote() << failure.message;
+        return failure;
+    }
+    if (!loadPointCloudFrameFromPath(outerPath, &outerCloud, &loadError)) {
+        failure.message = loadError;
+        qWarning(LOG_FLOW).noquote() << failure.message;
+        return failure;
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Thickness] 离线回放点云已加载 innerPoints=") << innerCloud.pointCount
+        << QStringLiteral(" outerPoints=") << outerCloud.pointCount;
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Thickness] 离线回放即将执行算法（offlineReplayEnabled=true 时使用 offlineReplayAlgorithmConfigPath；大点云可能耗时数分钟，请查看 [vision.thickness] 日志）");
+
+    const tracking::InspectionResult result = m_tracking->inspectThicknessPointClouds(
+        innerCloud,
+        outerCloud,
+        innerCloud.pointCount,
+        outerCloud.pointCount,
+        pathId,
+        false);
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Thickness] 离线回放完成 resultCode=") << result.resultCode
+        << QStringLiteral(" thicknessMm=") << result.measurement.thicknessMm
+        << QStringLiteral(" message=") << result.message;
+
+    return result;
+}
+
+void StateMachine::deliverOfflineThicknessInspectionResult(
+    const tracking::InspectionResult& result)
+{
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Thickness] 离线回放结果 resultCode=") << result.resultCode
+        << QStringLiteral(" thicknessMm=") << result.measurement.thicknessMm
+        << QStringLiteral(" icpFitness=") << result.measurement.icpFitness
+        << QStringLiteral(" message=") << result.message;
+
+    if (m_inspectionResultPublisher) {
+        m_inspectionResultPublisher(result);
+    }
+
+    emit inspectionFinished(
+        result.resultCode,
+        result.ngReasonWord0,
+        result.ngReasonWord1,
+        result.measureItemCount,
+        result.measurement,
+        result.message);
+}
+
+void StateMachine::deliverOfflineBevelInspectionResult(
+    const tracking::InspectionResult& result)
+{
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Bevel] 离线回放结果 resultCode=") << result.resultCode
+        << QStringLiteral(" ngReasonWord0=") << result.ngReasonWord0
+        << QStringLiteral(" bevelType=") << result.measurement.bevelType
+        << QStringLiteral(" angleDeg=") << result.measurement.headAngleTol
+        << QStringLiteral(" lengthMm=") << result.measurement.bluntHeightTol
+        << QStringLiteral(" icpFitness=") << result.measurement.icpFitness
+        << QStringLiteral(" qualityCode=") << result.measurement.qualityCode
+        << QStringLiteral(" message=") << result.message;
+
+    if (m_inspectionResultPublisher) {
+        m_inspectionResultPublisher(result);
+    }
+
+    emit inspectionFinished(
+        result.resultCode,
+        result.ngReasonWord0,
+        result.ngReasonWord1,
+        result.measureItemCount,
+        result.measurement,
+        result.message);
+}
+
 void StateMachine::deliverOfflineInternalSurfaceInspectionResult(
     const tracking::InspectionResult& result)
 {
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[InternalSurface] 离线回放完成 resultCode=") << result.resultCode
         << QStringLiteral(" message=") << result.message;
+
+    if (m_inspectionResultPublisher) {
+        m_inspectionResultPublisher(result);
+    }
 
     emit inspectionFinished(
         result.resultCode,
@@ -4476,7 +4945,6 @@ void StateMachine::resetScanSegmentCache()
     m_currentPathId = 1;
     m_currentPathSegments.clear();
     clearFirstPathStepPauseLatch();
-    clearPathProgressTracking(QStringLiteral("cache_reset"));
 
     if (totalCacheSize > 0) {
         qInfo(LOG_FLOW).noquote()
@@ -4488,6 +4956,10 @@ void StateMachine::resetScanSegmentCache()
     m_pathSegmentPoseStitchRecords.clear();
     m_currentCalibrationMatrix = m_baseCalibrationMatrix;
     }
+
+    // 须在 segment 缓存锁外 emit，否则 HMI pushSystemStatus → scanPathProgressSnapshot
+    // 会再次 lock m_segmentCacheMutex，同线程重入导致 std::system_error。
+    clearPathProgressTracking(QStringLiteral("cache_reset"));
 
     {
         std::lock_guard<std::mutex> poseStitchLock(m_lastPoseStitchMutex);

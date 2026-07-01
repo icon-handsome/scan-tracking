@@ -145,10 +145,15 @@ BevelRecipe bevelRecipePresetForType(int bevelType);
 /// 坡口测量（Po_Kou）算法配置（[Bevel]）
 struct BevelConfig {
     QString configPath = QStringLiteral("bevel/config.txt");
-    QString templateDir = QStringLiteral("bevel/data/templates");
+    QString templateDir = QStringLiteral("bevel");
     float angleTolDeg = 2.0f;
     float lengthTolMm = 1.0f;
     BevelRecipe defaultRecipe;
+    /// 一次性联调：启动后从 PCD/PLY 目录加载点云并直接跑坡口测量，无需 PLC Trig_Inspection
+    bool offlineReplayEnabled = false;
+    QString offlineReplayDataDir;
+    int offlineReplayPathId = 4;
+    int offlineReplayDelayMs = 5000;
 };
 
 /// 柱面/开孔测量（HeadMeasure）算法配置（[Hole]）
@@ -168,6 +173,17 @@ struct HoleConfig {
 struct ThicknessConfig {
     QString configPath = QStringLiteral("thickness/config/thickness_config.json");
     double icpFitnessMax = 50.0;
+    /// 一次性联调：启动后从目录加载 inner/outer 点云并直接跑厚度测量，无需 PLC Trig_Inspection
+    bool offlineReplayEnabled = false;
+    QString offlineReplayDataDir;
+    /// 可选：内表面点云文件名（相对 offlineReplayDataDir）或绝对路径；空则按文件名关键字自动匹配
+    QString offlineReplayInnerCloudFile;
+    /// 可选：外表面点云文件名（相对 offlineReplayDataDir）或绝对路径；空则按文件名关键字自动匹配
+    QString offlineReplayOuterCloudFile;
+    int offlineReplayPathId = 5;
+    int offlineReplayDelayMs = 5000;
+    /// 离线回放专用算法 JSON（空则与 configPath 相同）；大点云联调建议用 offline_fast 配置
+    QString offlineReplayAlgorithmConfigPath;
 };
 
 /// 内表面测量算法配置（[InternalSurface]）：封头深度与容积
@@ -181,6 +197,8 @@ struct InternalSurfaceConfig {
     QString offlineReplayPointCloudPath;
     int offlineReplayPathId = 2;
     int offlineReplayDelayMs = 5000;
+    /// 离线回放专用算法 JSON（空则与 configPath 相同）；大点云联调建议用 offline_fast 配置
+    QString offlineReplayAlgorithmConfigPath;
 };
 
 /// 扫描仪编码标记点距离自检（[SelfCheck]）
@@ -244,6 +262,8 @@ struct HmiConfig {
     bool allowDebugTriggerInspection = false;
     /// path1~5 扫完且末路径 Trig_Inspection 握手完成后推送预设 headMetrics（临时演示）
     bool emitPresetInspectionOnPathsComplete = false;
+    /// 显控 TCP 连接后推送演示用 scanPathProgress（默认 path1、2 已完成，path3 进行中）及 event.path.started
+    bool emitDemoScanPathStatusOnConnect = false;
 };
 
 struct LbPoseConfig {

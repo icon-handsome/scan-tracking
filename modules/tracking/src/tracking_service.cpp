@@ -270,9 +270,20 @@ std::string TrackingService::statusText() const
     return scan_tracking::common::ApplicationInfo::name() + " core is ready.";
 }
 
+TrackingService::~TrackingService()
+{
+    clearInspectionResultNotifier();
+}
+
 void TrackingService::setInspectionResultNotifier(InspectionResultNotifier notifier)
 {
     m_inspectionResultNotifier = std::move(notifier);
+}
+
+void TrackingService::clearInspectionResultNotifier()
+{
+    InspectionResultNotifier cleared;
+    m_inspectionResultNotifier.swap(cleared);
 }
 
 InspectionResult TrackingService::deliverInspectionResult(
@@ -453,7 +464,13 @@ InspectionResult TrackingService::inspectPointCloud(
         result.resultCode = 2;
         result.ngReasonWord0 = (1u << 6);
         result.message = detection.message.isEmpty()
-            ? QStringLiteral("坡口测量超出标准范围，qualityCode=%1。")
+            ? QStringLiteral(
+                  "坡口测量超出标准范围：angle=%1 deg, length=%2 mm, bevelType=%3, "
+                  "icpFitness=%4, qualityCode=%5。")
+                  .arg(detection.angleDeg, 0, 'f', 3)
+                  .arg(detection.lengthMm, 0, 'f', 3)
+                  .arg(detection.bevelType)
+                  .arg(detection.icpFitness, 0, 'f', 6)
                   .arg(detection.qualityCode)
             : detection.message;
         return deliverInspectionResult(result, notifyListener);
@@ -461,7 +478,7 @@ InspectionResult TrackingService::inspectPointCloud(
 
     result.resultCode = 1;
     result.message = QStringLiteral(
-        "坡口测量通过：angle=%1 deg, length=%2 mm, bevelType=%3, icpFitness=%4。")
+        "坡口测量通过：angle=%1 deg, length=%2 mm, bevelType=%3, icpFitness=%4, qualityCode=0。")
                          .arg(detection.angleDeg, 0, 'f', 3)
                          .arg(detection.lengthMm, 0, 'f', 3)
                          .arg(detection.bevelType)
@@ -531,6 +548,85 @@ InspectionResult TrackingService::inspectInternalSurfaceFromScanFile(
         "内表面测量未编译（SCAN_TRACKING_ENABLE_INTERNAL_SURFACE_MEASUREMENT=OFF）。");
     return deliverInspectionResult(result, notifyListener);
 #endif
+}
+
+InspectionResult TrackingService::inspectBevelPointCloudFile(
+    const QString& cloudPath,
+    int inspectionPathId,
+    bool notifyListener) const
+{
+    ensureInspectionMeasurementMetaTypeRegistered();
+
+    InspectionResult result;
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    const scan_tracking::common::InspectionType inspectionType =
+        resolveInspectionType(configManager, inspectionPathId);
+    if (inspectionType != scan_tracking::common::InspectionType::Bevel) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral(
+            "坡口文件测量失败：路径 %1 的 inspectionType 不是 bevel。").arg(inspectionPathId);
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    if (configManager == nullptr || !configManager->hasActiveBevelRecipe()) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral("请先通过 HMI 设置坡口配方（cmd.set_bevel_recipe）。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    const scan_tracking::common::BevelRecipe recipe = configManager->bevelRecipe();
+    const scan_tracking::common::BevelConfig& bevelConfig = configManager->bevelConfig();
+    const auto detection = scan_tracking::vision::bevel::runBevelMeasurementFromPointCloudFile(
+        cloudPath, recipe, bevelConfig.angleTolDeg, bevelConfig.lengthTolMm);
+
+    if (!detection.invoked) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = detection.message.isEmpty()
+            ? QStringLiteral("坡口测量适配层未启动。")
+            : detection.message;
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    result.measurement = measurementFromBevelResult(detection);
+
+    if (!detection.ok) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 5);
+        result.message = detection.message.isEmpty()
+            ? QStringLiteral("坡口测量算法失败。")
+            : detection.message;
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    if (detection.qualityCode != 0) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 6);
+        result.message = detection.message.isEmpty()
+            ? QStringLiteral(
+                  "坡口测量超出标准范围：angle=%1 deg, length=%2 mm, bevelType=%3, "
+                  "icpFitness=%4, qualityCode=%5。")
+                  .arg(detection.angleDeg, 0, 'f', 3)
+                  .arg(detection.lengthMm, 0, 'f', 3)
+                  .arg(detection.bevelType)
+                  .arg(detection.icpFitness, 0, 'f', 6)
+                  .arg(detection.qualityCode)
+            : detection.message;
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    result.resultCode = 1;
+    result.message = QStringLiteral(
+        "坡口测量通过：angle=%1 deg, length=%2 mm, bevelType=%3, icpFitness=%4, qualityCode=0。")
+                         .arg(detection.angleDeg, 0, 'f', 3)
+                         .arg(detection.lengthMm, 0, 'f', 3)
+                         .arg(detection.bevelType)
+                         .arg(detection.icpFitness, 0, 'f', 6);
+    result.measureItemCount = countMeasuredItems(result.measurement);
+    return deliverInspectionResult(result, notifyListener);
 }
 
 InspectionResult TrackingService::inspectCodeRead(int inspectionPathId, bool notifyListener) const

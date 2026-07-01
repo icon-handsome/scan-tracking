@@ -2,11 +2,13 @@
 
 #include <Eigen/Geometry>
 #include <Eigen/Eigenvalues>
+#include <pcl/common/common.h>
 #include <pcl/common/transforms.h>
 #include <pcl/filters/crop_box.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
+#include <pcl/io/ply_io.h>
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/registration/correspondence_rejection_trimmed.h>
 #include <pcl/registration/icp.h>
@@ -14,6 +16,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -26,6 +29,94 @@ namespace bevel
 namespace
 {
 const double kPi = 3.14159265358979323846;
+// Windows 下 PCL StatisticalOutlierRemoval 在 10 万点以上易触发 Eigen aligned_free 崩溃
+constexpr std::size_t kMaxOutlierRemovalPoints = 80000;
+// crop 后超过此阈值先 VoxelGrid，再考虑 SOR（须先降采样后离群点滤波）
+constexpr std::size_t kEarlyDownsampleThreshold = 150000;
+constexpr std::size_t kEarlyXyzStrideLimitPoints = 200000;
+// PCL VoxelGrid 体素格总数须 < INT_MAX；大场景全幅点云须先 crop 或放大 leaf
+constexpr float kMaxVoxelDivisionsPerAxis = 256.0f;
+constexpr int64_t kMaxVoxelGridCells = 100000000LL;
+
+/// PCL 滤波/IO 在 Windows DLL 堆上分配点云，若由 exe 侧释放会触发 aligned_free 崩溃。
+CloudT::Ptr reownCloudPoints(const CloudT::ConstPtr& input)
+{
+    CloudT::Ptr output(new CloudT);
+    if (input == nullptr || input->empty()) {
+        output->width = 0;
+        output->height = 1;
+        output->is_dense = true;
+        return output;
+    }
+
+    output->points.reserve(input->points.size());
+    for (const PointT& point : input->points) {
+        output->points.push_back(point);
+    }
+    output->width = input->width;
+    output->height = input->height;
+    output->is_dense = input->is_dense;
+    return output;
+}
+
+void adoptPclIntermediateCloud(CloudT::Ptr& cloud)
+{
+    if (!cloud) {
+        return;
+    }
+    static std::vector<CloudT::Ptr> adoptedPclClouds;
+    adoptedPclClouds.push_back(cloud);
+    cloud.reset();
+}
+
+CloudT::Ptr reownFromPclOutput(CloudT::Ptr& pclOutput)
+{
+    CloudT::Ptr owned = reownCloudPoints(pclOutput);
+    adoptPclIntermediateCloud(pclOutput);
+    return owned;
+}
+
+CloudT::Ptr transformCloudInProcessHeap(const CloudT::ConstPtr& input, const Eigen::Matrix4f& matrix)
+{
+    CloudT::Ptr output(new CloudT);
+    if (input == nullptr || input->empty()) {
+        return output;
+    }
+
+    output->points.reserve(input->size());
+    for (const PointT& point : input->points) {
+        const Eigen::Vector4f transformed =
+            matrix * Eigen::Vector4f(point.x, point.y, point.z, 1.0f);
+        output->points.emplace_back(transformed.x(), transformed.y(), transformed.z());
+    }
+
+    output->width = static_cast<std::uint32_t>(output->size());
+    output->height = 1;
+    output->is_dense = input->is_dense;
+    return output;
+}
+
+CloudT::Ptr cropCloudInProcessHeap(const CloudT::ConstPtr& input, const BevelConfig& cfg)
+{
+    CloudT::Ptr output(new CloudT);
+    if (input == nullptr || input->empty()) {
+        return output;
+    }
+
+    output->points.reserve(input->size());
+    for (const PointT& point : input->points) {
+        if (point.x >= cfg.cropMin.x() && point.x <= cfg.cropMax.x() &&
+            point.y >= cfg.cropMin.y() && point.y <= cfg.cropMax.y() &&
+            point.z >= cfg.cropMin.z() && point.z <= cfg.cropMax.z()) {
+            output->points.push_back(point);
+        }
+    }
+
+    output->width = static_cast<std::uint32_t>(output->size());
+    output->height = 1;
+    output->is_dense = true;
+    return output;
+}
 
 std::string trim(const std::string& s)
 {
@@ -178,13 +269,81 @@ std::string joinPath(const std::string& dir, const std::string& name)
     return dir + "/" + name;
 }
 
+void resolveBevelConfigRuntimePaths(BevelConfig& cfg, const std::string& assetRoot)
+{
+    if (assetRoot.empty()) {
+        return;
+    }
+
+    cfg.templatePath = joinPath(assetRoot, cfg.templatePath);
+    if (cfg.saveDownsampledCloud && !cfg.downsampledCloudPath.empty()) {
+        cfg.downsampledCloudPath = joinPath(assetRoot, cfg.downsampledCloudPath);
+    }
+    if (cfg.saveAlignedCloud && !cfg.alignedCloudPath.empty()) {
+        cfg.alignedCloudPath = joinPath(assetRoot, cfg.alignedCloudPath);
+    }
+}
+
+std::string fileExtensionLower(const std::string& path)
+{
+    const size_t dot = path.find_last_of('.');
+    if (dot == std::string::npos || dot + 1 >= path.size()) {
+        return std::string();
+    }
+    std::string ext = path.substr(dot);
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return ext;
+}
+
 bool loadCloudAuto(const std::string& path, CloudT::Ptr cloud)
 {
-    const bool isPcd = path.size() >= 4 && path.substr(path.size() - 4) == ".pcd";
-    if (isPcd) {
-        return pcl::io::loadPCDFile<PointT>(path, *cloud) == 0 && !cloud->empty();
+    CloudT::Ptr loaded(new CloudT);
+    const std::string ext = fileExtensionLower(path);
+    bool ok = false;
+    if (ext == ".pcd") {
+        ok = pcl::io::loadPCDFile<PointT>(path, *loaded) == 0 && !loaded->empty();
+    } else if (ext == ".ply") {
+        ok = pcl::io::loadPLYFile<PointT>(path, *loaded) == 0 && !loaded->empty();
+    } else {
+        ok = loadTextPointCloud(path, loaded);
     }
-    return loadTextPointCloud(path, cloud);
+
+    if (!ok) {
+        return false;
+    }
+
+    CloudT::Ptr owned = reownCloudPoints(loaded);
+    *cloud = *owned;
+    adoptPclIntermediateCloud(loaded);
+    return !cloud->empty();
+}
+
+std::vector<float> strideSampleXyzBuffer(
+    const float* xyz,
+    std::size_t pointCount,
+    std::size_t maxPointCount)
+{
+    std::vector<float> sampled;
+    if (xyz == nullptr || pointCount == 0 || maxPointCount == 0) {
+        return sampled;
+    }
+
+    if (pointCount <= maxPointCount) {
+        sampled.assign(xyz, xyz + pointCount * 3);
+        return sampled;
+    }
+
+    const std::size_t stride = (pointCount + maxPointCount - 1) / maxPointCount;
+    sampled.reserve(maxPointCount * 3);
+    for (std::size_t index = 0; index < pointCount; index += stride) {
+        const std::size_t base = index * 3;
+        sampled.push_back(xyz[base]);
+        sampled.push_back(xyz[base + 1]);
+        sampled.push_back(xyz[base + 2]);
+    }
+    return sampled;
 }
 
 Eigen::Matrix4f makePoseTransform(const BevelConfig& cfg)
@@ -198,58 +357,132 @@ Eigen::Matrix4f makePoseTransform(const BevelConfig& cfg)
     return tf.matrix();
 }
 
-CloudT::Ptr preprocess(const CloudT::ConstPtr& raw, const BevelConfig& cfg)
+bool needsPoseCorrection(const BevelConfig& cfg)
 {
-    CloudT::Ptr current(new CloudT(*raw));
+    if (!cfg.poseCorrection) {
+        return false;
+    }
+    if (cfg.poseTranslation.norm() > 1e-6f) {
+        return true;
+    }
+    return cfg.poseRotationDeg.norm() > 1e-6f;
+}
 
-	if (cfg.poseCorrection)
-	{
-		CloudT::Ptr corrected(new CloudT);
-		pcl::transformPointCloud(*current, *corrected, makePoseTransform(cfg));
-		current = corrected;
-	}
+CloudT::Ptr filterFinitePoints(const CloudT::ConstPtr& input)
+{
+    CloudT::Ptr output(new CloudT);
+    if (input == nullptr || input->empty()) {
+        return output;
+    }
 
-	if (cfg.cropBox)
-	{
-		pcl::CropBox<PointT> crop;
-		crop.setInputCloud(current);
-		crop.setMin(cfg.cropMin);
-		crop.setMax(cfg.cropMax);
-		CloudT::Ptr cropped(new CloudT);
-		crop.filter(*cropped);
-		current = cropped;
-	}
+    output->points.reserve(input->size());
+    for (const PointT& point : input->points) {
+        if (std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z)) {
+            output->points.push_back(point);
+        }
+    }
 
-	if (cfg.outlierRemoval && current->size() > static_cast<size_t>(cfg.sorMeanK))
-	{
-		pcl::StatisticalOutlierRemoval<PointT> sor;
-		sor.setInputCloud(current);
-		sor.setMeanK(cfg.sorMeanK);
-		sor.setStddevMulThresh(cfg.sorStddevMulThresh);
-		CloudT::Ptr filtered(new CloudT);
-		sor.filter(*filtered);
-		current = filtered;
-	}
+    output->width = static_cast<std::uint32_t>(output->size());
+    output->height = 1;
+    output->is_dense = true;
+    return output;
+}
+
+CloudT::Ptr applyPoseAndCrop(const CloudT::ConstPtr& raw, const BevelConfig& cfg)
+{
+    CloudT::ConstPtr current = raw;
+    if (needsPoseCorrection(cfg)) {
+        current = transformCloudInProcessHeap(current, makePoseTransform(cfg));
+    }
+
+    if (!cfg.cropBox) {
+        return filterFinitePoints(current);
+    }
+
+    return cropCloudInProcessHeap(current, cfg);
+}
+
+float computeSafeVoxelLeafSize(const CloudT::ConstPtr& cloud, float requestedLeaf)
+{
+    if (cloud == nullptr || cloud->empty()) {
+        return requestedLeaf;
+    }
+
+    PointT minPt;
+    PointT maxPt;
+    pcl::getMinMax3D(*cloud, minPt, maxPt);
+
+    const float spanX = maxPt.x - minPt.x;
+    const float spanY = maxPt.y - minPt.y;
+    const float spanZ = maxPt.z - minPt.z;
+
+    float minLeaf = std::max(requestedLeaf, 1e-4f);
+    if (spanX > 0.0f) {
+        minLeaf = std::max(minLeaf, spanX / kMaxVoxelDivisionsPerAxis);
+    }
+    if (spanY > 0.0f) {
+        minLeaf = std::max(minLeaf, spanY / kMaxVoxelDivisionsPerAxis);
+    }
+    if (spanZ > 0.0f) {
+        minLeaf = std::max(minLeaf, spanZ / kMaxVoxelDivisionsPerAxis);
+    }
+
+    const float volume = std::max(spanX, 0.0f) * std::max(spanY, 0.0f) * std::max(spanZ, 0.0f);
+    if (volume > 0.0f) {
+        const float leafForVolume = std::cbrt(
+            volume / static_cast<float>(kMaxVoxelGridCells));
+        minLeaf = std::max(minLeaf, leafForVolume);
+    }
+
+    return minLeaf;
+}
+
+CloudT::Ptr preprocess(CloudT::Ptr current, const BevelConfig& cfg)
+{
+    if (current == nullptr) {
+        return CloudT::Ptr(new CloudT);
+    }
+
+    if (cfg.outlierRemoval
+        && current->size() > static_cast<size_t>(cfg.sorMeanK)
+        && current->size() <= kMaxOutlierRemovalPoints) {
+        pcl::StatisticalOutlierRemoval<PointT> sor;
+        sor.setInputCloud(current);
+        sor.setMeanK(cfg.sorMeanK);
+        sor.setStddevMulThresh(cfg.sorStddevMulThresh);
+        CloudT::Ptr filteredPcl(new CloudT);
+        sor.filter(*filteredPcl);
+        current = reownFromPclOutput(filteredPcl);
+    }
 
     return current;
 }
 
-CloudT::Ptr downsampleForIcp(const CloudT::ConstPtr& cloud, const BevelConfig& cfg)
+CloudT::Ptr downsampleForIcp(const CloudT::ConstPtr& cloud, const BevelConfig& cfg, bool allowSaveCloud)
 {
-    if (!cfg.uniformDownsample || cfg.uniformLeafSize <= 0.0 || cloud->empty()) {
-        return CloudT::Ptr(new CloudT(*cloud));
+    if (!cfg.uniformDownsample || cfg.uniformLeafSize <= 0.0 || cloud == nullptr || cloud->empty()) {
+        return reownCloudPoints(cloud);
     }
 
-    pcl::VoxelGrid<PointT> filter;
-    filter.setInputCloud(cloud);
-    const float leaf = static_cast<float>(cfg.uniformLeafSize);
-    filter.setLeafSize(leaf, leaf, leaf);
-    CloudT::Ptr sampled(new CloudT);
-    filter.filter(*sampled);
-    if (cfg.saveDownsampledCloud) {
-        pcl::io::savePCDFileBinary(cfg.downsampledCloudPath, *sampled);
+    float leaf = computeSafeVoxelLeafSize(cloud, static_cast<float>(cfg.uniformLeafSize));
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        pcl::VoxelGrid<PointT> filter;
+        filter.setInputCloud(cloud);
+        filter.setLeafSize(leaf, leaf, leaf);
+        CloudT::Ptr sampledPcl(new CloudT);
+        filter.filter(*sampledPcl);
+        if (!sampledPcl->empty()) {
+            CloudT::Ptr sampled = reownFromPclOutput(sampledPcl);
+            if (allowSaveCloud && cfg.saveDownsampledCloud) {
+                pcl::io::savePCDFileBinary(cfg.downsampledCloudPath, *sampled);
+            }
+            return sampled;
+        }
+        adoptPclIntermediateCloud(sampledPcl);
+        leaf *= 2.0f;
     }
-    return sampled;
+
+    throw std::runtime_error("VoxelGrid downsampling failed: leaf size too small for input cloud");
 }
 
 TemplateFeature parseTemplateFeatureLine(const std::string& line)
@@ -471,56 +704,70 @@ BevelMeasurementResult solveGeometry(const CloudT::ConstPtr& icpScan,
                                       const std::vector<TemplateFeature>& features,
                                       const BevelConfig& cfg)
 {
-    pcl::IterativeClosestPoint<PointT, PointT> icp;
-    icp.setInputSource(icpScan);
-    icp.setInputTarget(templ);
-    icp.setMaximumIterations(cfg.icpMaxIterations);
-    icp.setMaxCorrespondenceDistance(cfg.icpMaxCorrespondenceDistance);
-    icp.setTransformationEpsilon(cfg.icpTransformationEpsilon);
-    icp.setEuclideanFitnessEpsilon(cfg.icpEuclideanFitnessEpsilon);
-    if (cfg.icpTrimEnable) {
-        pcl::registration::CorrespondenceRejectorTrimmed::Ptr trimmed(new pcl::registration::CorrespondenceRejectorTrimmed);
-        trimmed->setOverlapRatio(static_cast<float>(cfg.icpTrimOverlapRatio));
-        trimmed->setMinCorrespondences(cfg.icpTrimMinCorrespondences);
-        icp.addCorrespondenceRejector(trimmed);
+    const CloudT::ConstPtr icpSourceLocal = reownCloudPoints(icpScan);
+    const CloudT::ConstPtr icpTargetLocal = reownCloudPoints(templ);
+
+    Eigen::Matrix4f scanToTemplate = Eigen::Matrix4f::Identity();
+    double icpFitness = 0.0;
+    CloudT::Ptr aligned;
+
+    {
+        pcl::IterativeClosestPoint<PointT, PointT> icp;
+        icp.setInputSource(icpSourceLocal);
+        icp.setInputTarget(icpTargetLocal);
+        icp.setMaximumIterations(cfg.icpMaxIterations);
+        icp.setMaxCorrespondenceDistance(cfg.icpMaxCorrespondenceDistance);
+        icp.setTransformationEpsilon(cfg.icpTransformationEpsilon);
+        icp.setEuclideanFitnessEpsilon(cfg.icpEuclideanFitnessEpsilon);
+        if (cfg.icpTrimEnable) {
+            pcl::registration::CorrespondenceRejectorTrimmed::Ptr trimmed(
+                new pcl::registration::CorrespondenceRejectorTrimmed);
+            trimmed->setOverlapRatio(static_cast<float>(cfg.icpTrimOverlapRatio));
+            trimmed->setMinCorrespondences(cfg.icpTrimMinCorrespondences);
+            icp.addCorrespondenceRejector(trimmed);
+        }
+
+        CloudT::Ptr alignedPcl(new CloudT);
+        icp.align(*alignedPcl);
+        aligned = reownFromPclOutput(alignedPcl);
+        scanToTemplate = icp.getFinalTransformation();
+        icpFitness = icp.getFitnessScore();
     }
 
-    CloudT aligned;
-    icp.align(aligned);
-    const Eigen::Matrix4f scanToTemplate = icp.getFinalTransformation();
-
-    CloudT::Ptr scanAlignedToTemplate(new CloudT);
-    pcl::transformPointCloud(*measureScan, *scanAlignedToTemplate, scanToTemplate);
+    CloudT::Ptr scanAlignedToTemplate =
+        transformCloudInProcessHeap(measureScan, scanToTemplate);
     if (cfg.saveAlignedCloud) {
         pcl::io::savePCDFileBinary(cfg.alignedCloudPath, *scanAlignedToTemplate);
     }
 
-    pcl::KdTreeFLANN<PointT> alignedTree;
-    alignedTree.setInputCloud(scanAlignedToTemplate);
-
     std::map<std::string, Eigen::Vector3f> actual;
     std::map<std::string, Eigen::Vector3f> templateFeature;
-    for (const TemplateFeature& feature : features) 
-	{
-        templateFeature[feature.name] = feature.point;
-        if (feature.name == "project_normal" || feature.name == "project_point")
-		{
-            continue;
+    {
+        pcl::KdTreeFLANN<PointT> alignedTree;
+        alignedTree.setInputCloud(scanAlignedToTemplate);
+
+        for (const TemplateFeature& feature : features)
+        {
+            templateFeature[feature.name] = feature.point;
+            if (feature.name == "project_normal" || feature.name == "project_point")
+            {
+                continue;
+            }
+            actual[feature.name] = nearestPoint(alignedTree, scanAlignedToTemplate, feature.point);
+            std::cout << "matched feature point: " << feature.name << " "
+                      << actual[feature.name].x() << " "
+                      << actual[feature.name].y() << " "
+                      << actual[feature.name].z() << std::endl;
         }
-        actual[feature.name] = nearestPoint(alignedTree, scanAlignedToTemplate, feature.point);
-        std::cout << "matched feature point: " << feature.name << " "
-                  << actual[feature.name].x() << " "
-                  << actual[feature.name].y() << " "
-                  << actual[feature.name].z() << std::endl;
     }
 
     if (cfg.measurementMethod == "direct_points")
-	{
-        return computeDirectPointMeasurement(actual, cfg, icp.getFitnessScore(), scanToTemplate);
+    {
+        return computeDirectPointMeasurement(actual, cfg, icpFitness, scanToTemplate);
     }
     if (cfg.measurementMethod == "plane_fit")
-	{
-        return computePlaneFitMeasurement(actual, templateFeature, cfg, icp.getFitnessScore(), scanToTemplate);
+    {
+        return computePlaneFitMeasurement(actual, templateFeature, cfg, icpFitness, scanToTemplate);
     }
 
     throw std::runtime_error("Invalid measurement.method: use plane_fit or direct_points");
@@ -653,6 +900,73 @@ BevelConfig loadConfig(const std::string& configPath)
     validateConfig(cfg);
     return cfg;
 }
+
+BevelMeasurementResult solveBevelFromXyzBuffer(const float* xyz,
+                                               std::size_t floatCount,
+                                               const std::string& configPath,
+                                               const std::string& templateDir)
+{
+    BevelMeasurementResult result;
+    if (xyz == nullptr || floatCount < 3 || (floatCount % 3) != 0) {
+        result.ok = false;
+        result.message = "Invalid xyz buffer: null or length not a multiple of 3";
+        return result;
+    }
+
+    const std::size_t pointCount = floatCount / 3;
+    const float* effectiveXyz = xyz;
+    std::vector<float> sampledXyz;
+    if (pointCount > kEarlyXyzStrideLimitPoints) {
+        sampledXyz = strideSampleXyzBuffer(xyz, pointCount, kEarlyXyzStrideLimitPoints);
+        if (sampledXyz.size() < 3 || (sampledXyz.size() % 3) != 0) {
+            result.ok = false;
+            result.message = "Input xyz buffer has no finite points after early sampling";
+            return result;
+        }
+        effectiveXyz = sampledXyz.data();
+        floatCount = sampledXyz.size();
+    }
+
+    CloudT::Ptr raw(new CloudT);
+    const std::size_t effectivePointCount = floatCount / 3;
+    raw->points.reserve(effectivePointCount);
+    for (std::size_t index = 0; index < effectivePointCount; ++index) {
+        const std::size_t base = index * 3;
+        const float x = effectiveXyz[base];
+        const float y = effectiveXyz[base + 1];
+        const float z = effectiveXyz[base + 2];
+        if (std::isfinite(x) && std::isfinite(y) && std::isfinite(z)) {
+            raw->points.emplace_back(x, y, z);
+        }
+    }
+
+    raw->width = static_cast<std::uint32_t>(raw->size());
+    raw->height = 1;
+    raw->is_dense = true;
+
+    if (raw->empty()) {
+        result.ok = false;
+        result.message = "Input xyz buffer has no finite points";
+        return result;
+    }
+
+    return solveBevelFromRawCloud(raw, configPath, templateDir);
+}
+
+BevelMeasurementResult solveBevelFromPointCloudFile(const std::string& cloudPath,
+                                                    const std::string& configPath,
+                                                    const std::string& templateDir)
+{
+    BevelMeasurementResult result;
+    CloudT::Ptr raw(new CloudT);
+    if (!loadCloudAuto(cloudPath, raw)) {
+        result.ok = false;
+        result.message = "Failed to load point cloud: " + cloudPath;
+        return result;
+    }
+    return solveBevelFromRawCloud(raw, configPath, templateDir);
+}
+
 BevelMeasurementResult solveBevelFromRawCloud(const CloudT::ConstPtr& rawCloud, const std::string& configPath)
 {
     return solveBevelFromRawCloud(rawCloud, configPath, std::string());
@@ -666,16 +980,38 @@ BevelMeasurementResult solveBevelFromRawCloud(const CloudT::ConstPtr& rawCloud,
     try 
 	{
         BevelConfig cfg = loadConfig(configPath);
-        if (!templateDir.empty()) 
-		{
-            cfg.templatePath = joinPath(templateDir, cfg.templatePath);
+        resolveBevelConfigRuntimePaths(cfg, templateDir);
+        std::cout << "[Bevel] 使用配置文件: " << configPath << std::endl;
+        std::cout << "[Bevel] 使用模版文件: " << cfg.templatePath << std::endl;
+        CloudT::Ptr finiteCloud = filterFinitePoints(rawCloud);
+        if (finiteCloud->empty()) {
+            throw std::runtime_error("Input point cloud has no finite XYZ points");
         }
-        CloudT::Ptr measureScan = preprocess(rawCloud, cfg);
+
+        CloudT::Ptr measureScan = applyPoseAndCrop(finiteCloud, cfg);
+        if (measureScan->empty()) {
+            throw std::runtime_error(
+                "Crop box removed all points; check preprocess.crop.min/max in bevel config");
+        }
+
+        if (measureScan->size() > kEarlyDownsampleThreshold
+            && cfg.uniformDownsample
+            && cfg.uniformLeafSize > 0.0) {
+            // 大点云须先体素降采样，否则后续 SOR/VoxelGrid 在 Windows 上易堆损坏
+            std::cout << "[Bevel] early voxel downsample: points=" << measureScan->size()
+                      << " threshold=" << kEarlyDownsampleThreshold << std::endl;
+            measureScan = downsampleForIcp(measureScan, cfg, false);
+            std::cout << "[Bevel] after early downsample: points=" << measureScan->size() << std::endl;
+        }
+        std::cout << "[Bevel] preprocess (SOR max=" << kMaxOutlierRemovalPoints
+                  << " enable=" << cfg.outlierRemoval << ") input points=" << measureScan->size()
+                  << std::endl;
+        measureScan = preprocess(measureScan, cfg);
         if (measureScan->empty())
 		{
             throw std::runtime_error("Preprocessed cloud is empty");
         }
-        CloudT::Ptr scan = downsampleForIcp(measureScan, cfg);
+        CloudT::Ptr scan = downsampleForIcp(measureScan, cfg, true);
         if (scan->empty())
         {
             throw std::runtime_error("Downsampled cloud is empty");

@@ -346,11 +346,6 @@ bool LoadConfig(const std::string& path, ThicknessConfig* config, std::string* e
         config->preprocess.enableVoxelDownsample = root.get<bool>("preprocess.enable_voxel_downsample", true);
         config->preprocess.leafSize = root.get<double>("preprocess.leaf_size", 0.5);
 
-        config->icp.maxIterations = root.get<int>("icp.max_iterations", 80);
-        config->icp.maxCorrespondenceDistance = root.get<double>("icp.max_correspondence_distance", 5.0);
-        config->icp.transformationEpsilon = root.get<double>("icp.transformation_epsilon", 1e-8);
-        config->icp.euclideanFitnessEpsilon = root.get<double>("icp.euclidean_fitness_epsilon", 1e-6);
-
         const std::string thicknessMethod =
             root.get<std::string>("measurement.thickness_method", "nearest_between_surfaces");
         if (!ParseThicknessMethod(thicknessMethod, &config->thicknessMethod))

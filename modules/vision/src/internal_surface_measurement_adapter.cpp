@@ -3,7 +3,10 @@
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <atomic>
+#include <chrono>
 #include <mutex>
+#include <thread>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
@@ -88,11 +91,33 @@ private:
     QString previous_;
 };
 
-InternalSurfaceInspectionResult runMeasurementWithPreparedScanPly(const QString& scanPlyPath)
+QString resolveInternalSurfaceConfigPathForRun(bool useOfflineReplayAlgorithmConfig)
+{
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (useOfflineReplayAlgorithmConfig && configManager != nullptr) {
+        const QString offlineConfigPath =
+            configManager->internalSurfaceConfig().offlineReplayAlgorithmConfigPath.trimmed();
+        if (!offlineConfigPath.isEmpty()) {
+            const QString resolved = resolveConfiguredPath(offlineConfigPath);
+            if (QFileInfo::exists(resolved)) {
+                return resolved;
+            }
+            qWarning(LOG_INTERNAL_SURFACE_ADAPTER).noquote()
+                << QStringLiteral("[InternalSurface] 离线算法配置不存在，回退默认 configPath：")
+                << resolved;
+        }
+    }
+    return resolveInternalSurfaceConfigPath();
+}
+
+InternalSurfaceInspectionResult runMeasurementWithPreparedScanPly(
+    const QString& scanPlyPath,
+    bool useOfflineReplayAlgorithmConfig)
 {
     InternalSurfaceInspectionResult result;
 
-    const QString configPath = resolveInternalSurfaceConfigPath();
+    const QString configPath =
+        resolveInternalSurfaceConfigPathForRun(useOfflineReplayAlgorithmConfig);
     if (!QFileInfo::exists(configPath)) {
         result.message = QStringLiteral("内表面测量配置文件不存在：%1").arg(configPath);
         return result;
@@ -113,9 +138,25 @@ InternalSurfaceInspectionResult runMeasurementWithPreparedScanPly(const QString&
     qInfo(LOG_INTERNAL_SURFACE_ADAPTER).noquote()
         << QStringLiteral("[InternalSurface] 开始测量 config=") << configPath
         << QStringLiteral(" scan=") << scanPlyPath
-        << QStringLiteral(" templateType=") << surfaceConfig.templateType;
+        << QStringLiteral(" templateType=") << surfaceConfig.templateType
+        << QStringLiteral("（大点云 ICP/网格化可能需数分钟，非卡死）");
 
     try {
+        std::atomic<bool> algorithmDone{false};
+        std::thread heartbeatThread([&algorithmDone]() {
+            int elapsedSec = 0;
+            while (!algorithmDone.load(std::memory_order_acquire)) {
+                std::this_thread::sleep_for(std::chrono::seconds(15));
+                if (algorithmDone.load(std::memory_order_acquire)) {
+                    break;
+                }
+                elapsedSec += 15;
+                qInfo(LOG_INTERNAL_SURFACE_ADAPTER).noquote()
+                    << QStringLiteral("[InternalSurface] 算法仍在运行，已耗时约")
+                    << elapsedSec << QStringLiteral("s（ICP/法向/三角网格阶段）");
+            }
+        });
+
         std::lock_guard<std::mutex> pclGuard(
             scan_tracking::mech_eye::pointCloudAlgorithmMutex());
 
@@ -127,7 +168,16 @@ InternalSurfaceInspectionResult runMeasurementWithPreparedScanPly(const QString&
         const ScopedCurrentDir algorithmCwd(QFileInfo(configPath).absolutePath());
 
         MeasurementResult algoResult;
-        if (!RunMeasurement(input, &algoResult)) {
+        const bool algoOk = RunMeasurement(input, &algoResult);
+        algorithmDone.store(true, std::memory_order_release);
+        if (heartbeatThread.joinable()) {
+            heartbeatThread.join();
+        }
+
+        qInfo(LOG_INTERNAL_SURFACE_ADAPTER).noquote()
+            << QStringLiteral("[InternalSurface] RunMeasurement 已返回 ok=") << algoOk;
+
+        if (!algoOk) {
             result.message = QStringLiteral("内表面测量算法失败：%1")
                                  .arg(QString::fromLocal8Bit(algoResult.message));
             qWarning(LOG_INTERNAL_SURFACE_ADAPTER).noquote() << result.message;
@@ -219,7 +269,7 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurement(
         return result;
     }
 
-    return runMeasurementWithPreparedScanPly(scanCloudPath);
+    return runMeasurementWithPreparedScanPly(scanCloudPath, false);
 }
 
 InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
@@ -235,7 +285,7 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
 
     const QString suffix = QFileInfo(resolved).suffix().toLower();
     if (suffix == QStringLiteral("ply") || suffix == QStringLiteral("pcd")) {
-        return runMeasurementWithPreparedScanPly(resolved);
+        return runMeasurementWithPreparedScanPly(resolved, true);
     }
 
     if (suffix != QStringLiteral("txt")) {
@@ -249,7 +299,7 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
         return result;
     }
 
-    return runMeasurementWithPreparedScanPly(convertedPlyPath);
+    return runMeasurementWithPreparedScanPly(convertedPlyPath, true);
 }
 
 }  // namespace scan_tracking::vision::internal_surface

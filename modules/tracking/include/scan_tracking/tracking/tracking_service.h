@@ -97,12 +97,17 @@ using InspectionResultNotifier = std::function<void(const InspectionResult&)>;
 /// 跟踪服务类，负责管理检测和位姿校验的核心业务逻辑
 class TrackingService {
 public:
+    ~TrackingService();
+
     /// 获取服务状态文本
     // @return 服务状态描述字符串
     std::string statusText() const;
 
     /// 注册综合检测结果回调：inspectPointCloud 返回前必定触发
     void setInspectionResultNotifier(InspectionResultNotifier notifier);
+
+    /// 安全释放回调（swap 清空，避免退出阶段 std::function 析构访问失效目标）
+    void clearInspectionResultNotifier();
 
     /// 执行单点云综合检测（按路径 inspectionType 分流坡口或 Hole）
     InspectionResult inspectPointCloud(
@@ -114,6 +119,12 @@ public:
     /// 内表面离线联调：从磁盘点云文件执行测量（不经过 PointCloudFrame 内存路径）
     InspectionResult inspectInternalSurfaceFromScanFile(
         const QString& scanCloudPath,
+        int inspectionPathId = 0,
+        bool notifyListener = true) const;
+
+    /// 坡口离线/文件路径测量：PCL 在 Po_Kou 模块内加载，避免跨模块堆释放崩溃
+    InspectionResult inspectBevelPointCloudFile(
+        const QString& cloudPath,
         int inspectionPathId = 0,
         bool notifyListener = true) const;
 

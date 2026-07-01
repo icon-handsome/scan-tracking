@@ -1,0 +1,50 @@
+{
+  "point_cloud": {
+    "inner_template_cloud_path": "../input/0_template_inner_sample.pcd",
+    "outer_template_cloud_path": "../input/0_template_outer_sample.pcd"
+  },
+  "preprocess": {
+    "enable_outlier_removal": false,
+    "mean_k": 10,
+    "stddev_mul_thresh": 5.0,
+    "enable_voxel_downsample": true,
+    "leaf_size": 8.0
+  },
+  "measurement": {
+    "_comment": "离线大点云联调：体素 8mm、跳过离群点；ICP 距离放宽至 500mm",
+    "thickness_method": "nearest_between_surfaces"
+  },
+  "icp": {
+    "max_iterations": 50,
+    "max_correspondence_distance": 500.0,
+    "transformation_epsilon": 0.001,
+    "euclidean_fitness_epsilon": 0.001
+  },
+  "template_cylinder": {
+    "axis_point": {
+      "x": -40.3683,
+      "y": 160.9239,
+      "z": 1875.7435
+    },
+    "axis_direction": {
+      "x": -0.11217465,
+      "y": 0.72954082,
+      "z": 0.67467552
+    }
+  },
+  "template_feature_points": [
+    {
+      "x": -615.117615,
+      "y": -463.260071,
+      "z": 3423.801270
+    },
+    {
+      "x": -608.145386,
+      "y": -499.079773,
+      "z": 3483.108154
+    }
+  ],
+  "output": {
+    "result_path": "thickness_result_offline.json"
+  }
+}

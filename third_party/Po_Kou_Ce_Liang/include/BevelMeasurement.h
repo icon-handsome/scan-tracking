@@ -71,6 +71,17 @@ BevelMeasurementResult solveBevelFromRawCloud(const CloudT::ConstPtr& rawCloud,
                                               const std::string& configPath,
                                               const std::string& templateDir);
 
+/// 从 PCD/PLY/TXT 点云文件加载并在本模块内完成测量（避免跨模块传递 PCL 点云）。
+BevelMeasurementResult solveBevelFromPointCloudFile(const std::string& cloudPath,
+                                                  const std::string& configPath,
+                                                  const std::string& templateDir = std::string());
+
+/// 从连续 xyz 浮点缓冲（长度须为 3 的倍数）在本模块内构建 PCL 点云并测量；供适配层跨库传数据用。
+BevelMeasurementResult solveBevelFromXyzBuffer(const float* xyz,
+                                               std::size_t floatCount,
+                                               const std::string& configPath,
+                                               const std::string& templateDir = std::string());
+
 bool loadTextPointCloud(const std::string& path, CloudT::Ptr cloud);
 
 } // namespace bevel

@@ -62,7 +62,7 @@ bool writeTestConfig()
     stream << "[Vision]\nmechEyeCameraKey=Mech-Eye Nano\nmechCaptureTimeoutMs=5000\nhikConnectTimeoutMs=3000\nhikCaptureTimeoutMs=1000\nhikSdkRoot=D:/work/scan-tracking/third_party/hik_mvs\nhikCameraAName=hik_camera_a\nhikCameraAKey=192.168.10.12\nhikCameraAIp=192.168.10.12\nhikCameraASerial=\nhikCameraBName=hik_camera_b\nhikCameraBKey=192.168.10.13\nhikCameraBIp=192.168.10.13\nhikCameraBSerial=\n";
     stream << "[FlowControl]\npollIntervalMs=100\nheartbeatIntervalMs=1000\nsimulatedProcessingMs=300\n";
     stream << "[Tracking]\nscanSegmentTotal=3\n";
-    stream << "[Bevel]\nconfigPath=bevel/config.txt\ntemplateDir=bevel/data/templates\n";
+    stream << "[Bevel]\nconfigPath=bevel/config.txt\ntemplateDir=bevel\n";
     stream << "angleTolDeg=2.0\nlengthTolMm=1.0\ndefaultBevelType=0\ndefaultAngleDeg=45.0\ndefaultLengthMm=1.0\n";
     file.close();
     return true;
@@ -99,7 +99,7 @@ bool testRejectsMissingRecipeWhenDefaultsDisabled()
     stream << "[Vision]\nmechEyeCameraKey=Mech-Eye Nano\nmechCaptureTimeoutMs=5000\nhikConnectTimeoutMs=3000\nhikCaptureTimeoutMs=1000\nhikSdkRoot=D:/work/scan-tracking/third_party/hik_mvs\nhikCameraAName=hik_camera_a\nhikCameraAKey=192.168.10.12\nhikCameraAIp=192.168.10.12\nhikCameraASerial=\nhikCameraBName=hik_camera_b\nhikCameraBKey=192.168.10.13\nhikCameraBIp=192.168.10.13\nhikCameraBSerial=\n";
     stream << "[FlowControl]\npollIntervalMs=100\nheartbeatIntervalMs=1000\nsimulatedProcessingMs=300\n";
     stream << "[Tracking]\nscanSegmentTotal=3\n";
-    stream << "[Bevel]\nconfigPath=bevel/config.txt\ntemplateDir=bevel/data/templates\n";
+    stream << "[Bevel]\nconfigPath=bevel/config.txt\ntemplateDir=bevel\n";
     stream << "angleTolDeg=2.0\nlengthTolMm=1.0\ndefaultBevelType=0\ndefaultAngleDeg=0\ndefaultLengthMm=0\n";
     file.close();
 

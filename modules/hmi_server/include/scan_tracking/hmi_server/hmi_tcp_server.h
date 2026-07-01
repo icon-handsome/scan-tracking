@@ -304,6 +304,9 @@ private:
     /// 显控连接后一次性推送全零检测展示帧（resultCode=0，便于 UI 初始化绑定）
     void publishInitialInspectionDisplay();
 
+    /// 联调：连接后推送演示路径进度（path3 进行中）及 event.path.started
+    void publishDemoScanPathStatusOnConnect();
+
     void publishPresetInspectionOnPathsComplete();
 
     QTcpServer* m_tcpServer = nullptr;      ///< Qt TCP 服务器

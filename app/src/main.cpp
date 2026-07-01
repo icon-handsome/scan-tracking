@@ -27,8 +27,11 @@ int main(int argc, char* argv[])
         QCoreApplication::applicationDirPath() + QStringLiteral("/logs"));
     scan_tracking::common::ConfigManager::initialize();
 
-    scan_tracking::app::ConsoleRuntime runtime(app);
-    const int exit_code = runtime.run();
+    int exit_code = 0;
+    {
+        scan_tracking::app::ConsoleRuntime runtime(app);
+        exit_code = runtime.run();
+    }
 
     scan_tracking::common::ConfigManager::cleanup();
     scan_tracking::common::Logger::cleanup();

@@ -170,6 +170,24 @@ public:
     void deliverOfflineInternalSurfaceInspectionResult(
         const tracking::InspectionResult& result);
 
+    /**
+     * @brief 一次性联调：从 [Bevel] offlineReplayDataDir 加载 PCD/PLY 点云并跑坡口测量
+     *
+     * 不写 PLC、不占用 PLC 任务槽；结果写入日志并推送显控（若已连接）。
+     */
+    tracking::InspectionResult runOfflineBevelInspectionFromDataDir();
+
+    void deliverOfflineBevelInspectionResult(const tracking::InspectionResult& result);
+
+    /**
+     * @brief 一次性联调：从 [Thickness] offlineReplayDataDir 加载 inner/outer 点云并跑厚度测量
+     *
+     * 不写 PLC、不占用 PLC 任务槽；结果写入日志并推送显控（若已连接）。
+     */
+    tracking::InspectionResult runOfflineThicknessInspectionFromDataDir();
+
+    void deliverOfflineThicknessInspectionResult(const tracking::InspectionResult& result);
+
     // 设置报警
     // @param level 报警级别
     // @param code 报警代码

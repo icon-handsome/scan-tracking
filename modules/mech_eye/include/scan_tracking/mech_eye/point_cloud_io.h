@@ -6,6 +6,7 @@
  *
  * 负责分段采集结果的落盘与回放：
  * - PLY：binary_little_endian xyz（保存时过滤 NaN；加载时兼容 ASCII 与带法向格式）
+ * - PCD：PCL PointXYZ（Po_Kou 坡口离线测试数据）
  * - PNG：8 位灰度 Mech 2D 纹理
  *
  * 路径规则与 common/capture_cache_paths 一致，目录结构示例：
@@ -18,6 +19,8 @@
  */
 
 #include <QtCore/QString>
+
+#include <vector>
 
 #include "scan_tracking/mech_eye/mech_eye_types.h"
 
@@ -67,6 +70,27 @@ bool convertTxtPointCloudToPly(const QString& txtPath, const QString& plyPath);
  * @note 支持 binary_little_endian 与 legacy ASCII；可识别 x,y,z 或 x,y,z,nx,ny,nz 属性
  */
 bool loadPointCloudFrameFromPly(const QString& absolutePath, PointCloudFrame* outFrame);
+
+/** @brief 从 PCD 文件加载点云（PCL PointXYZ；跳过 NaN/Inf 点） */
+bool loadPointCloudFrameFromPcd(const QString& absolutePath, PointCloudFrame* outFrame);
+
+/**
+ * @brief 从 PLY 流式提取有限 xyz 浮点缓冲（不整包读 body，不建 PointCloudFrame）
+ * @param maxPointCount 大于 0 时按 header 顶点数 stride 采样，上限约 maxPointCount
+ */
+bool loadPointCloudXyzFromPly(
+    const QString& absolutePath,
+    std::vector<float>* outXyz,
+    int maxPointCount = 0);
+
+/**
+ * @brief 从 PCD 提取有限 xyz 浮点缓冲（PCL 仅在持锁期间使用，不跨模块传递点云）
+ * @param maxPointCount 大于 0 时对有效点 stride 采样
+ */
+bool loadPointCloudXyzFromPcd(
+    const QString& absolutePath,
+    std::vector<float>* outXyz,
+    int maxPointCount = 0);
 
 /**
  * @brief 从 TXT 文件加载点云（每行 x y z，空格分隔）

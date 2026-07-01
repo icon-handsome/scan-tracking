@@ -102,6 +102,124 @@ bool shouldForwardLogToHmi(QtMsgType type, const QString& category, const QStrin
     return type >= QtWarningMsg;
 }
 
+QVector<int> collectHmiEnabledScanPathIds(const common::ConfigManager* cfgMgr)
+{
+    QVector<int> ids;
+    if (cfgMgr == nullptr) {
+        return ids;
+    }
+
+    const auto& pathsConfig = cfgMgr->scanPathsConfig();
+    if (cfgMgr->hmiConfig().emitDemoScanPathStatusOnConnect) {
+        ids.reserve(static_cast<int>(pathsConfig.scanPaths.size()));
+        for (const auto& path : pathsConfig.scanPaths) {
+            if (path.enabled) {
+                ids.append(path.pathId);
+            }
+        }
+    } else if (!pathsConfig.selectedPathIds.empty()) {
+        for (int pathId : pathsConfig.selectedPathIds) {
+            ids.append(pathId);
+        }
+    } else {
+        for (const auto& path : pathsConfig.scanPaths) {
+            if (path.enabled) {
+                ids.append(path.pathId);
+            }
+        }
+    }
+
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    return ids;
+}
+
+QJsonArray buildHmiScanPathsConfigArray(const common::ConfigManager* cfgMgr)
+{
+    QJsonArray scanPathsArray;
+    if (cfgMgr == nullptr) {
+        return scanPathsArray;
+    }
+
+    const auto& pathsConfig = cfgMgr->scanPathsConfig();
+    for (int pathId : collectHmiEnabledScanPathIds(cfgMgr)) {
+        for (const auto& path : pathsConfig.scanPaths) {
+            if (path.pathId != pathId) {
+                continue;
+            }
+            QJsonObject pathObj;
+            pathObj[QLatin1String("pathId")] = path.pathId;
+            pathObj[QLatin1String("pathName")] = cfgMgr->pathNameForPath(path.pathId);
+            pathObj[QLatin1String("inspectionType")] =
+                common::inspectionTypeToString(path.inspectionType);
+            pathObj[QLatin1String("totalPoints")] = path.totalPoints;
+            pathObj[QLatin1String("enabled")] = path.enabled;
+            scanPathsArray.append(pathObj);
+            break;
+        }
+    }
+    return scanPathsArray;
+}
+
+QJsonObject buildScanPathProgressJson(
+    const QVector<int>& enabledPathIds,
+    int currentPathId,
+    const common::ConfigManager* cfgMgr)
+{
+    QJsonObject obj;
+    QJsonArray enabledArr;
+    QJsonArray completedArr;
+    for (int pathId : enabledPathIds) {
+        enabledArr.append(pathId);
+    }
+
+    const int currentIndex = enabledPathIds.indexOf(currentPathId);
+    if (currentIndex > 0) {
+        for (int index = 0; index < currentIndex; ++index) {
+            completedArr.append(enabledPathIds.at(index));
+        }
+    }
+
+    obj[QLatin1String("enabledPathIds")] = enabledArr;
+    obj[QLatin1String("currentPathId")] = currentPathId;
+    if (cfgMgr != nullptr && currentPathId > 0) {
+        obj[QLatin1String("currentPathName")] = cfgMgr->pathNameForPath(currentPathId);
+    } else {
+        obj[QLatin1String("currentPathName")] = QString();
+    }
+    obj[QLatin1String("completedPathIds")] = completedArr;
+    obj[QLatin1String("pathCount")] = enabledPathIds.size();
+    obj[QLatin1String("allPathsComplete")] =
+        currentPathId <= 0 && !enabledPathIds.isEmpty();
+    return obj;
+}
+
+flow_control::ScanPathEventInfo buildScanPathEventInfoForHmi(
+    const common::ConfigManager* cfgMgr,
+    int pathId,
+    const QVector<int>& enabledPathIds,
+    quint16 resultCode = 0)
+{
+    flow_control::ScanPathEventInfo info;
+    info.pathId = pathId;
+    info.resultCode = resultCode;
+    const int index = enabledPathIds.indexOf(pathId);
+    info.pathIndex = index >= 0 ? index + 1 : 0;
+    info.pathCount = enabledPathIds.size();
+    if (cfgMgr != nullptr) {
+        info.pathName = cfgMgr->pathNameForPath(pathId);
+        info.inspectionType =
+            common::inspectionTypeToString(cfgMgr->inspectionTypeForPath(pathId));
+        for (const auto& path : cfgMgr->scanPathsConfig().scanPaths) {
+            if (path.pathId == pathId) {
+                info.totalPoints = path.totalPoints;
+                break;
+            }
+        }
+    }
+    return info;
+}
+
 tracking::InspectionResult buildPresetInspectionResultAfterPathsComplete()
 {
     tracking::InspectionResult result;
@@ -306,6 +424,10 @@ void HmiTcpServer::onNewConnection()
         sendToClient(buildEnvelope(QStringLiteral("core.hello"), nextEventId(), QJsonObject()));
         pushAllStatusToClient();
         publishInitialInspectionDisplay();
+        if (const auto* cfgMgr = common::ConfigManager::instance();
+            cfgMgr != nullptr && cfgMgr->hmiConfig().emitDemoScanPathStatusOnConnect) {
+            publishDemoScanPathStatusOnConnect();
+        }
         syncCameraConnectivityCache();
         if (m_stateMachine) {
             syncPlcAuxDeviceAlarmCache(m_stateMachine->lastCommandBlock());
@@ -634,44 +756,11 @@ void HmiTcpServer::handleCmdGetConfig(const QJsonObject& message)
     hmiObj[QLatin1String("allowDebugTriggerInspection")] = cfgMgr->hmiConfig().allowDebugTriggerInspection;
     hmiObj[QLatin1String("emitPresetInspectionOnPathsComplete")] =
         cfgMgr->hmiConfig().emitPresetInspectionOnPathsComplete;
+    hmiObj[QLatin1String("emitDemoScanPathStatusOnConnect")] =
+        cfgMgr->hmiConfig().emitDemoScanPathStatusOnConnect;
     configPayload[QLatin1String("hmi")] = hmiObj;
 
-    QJsonArray scanPathsArray;
-    const auto& pathsConfig = cfgMgr->scanPathsConfig();
-    const QVector<int> enabledIds = [&pathsConfig]() {
-        QVector<int> ids;
-        if (!pathsConfig.selectedPathIds.empty()) {
-            for (int pathId : pathsConfig.selectedPathIds) {
-                ids.append(pathId);
-            }
-        } else {
-            for (const auto& path : pathsConfig.scanPaths) {
-                if (path.enabled) {
-                    ids.append(path.pathId);
-                }
-            }
-        }
-        std::sort(ids.begin(), ids.end());
-        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
-        return ids;
-    }();
-    for (int pathId : enabledIds) {
-        for (const auto& path : pathsConfig.scanPaths) {
-            if (path.pathId != pathId) {
-                continue;
-            }
-            QJsonObject pathObj;
-            pathObj[QLatin1String("pathId")] = path.pathId;
-            pathObj[QLatin1String("pathName")] = cfgMgr->pathNameForPath(path.pathId);
-            pathObj[QLatin1String("inspectionType")] =
-                common::inspectionTypeToString(path.inspectionType);
-            pathObj[QLatin1String("totalPoints")] = path.totalPoints;
-            pathObj[QLatin1String("enabled")] = path.enabled;
-            scanPathsArray.append(pathObj);
-            break;
-        }
-    }
-    configPayload[QLatin1String("scanPaths")] = scanPathsArray;
+    configPayload[QLatin1String("scanPaths")] = buildHmiScanPathsConfigArray(cfgMgr);
     
     // 8. LbPose 配置
     QJsonObject lbPoseObj;
@@ -2177,6 +2266,46 @@ void HmiTcpServer::publishPresetInspectionOnPathsComplete()
         << QStringLiteral(" trigger=paths_complete");
 }
 
+void HmiTcpServer::publishDemoScanPathStatusOnConnect()
+{
+    if (!hasClient()) {
+        return;
+    }
+
+    auto* cfgMgr = common::ConfigManager::instance();
+    const QVector<int> enabledPathIds = collectHmiEnabledScanPathIds(cfgMgr);
+    if (enabledPathIds.isEmpty()) {
+        qWarning(LOG_HMI_SERVER) << QStringLiteral("[TCPIP] 演示路径状态跳过：无启用路径");
+        return;
+    }
+
+    constexpr int kDemoCurrentPathId = 3;
+    const int currentPathId =
+        enabledPathIds.contains(kDemoCurrentPathId) ? kDemoCurrentPathId : enabledPathIds.at(0);
+
+    const flow_control::ScanPathEventInfo startedInfo =
+        buildScanPathEventInfoForHmi(cfgMgr, currentPathId, enabledPathIds);
+    sendToClient(buildEnvelope(
+        QLatin1String(msg_type::kEventPathStarted),
+        nextEventId(),
+        buildScanPathEventPayload(startedInfo)));
+
+    QJsonObject systemPayload = buildSystemStatusPayload();
+    systemPayload[QLatin1String("scanPathProgress")] =
+        buildScanPathProgressJson(enabledPathIds, currentPathId, cfgMgr);
+    pushStatusIfChanged(
+        QLatin1String(msg_type::kStatusSystem),
+        systemPayload,
+        m_systemStatusCache,
+        true);
+
+    qInfo(LOG_HMI_SERVER).noquote()
+        << QStringLiteral("[TCPIP] 显控连接后已推送演示路径状态 pathId=") << currentPathId
+        << QStringLiteral(" pathName=") << startedInfo.pathName
+        << QStringLiteral(" completed=") << (currentPathId > 0 ? currentPathId - 1 : 0)
+        << QStringLiteral("/") << enabledPathIds.size();
+}
+
 void HmiTcpServer::publishInitialInspectionDisplay()
 {
     if (!hasClient()) {
@@ -2205,6 +2334,11 @@ void HmiTcpServer::publishInspectionResult(const tracking::InspectionResult& res
         qInfo(LOG_HMI_SERVER).noquote()
             << QStringLiteral("[TCPIP] 坡口测量结果未推送（无显控连接）")
             << QStringLiteral(" resultCode=") << result.resultCode
+            << QStringLiteral(" bevelType=") << result.measurement.bevelType
+            << QStringLiteral(" angleDeg=") << result.measurement.headAngleTol
+            << QStringLiteral(" lengthMm=") << result.measurement.bluntHeightTol
+            << QStringLiteral(" icpFitness=") << result.measurement.icpFitness
+            << QStringLiteral(" qualityCode=") << result.measurement.qualityCode
             << QStringLiteral(" message=") << result.message;
         return;
     }
@@ -2217,8 +2351,11 @@ void HmiTcpServer::publishInspectionResult(const tracking::InspectionResult& res
         << QStringLiteral(" resultCode=") << result.resultCode
         << QStringLiteral(" ngWord0=") << result.ngReasonWord0
         << QStringLiteral(" measureItems=") << result.measureItemCount
+        << QStringLiteral(" bevelType=") << result.measurement.bevelType
         << QStringLiteral(" angleDeg=") << result.measurement.headAngleTol
         << QStringLiteral(" lengthMm=") << result.measurement.bluntHeightTol
+        << QStringLiteral(" icpFitness=") << result.measurement.icpFitness
+        << QStringLiteral(" qualityCode=") << result.measurement.qualityCode
         << QStringLiteral(" message=") << result.message;
 }
 

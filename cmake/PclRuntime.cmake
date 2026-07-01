@@ -107,6 +107,9 @@ function(scan_tracking_deploy_thickness_runtime target_name)
             "${_thickness_source_root}/config/thickness_config.json"
             "$<TARGET_FILE_DIR:${target_name}>/thickness/config/thickness_config.json"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_thickness_source_root}/config/thickness_config_offline_fast.json"
+            "$<TARGET_FILE_DIR:${target_name}>/thickness/config/thickness_config_offline_fast.json"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${_thickness_source_root}/config/path3.json"
             "$<TARGET_FILE_DIR:${target_name}>/thickness/config/path3.json"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -129,6 +132,9 @@ function(scan_tracking_deploy_internal_surface_runtime target_name)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${_internal_surface_source_root}/config/algorithm_config.json"
             "$<TARGET_FILE_DIR:${target_name}>/internal_surface/config/algorithm_config.json"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_internal_surface_source_root}/config/algorithm_config_offline_fast.json"
+            "$<TARGET_FILE_DIR:${target_name}>/internal_surface/config/algorithm_config_offline_fast.json"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${_internal_surface_source_root}/templates"
             "$<TARGET_FILE_DIR:${target_name}>/internal_surface/templates"

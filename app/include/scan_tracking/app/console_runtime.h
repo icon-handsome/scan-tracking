@@ -72,6 +72,8 @@ private:
 
     void stopAutoLatencyBundleTest();
 
+    void stopOfflineReplayTimers();
+
     /* [Hole] 离线回放：启动后从 session 目录加载点云并跑 Hole 检测 */
     void scheduleOfflineHoleReplay();
     void triggerOfflineHoleReplay();
@@ -79,6 +81,14 @@ private:
     /* [InternalSurface] 离线回放：启动后从 TXT/PLY 加载点云并跑内表面检测 */
     void scheduleOfflineInternalSurfaceReplay();
     void triggerOfflineInternalSurfaceReplay();
+
+    /* [Bevel] 离线回放：启动后从 PCD 目录加载点云并跑坡口测量 */
+    void scheduleOfflineBevelReplay();
+    void triggerOfflineBevelReplay();
+
+    /* [Thickness] 离线回放：启动后从目录加载 inner/outer 点云并跑厚度测量 */
+    void scheduleOfflineThicknessReplay();
+    void triggerOfflineThicknessReplay();
 
     // ---- 自动延时测试状态 ----
     qint64 m_autoLatencyTriggerMs = 0;   // 本次触发时刻（epoch ms），用于计算墙钟耗时
@@ -89,7 +99,10 @@ private:
     QTimer* m_autoLatencyTimer = nullptr;
     QTimer* m_offlineHoleReplayTimer = nullptr;
     QTimer* m_offlineInternalSurfaceReplayTimer = nullptr;
+    QTimer* m_offlineBevelReplayTimer = nullptr;
+    QTimer* m_offlineThicknessReplayTimer = nullptr;
     bool m_offlineInternalSurfaceReplayInFlight = false;
+    bool m_shutdownCompleted = false;
 
     // ---- 业务模块（unique_ptr 持有，析构顺序与声明顺序相反） ----
     QCoreApplication& application_;

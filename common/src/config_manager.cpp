@@ -21,19 +21,33 @@ ConfigManager* ConfigManager::s_instance = nullptr;
 
 namespace {
 
+void configureUtf8IniSettings(QSettings& settings)
+{
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    settings.setIniCodec("UTF-8");
+#else
+    Q_UNUSED(settings);
+#endif
+}
+
 QString projectRootConfigPath()
 {
     const QString exeDirConfig =
         QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("config.ini"));
-    if (QFileInfo::exists(exeDirConfig)) {
-        return exeDirConfig;
+
+    // Dev：从 build/<preset>/ 运行时优先读仓库根 config.ini，避免 build 目录陈旧副本覆盖联调配置。
+    QDir sourceDir(QCoreApplication::applicationDirPath());
+    if (sourceDir.cdUp() && sourceDir.cdUp()) {
+        const QString sourceTreeConfig = sourceDir.filePath(QStringLiteral("config.ini"));
+        if (QFileInfo::exists(sourceTreeConfig)) {
+            return QDir::cleanPath(sourceTreeConfig);
+        }
     }
 
-    QDir rootDir(QCoreApplication::applicationDirPath());
-    if (rootDir.cdUp() && rootDir.cdUp() && rootDir.cdUp()) {
-        return rootDir.filePath(QStringLiteral("config.ini"));
+    if (QFileInfo::exists(exeDirConfig)) {
+        return QDir::cleanPath(exeDirConfig);
     }
-    return exeDirConfig;
+    return QDir::cleanPath(exeDirConfig);
 }
 
 QString resolveConfigRelativePath(const QString& rawPath, const QString& configFilePath)
@@ -513,12 +527,16 @@ void ConfigManager::writeDefaults(QSettings& settings)
 
     settings.beginGroup("Bevel");
     settings.setValue("configPath", "bevel/config.txt");
-    settings.setValue("templateDir", "bevel/data/templates");
+    settings.setValue("templateDir", "bevel");
     settings.setValue("angleTolDeg", 2.0);
     settings.setValue("lengthTolMm", 1.0);
     settings.setValue("defaultBevelType", 0);
     settings.setValue("defaultAngleDeg", 45.0);
     settings.setValue("defaultLengthMm", 1.0);
+    settings.setValue("offlineReplayEnabled", false);
+    settings.setValue("offlineReplayDataDir", QString());
+    settings.setValue("offlineReplayPathId", 4);
+    settings.setValue("offlineReplayDelayMs", 5000);
     settings.endGroup();
 
     settings.beginGroup("Hole");
@@ -607,6 +625,7 @@ void ConfigManager::loadStationProfile(QSettings& settings, const QString& confi
     const QString resolvedProfileIni = resolveConfigRelativePath(profileIni, configFilePath);
     if (!resolvedProfileIni.isEmpty() && QFileInfo::exists(resolvedProfileIni)) {
         QSettings profileSettings(resolvedProfileIni, QSettings::IniFormat);
+        configureUtf8IniSettings(profileSettings);
         profileSettings.beginGroup(QStringLiteral("Station"));
         applyStationSettings(profileSettings, profile, nullptr);
         profileSettings.endGroup();
@@ -635,6 +654,7 @@ void ConfigManager::load(const QString& filePath)
     m_configFilePath = QDir::cleanPath(filePath);
 
     QSettings settings(filePath, QSettings::IniFormat);
+    configureUtf8IniSettings(settings);
     if (!fileExists) {
         qWarning(LOG_CONFIG) << "config.ini 未找到或为空。正在生成默认配置...";
         writeDefaults(settings);
@@ -829,7 +849,7 @@ void ConfigManager::load(const QString& filePath)
     m_bevelConfig.configPath =
         settings.value("configPath", QStringLiteral("bevel/config.txt")).toString();
     m_bevelConfig.templateDir =
-        settings.value("templateDir", QStringLiteral("bevel/data/templates")).toString();
+        settings.value("templateDir", QStringLiteral("bevel")).toString();
     m_bevelConfig.angleTolDeg =
         settings.value("angleTolDeg", 2.0).toFloat();
     m_bevelConfig.lengthTolMm =
@@ -843,7 +863,24 @@ void ConfigManager::load(const QString& filePath)
     m_bevelConfig.defaultRecipe.active =
         m_bevelConfig.defaultRecipe.angleDeg > 0.0f
         && m_bevelConfig.defaultRecipe.lengthMm > 0.0f;
+    m_bevelConfig.offlineReplayEnabled =
+        settings.value("offlineReplayEnabled", false).toBool();
+    m_bevelConfig.offlineReplayDataDir = resolveConfigRelativePath(
+        settings.value("offlineReplayDataDir").toString().trimmed(),
+        m_configFilePath);
+    m_bevelConfig.offlineReplayPathId =
+        qMax(1, settings.value("offlineReplayPathId", 4).toInt());
+    m_bevelConfig.offlineReplayDelayMs =
+        qMax(0, settings.value("offlineReplayDelayMs", 5000).toInt());
     settings.endGroup();
+
+    if (m_bevelConfig.offlineReplayEnabled) {
+        qInfo(LOG_CONFIG).noquote()
+            << QStringLiteral("[Bevel] 离线回放已启用 pathId=")
+            << m_bevelConfig.offlineReplayPathId
+            << QStringLiteral(" dataDir=") << m_bevelConfig.offlineReplayDataDir
+            << QStringLiteral(" delayMs=") << m_bevelConfig.offlineReplayDelayMs;
+    }
 
     settings.beginGroup("Hole");
     m_holeConfig.configPath =
@@ -883,7 +920,45 @@ void ConfigManager::load(const QString& filePath)
     m_thicknessConfig.configPath = settings.value(
         "configPath", QStringLiteral("thickness/config/thickness_config.json")).toString();
     m_thicknessConfig.icpFitnessMax = settings.value("icpFitnessMax", 50.0).toDouble();
+    m_thicknessConfig.offlineReplayEnabled =
+        settings.value("offlineReplayEnabled", false).toBool();
+    m_thicknessConfig.offlineReplayDataDir = resolveConfigRelativePath(
+        settings.value("offlineReplayDataDir").toString().trimmed(),
+        m_configFilePath);
+    m_thicknessConfig.offlineReplayInnerCloudFile = resolveConfigRelativePath(
+        settings.value("offlineReplayInnerCloudFile").toString().trimmed(),
+        m_configFilePath);
+    m_thicknessConfig.offlineReplayOuterCloudFile = resolveConfigRelativePath(
+        settings.value("offlineReplayOuterCloudFile").toString().trimmed(),
+        m_configFilePath);
+    m_thicknessConfig.offlineReplayPathId =
+        qMax(1, settings.value("offlineReplayPathId", 5).toInt());
+    m_thicknessConfig.offlineReplayDelayMs =
+        qMax(0, settings.value("offlineReplayDelayMs", 5000).toInt());
+    m_thicknessConfig.offlineReplayAlgorithmConfigPath = resolveConfigRelativePath(
+        settings.value("offlineReplayAlgorithmConfigPath").toString().trimmed(),
+        m_configFilePath);
     settings.endGroup();
+
+    if (m_thicknessConfig.offlineReplayEnabled) {
+        qInfo(LOG_CONFIG).noquote()
+            << QStringLiteral("[Thickness] 离线回放已启用 pathId=")
+            << m_thicknessConfig.offlineReplayPathId
+            << QStringLiteral(" dataDir=") << m_thicknessConfig.offlineReplayDataDir
+            << QStringLiteral(" inner=")
+            << (m_thicknessConfig.offlineReplayInnerCloudFile.isEmpty()
+                    ? QStringLiteral("(auto)")
+                    : m_thicknessConfig.offlineReplayInnerCloudFile)
+            << QStringLiteral(" outer=")
+            << (m_thicknessConfig.offlineReplayOuterCloudFile.isEmpty()
+                    ? QStringLiteral("(auto)")
+                    : m_thicknessConfig.offlineReplayOuterCloudFile)
+            << QStringLiteral(" algoConfig=")
+            << (m_thicknessConfig.offlineReplayAlgorithmConfigPath.isEmpty()
+                    ? m_thicknessConfig.configPath
+                    : m_thicknessConfig.offlineReplayAlgorithmConfigPath)
+            << QStringLiteral(" delayMs=") << m_thicknessConfig.offlineReplayDelayMs;
+    }
 
     settings.beginGroup("InternalSurface");
     m_internalSurfaceConfig.configPath = settings.value(
@@ -894,12 +969,15 @@ void ConfigManager::load(const QString& filePath)
     m_internalSurfaceConfig.offlineReplayEnabled =
         settings.value("offlineReplayEnabled", false).toBool();
     m_internalSurfaceConfig.offlineReplayPointCloudPath = resolveConfigRelativePath(
-        settings.value("offlineReplayPointCloudPath").toString(),
-        QCoreApplication::applicationDirPath());
+        settings.value("offlineReplayPointCloudPath").toString().trimmed(),
+        m_configFilePath);
     m_internalSurfaceConfig.offlineReplayPathId =
         qMax(1, settings.value("offlineReplayPathId", 2).toInt());
     m_internalSurfaceConfig.offlineReplayDelayMs =
         qMax(0, settings.value("offlineReplayDelayMs", 5000).toInt());
+    m_internalSurfaceConfig.offlineReplayAlgorithmConfigPath = resolveConfigRelativePath(
+        settings.value("offlineReplayAlgorithmConfigPath").toString().trimmed(),
+        m_configFilePath);
     settings.endGroup();
 
     if (m_internalSurfaceConfig.offlineReplayEnabled) {
@@ -907,6 +985,10 @@ void ConfigManager::load(const QString& filePath)
             << QStringLiteral("[InternalSurface] 离线回放已启用 pathId=")
             << m_internalSurfaceConfig.offlineReplayPathId
             << QStringLiteral(" cloud=") << m_internalSurfaceConfig.offlineReplayPointCloudPath
+            << QStringLiteral(" algoConfig=")
+            << (m_internalSurfaceConfig.offlineReplayAlgorithmConfigPath.isEmpty()
+                    ? m_internalSurfaceConfig.configPath
+                    : m_internalSurfaceConfig.offlineReplayAlgorithmConfigPath)
             << QStringLiteral(" delayMs=") << m_internalSurfaceConfig.offlineReplayDelayMs;
     }
 
@@ -973,6 +1055,8 @@ void ConfigManager::load(const QString& filePath)
         settings.value("allowDebugTriggerInspection", false).toBool();
     m_hmiConfig.emitPresetInspectionOnPathsComplete =
         settings.value("emitPresetInspectionOnPathsComplete", false).toBool();
+    m_hmiConfig.emitDemoScanPathStatusOnConnect =
+        settings.value("emitDemoScanPathStatusOnConnect", false).toBool();
     settings.endGroup();
 
     QtMsgType minType = QtDebugMsg;

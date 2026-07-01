@@ -5,18 +5,34 @@
 #include <cstdlib>
 #include <exception>
 #include <mutex>
+#include <vector>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QLoggingCategory>
 
 #include "BevelMeasurement.h"
 #include "scan_tracking/common/config_manager.h"
+#include "scan_tracking/mech_eye/point_cloud_io.h"
 #include "scan_tracking/mech_eye/point_cloud_processor.h"
 
 namespace scan_tracking::vision::bevel {
 
+Q_LOGGING_CATEGORY(LOG_BEVEL_ADAPTER, "vision.bevel")
+
+QString resolveBevelConfigPath();
+QString resolveBevelTemplateDir();
+
+BevelSolveOptions buildBevelSolveOptions(
+    const scan_tracking::common::BevelRecipe& recipe,
+    float angleTolDeg,
+    float lengthTolMm);
+
 namespace {
+
+constexpr int kBevelOfflineReplayMaxInputPoints = 200000;
 
 QString localPathFromEnv(const char* name)
 {
@@ -27,9 +43,331 @@ QString localPathFromEnv(const char* name)
     return QString::fromLocal8Bit(value);
 }
 
+std::vector<float> limitXyzPointCountByStride(
+    const std::vector<float>& xyz,
+    int maxPointCount)
+{
+    std::vector<float> limited;
+    if (xyz.size() < 3 || (xyz.size() % 3) != 0 || maxPointCount <= 0) {
+        return limited;
+    }
+
+    const int pointCount = static_cast<int>(xyz.size() / 3);
+    if (pointCount <= maxPointCount) {
+        return xyz;
+    }
+
+    const int stride = std::max(1, (pointCount + maxPointCount - 1) / maxPointCount);
+    limited.reserve(static_cast<std::size_t>(maxPointCount) * 3);
+    for (int index = 0; index < pointCount; index += stride) {
+        const std::size_t base = static_cast<std::size_t>(index * 3);
+        limited.push_back(xyz[base]);
+        limited.push_back(xyz[base + 1]);
+        limited.push_back(xyz[base + 2]);
+    }
+
+    return limited;
+}
+
 QString defaultBevelRootDirectory()
 {
     return QCoreApplication::applicationDirPath() + QStringLiteral("/bevel");
+}
+
+/// Po_Kou 配置内路径（如 data/templates/...）均相对 bevel 资产根目录解析。
+QString normalizeBevelAssetRoot(const QString& path)
+{
+    const QFileInfo info(path);
+    if (!info.exists()) {
+        return path;
+    }
+
+    QString root = info.isDir() ? info.absoluteFilePath() : info.dir().absolutePath();
+    const QString normalized = QDir::fromNativeSeparators(root);
+    if (normalized.endsWith(QStringLiteral("/data/templates"))) {
+        QDir dir(root);
+        if (dir.cdUp() && dir.cdUp()) {
+            return dir.absolutePath();
+        }
+    }
+    if (info.fileName() == QStringLiteral("data")
+        && QDir(root).exists(QStringLiteral("templates"))) {
+        QDir dir(root);
+        if (dir.cdUp()) {
+            return dir.absolutePath();
+        }
+    }
+    return root;
+}
+
+QString describeBevelQualityCode(int qualityCode)
+{
+    switch (qualityCode) {
+    case 0:
+        return QStringLiteral("合格");
+    case 1:
+        return QStringLiteral("角度超差");
+    case 2:
+        return QStringLiteral("长度超差");
+    case 3:
+        return QStringLiteral("角度与长度均超差");
+    case 10000:
+        return QStringLiteral("算法失败");
+    default:
+        return QStringLiteral("未知(%1)").arg(qualityCode);
+    }
+}
+
+QString formatBevelInspectionSummary(const BevelInspectionResult& result)
+{
+    return QStringLiteral(
+        "坡口测量完成：angle=%1 deg, length=%2 mm, bevelType=%3, icpFitness=%4, "
+        "qualityCode=%5（%6）")
+        .arg(result.angleDeg, 0, 'f', 3)
+        .arg(result.lengthMm, 0, 'f', 3)
+        .arg(result.bevelType)
+        .arg(result.icpFitness, 0, 'f', 6)
+        .arg(result.qualityCode)
+        .arg(describeBevelQualityCode(result.qualityCode));
+}
+
+void logBevelInspectionResult(const BevelInspectionResult& result)
+{
+    qInfo(LOG_BEVEL_ADAPTER).noquote()
+        << QStringLiteral("[Bevel] 算法结果")
+        << QStringLiteral(" ok=") << result.ok
+        << QStringLiteral(" bevelType=") << result.bevelType
+        << QStringLiteral(" angleDeg=") << result.angleDeg
+        << QStringLiteral(" lengthMm=") << result.lengthMm
+        << QStringLiteral(" icpFitness=") << result.icpFitness
+        << QStringLiteral(" qualityCode=") << result.qualityCode
+        << QStringLiteral(" quality=") << describeBevelQualityCode(result.qualityCode)
+        << QStringLiteral(" message=") << result.message;
+}
+
+QString readBevelTemplateRelativePath(const QString& configPath)
+{
+    QFile file(configPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return {};
+    }
+
+    while (!file.atEnd()) {
+        QString line = QString::fromUtf8(file.readLine()).trimmed();
+        const int commentIndex = line.indexOf(QLatin1Char('#'));
+        if (commentIndex >= 0) {
+            line = line.left(commentIndex).trimmed();
+        }
+        if (!line.isEmpty()) {
+            return line;
+        }
+    }
+
+    return {};
+}
+
+QString resolveBevelTemplateFilePath(const QString& configPath, const QString& templateDir)
+{
+    const QString relativePath = readBevelTemplateRelativePath(configPath);
+    if (relativePath.isEmpty()) {
+        return {};
+    }
+
+    QFileInfo relativeInfo(relativePath);
+    if (relativeInfo.isAbsolute()) {
+        return relativeInfo.absoluteFilePath();
+    }
+
+    if (!templateDir.isEmpty()) {
+        return QDir(templateDir).filePath(relativePath);
+    }
+
+    return QFileInfo(configPath).dir().filePath(relativePath);
+}
+
+void logBevelAlgorithmAssetsBeforeRun(const QString& configPath, const QString& templateDir)
+{
+    const QString templatePath = resolveBevelTemplateFilePath(configPath, templateDir);
+    qInfo(LOG_BEVEL_ADAPTER).noquote()
+        << QStringLiteral("[Bevel] 算法资源")
+        << QStringLiteral(" config=") << configPath
+        << QStringLiteral(" configExists=") << QFileInfo::exists(configPath)
+        << QStringLiteral(" templateDir=") << (templateDir.isEmpty() ? QStringLiteral("<empty>") : templateDir)
+        << QStringLiteral(" template=") << templatePath
+        << QStringLiteral(" templateExists=") << (!templatePath.isEmpty() && QFileInfo::exists(templatePath));
+}
+
+BevelInspectionResult mapAlgorithmResult(
+    const ::bevel::BevelMeasurementResult& algorithmResult,
+    const scan_tracking::common::BevelRecipe& recipe,
+    float angleTolDeg,
+    float lengthTolMm)
+{
+    BevelInspectionResult result;
+    result.invoked = true;
+
+    const BevelSolveOptions solveOptions =
+        buildBevelSolveOptions(recipe, angleTolDeg, lengthTolMm);
+
+    result.ok = algorithmResult.ok;
+    result.bevelType = recipe.bevelType;
+    result.angleDeg = static_cast<float>(algorithmResult.angleDeg);
+    result.lengthMm = static_cast<float>(algorithmResult.length);
+    result.icpFitness = static_cast<float>(algorithmResult.icpFitness);
+
+    if (!result.ok) {
+        result.qualityCode = 10000;
+        result.message = algorithmResult.message.empty()
+            ? QStringLiteral("坡口测量算法失败。")
+            : QString::fromLocal8Bit(algorithmResult.message.c_str());
+    } else {
+        const bool angleOk =
+            result.angleDeg >= static_cast<float>(solveOptions.standardAngleMinDeg) &&
+            result.angleDeg <= static_cast<float>(solveOptions.standardAngleMaxDeg);
+        const bool lengthOk =
+            result.lengthMm >= static_cast<float>(solveOptions.standardLengthMin) &&
+            result.lengthMm <= static_cast<float>(solveOptions.standardLengthMax);
+        result.qualityCode = (angleOk ? 0 : 1) | (lengthOk ? 0 : 2);
+        result.message = formatBevelInspectionSummary(result);
+    }
+
+    return result;
+}
+
+BevelInspectionResult invokeBevelAlgorithmFromXyzBuffer(
+    const std::vector<float>& xyz,
+    const scan_tracking::common::BevelRecipe& recipe,
+    float angleTolDeg,
+    float lengthTolMm)
+{
+    BevelInspectionResult result;
+    if (xyz.size() < 3 || (xyz.size() % 3) != 0) {
+        result.message = QStringLiteral("坡口测量点云缓冲无效。");
+        return result;
+    }
+
+    const QString configPath = resolveBevelConfigPath();
+    if (!QFileInfo::exists(configPath)) {
+        result.message = QStringLiteral("坡口测量配置文件不存在：%1").arg(configPath);
+        return result;
+    }
+
+    const QString templateDir = resolveBevelTemplateDir();
+
+    try {
+        std::lock_guard<std::mutex> pclGuard(
+            scan_tracking::mech_eye::pointCloudAlgorithmMutex());
+
+        const std::string configPathUtf8 = configPath.toLocal8Bit().toStdString();
+        const std::string templateDirUtf8 = templateDir.toLocal8Bit().toStdString();
+
+        // 仅传递 float xyz 缓冲；PCL 点云在 po_kou_ce_liang 模块内分配/释放。
+        logBevelAlgorithmAssetsBeforeRun(configPath, templateDir);
+        qInfo(LOG_BEVEL_ADAPTER).noquote()
+            << QStringLiteral("[Bevel] 开始算法测量 floatCount=") << xyz.size()
+            << QStringLiteral(" pointCount=") << (xyz.size() / 3);
+
+        const ::bevel::BevelMeasurementResult algorithmResult =
+            ::bevel::solveBevelFromXyzBuffer(
+                xyz.data(), xyz.size(), configPathUtf8, templateDirUtf8);
+
+        const BevelInspectionResult mapped =
+            mapAlgorithmResult(algorithmResult, recipe, angleTolDeg, lengthTolMm);
+        logBevelInspectionResult(mapped);
+        return mapped;
+    } catch (const std::exception& ex) {
+        result.ok = false;
+        result.invoked = true;
+        result.message = QStringLiteral("坡口测量抛出异常：%1")
+                             .arg(QString::fromUtf8(ex.what()));
+    } catch (...) {
+        result.ok = false;
+        result.invoked = true;
+        result.message = QStringLiteral("坡口测量抛出未知异常。");
+    }
+
+    return result;
+}
+
+BevelInspectionResult invokeBevelAlgorithmFromCloudFilePath(
+    const QString& algorithmCloudPath,
+    const scan_tracking::common::BevelRecipe& recipe,
+    float angleTolDeg,
+    float lengthTolMm)
+{
+    BevelInspectionResult result;
+
+    const QString configPath = resolveBevelConfigPath();
+    if (!QFileInfo::exists(configPath)) {
+        result.message = QStringLiteral("坡口测量配置文件不存在：%1").arg(configPath);
+        return result;
+    }
+
+    const QString templateDir = resolveBevelTemplateDir();
+
+    try {
+        std::lock_guard<std::mutex> pclGuard(
+            scan_tracking::mech_eye::pointCloudAlgorithmMutex());
+
+        const std::string cloudPathUtf8 = algorithmCloudPath.toLocal8Bit().toStdString();
+        const std::string configPathUtf8 = configPath.toLocal8Bit().toStdString();
+        const std::string templateDirUtf8 = templateDir.toLocal8Bit().toStdString();
+
+        // TXT 等文本点云仍由 Po_Kou 按文件路径加载（PCL 仅在 po_kou 模块内使用）。
+        logBevelAlgorithmAssetsBeforeRun(configPath, templateDir);
+        qInfo(LOG_BEVEL_ADAPTER).noquote()
+            << QStringLiteral("[Bevel] 开始算法测量 cloud=") << algorithmCloudPath;
+
+        const ::bevel::BevelMeasurementResult algorithmResult =
+            ::bevel::solveBevelFromPointCloudFile(
+                cloudPathUtf8, configPathUtf8, templateDirUtf8);
+
+        const BevelInspectionResult mapped =
+            mapAlgorithmResult(algorithmResult, recipe, angleTolDeg, lengthTolMm);
+        logBevelInspectionResult(mapped);
+        return mapped;
+    } catch (const std::exception& ex) {
+        result.ok = false;
+        result.invoked = true;
+        result.message = QStringLiteral("坡口测量抛出异常：%1")
+                             .arg(QString::fromUtf8(ex.what()));
+    } catch (...) {
+        result.ok = false;
+        result.invoked = true;
+        result.message = QStringLiteral("坡口测量抛出未知异常。");
+    }
+
+    return result;
+}
+
+std::vector<float> collectFiniteXyz(const scan_tracking::mech_eye::PointCloudFrame& frame)
+{
+    std::vector<float> xyz;
+    if (!frame.isValid() || frame.pointsXYZ == nullptr || frame.pointCount <= 0) {
+        return xyz;
+    }
+
+    const auto& points = *frame.pointsXYZ;
+    const int availablePointCount = static_cast<int>(points.size() / 3);
+    const int pointCount = std::min(frame.pointCount, availablePointCount);
+    if (pointCount <= 0) {
+        return xyz;
+    }
+
+    xyz.reserve(static_cast<std::size_t>(pointCount) * 3);
+    for (int index = 0; index < pointCount; ++index) {
+        const auto base = static_cast<std::size_t>(index * 3);
+        const float x = points[base];
+        const float y = points[base + 1];
+        const float z = points[base + 2];
+        if (std::isfinite(x) && std::isfinite(y) && std::isfinite(z)) {
+            xyz.push_back(x);
+            xyz.push_back(y);
+            xyz.push_back(z);
+        }
+    }
+
+    return xyz;
 }
 
 }  // namespace
@@ -131,9 +469,9 @@ QString resolveBevelTemplateDir()
 {
     const QString envRoot = localPathFromEnv("SCAN_TRACKING_BEVEL_CONFIG_DIR");
     if (!envRoot.isEmpty()) {
-        const QDir envTemplateDir(QDir(envRoot).filePath(QStringLiteral("data/templates")));
-        if (envTemplateDir.exists()) {
-            return envTemplateDir.absolutePath();
+        const QDir envTemplateRoot(envRoot);
+        if (envTemplateRoot.exists()) {
+            return normalizeBevelAssetRoot(envTemplateRoot.absolutePath());
         }
     }
 
@@ -143,18 +481,20 @@ QString resolveBevelTemplateDir()
         if (!configured.isEmpty()) {
             QFileInfo configuredInfo(configured);
             if (configuredInfo.isAbsolute() && configuredInfo.exists()) {
-                return configuredInfo.absoluteFilePath();
+                return normalizeBevelAssetRoot(configuredInfo.absoluteFilePath());
             }
             const QFileInfo relativeToExe(
                 QDir(QCoreApplication::applicationDirPath()).filePath(configured));
             if (relativeToExe.exists()) {
-                return relativeToExe.absoluteFilePath();
+                return normalizeBevelAssetRoot(relativeToExe.absoluteFilePath());
             }
         }
     }
 
-    const QDir defaultTemplateDir(defaultBevelRootDirectory() + QStringLiteral("/data/templates"));
-    return defaultTemplateDir.exists() ? defaultTemplateDir.absolutePath() : QString();
+    const QDir defaultTemplateRoot(defaultBevelRootDirectory());
+    return defaultTemplateRoot.exists()
+        ? normalizeBevelAssetRoot(defaultTemplateRoot.absolutePath())
+        : QString();
 }
 
 BevelSolveOptions buildBevelSolveOptions(
@@ -183,81 +523,57 @@ BevelInspectionResult runBevelMeasurement(
     float lengthTolMm)
 {
     BevelInspectionResult result;
-
-    auto pclCloud = toPclPointCloud(cloud);
-    if (pclCloud->empty()) {
+    if (!cloud.isValid() || cloud.pointCount <= 0) {
         result.message = QStringLiteral("坡口测量缺少有效输入点云。");
         return result;
     }
 
-    const QString configPath = resolveBevelConfigPath();
-    if (!QFileInfo::exists(configPath)) {
-        result.message = QStringLiteral("坡口测量配置文件不存在：%1").arg(configPath);
+    std::vector<float> xyz = collectFiniteXyz(cloud);
+    if (xyz.empty()) {
+        result.message = QStringLiteral("坡口测量点云无有效 XYZ 点。");
         return result;
     }
 
-    const QString templateDir = resolveBevelTemplateDir();
-    result.invoked = true;
+    xyz = limitXyzPointCountByStride(xyz, kBevelOfflineReplayMaxInputPoints);
+    return invokeBevelAlgorithmFromXyzBuffer(xyz, recipe, angleTolDeg, lengthTolMm);
+}
 
-    try {
-        std::lock_guard<std::mutex> pclGuard(
-            scan_tracking::mech_eye::pointCloudAlgorithmMutex());
+BevelInspectionResult runBevelMeasurementFromPointCloudFile(
+    const QString& cloudPath,
+    const scan_tracking::common::BevelRecipe& recipe,
+    float angleTolDeg,
+    float lengthTolMm)
+{
+    BevelInspectionResult result;
 
-        const std::string configPathUtf8 = configPath.toLocal8Bit().toStdString();
-        const std::string templateDirUtf8 = templateDir.toLocal8Bit().toStdString();
-        // V1.2：算法不再接受 BevelSolveOptions，公差/合格判定上移至 IPC 侧。
-        const BevelSolveOptions solveOptions =
-            buildBevelSolveOptions(recipe, angleTolDeg, lengthTolMm);
-
-        const ::bevel::BevelMeasurementResult algorithmResult =
-            templateDir.isEmpty()
-                ? ::bevel::solveBevelFromRawCloud(
-                      pclCloud, configPathUtf8, std::string())
-                : ::bevel::solveBevelFromRawCloud(
-                      pclCloud, configPathUtf8, templateDirUtf8);
-
-        result.ok = algorithmResult.ok;
-        result.bevelType = recipe.bevelType;  // V1.2 不再返回类型，取自配方
-        result.angleDeg = static_cast<float>(algorithmResult.angleDeg);
-        result.lengthMm = static_cast<float>(algorithmResult.length);
-        result.icpFitness = static_cast<float>(algorithmResult.icpFitness);
-
-        // qualityCode 由 IPC 按公差判定：0=合格，1=角度超差，2=长度超差，3=均超差。
-        // 算法失败（ok=false）时保留 10000 哨兵，由上层 ok 判定短路。
-        if (!result.ok) {
-            result.qualityCode = 10000;
-        } else {
-            const bool angleOk =
-                result.angleDeg >= static_cast<float>(solveOptions.standardAngleMinDeg) &&
-                result.angleDeg <= static_cast<float>(solveOptions.standardAngleMaxDeg);
-            const bool lengthOk =
-                result.lengthMm >= static_cast<float>(solveOptions.standardLengthMin) &&
-                result.lengthMm <= static_cast<float>(solveOptions.standardLengthMax);
-            result.qualityCode = (angleOk ? 0 : 1) | (lengthOk ? 0 : 2);
-        }
-
-        result.message = algorithmResult.message.empty()
-            ? QString()
-            : QString::fromLocal8Bit(algorithmResult.message.c_str());
-
-        if (result.ok && result.message.isEmpty()) {
-            result.message = QStringLiteral(
-                "坡口测量完成：angle=%1 deg, length=%2 mm, bevelType=%3, qualityCode=%4")
-                                 .arg(result.angleDeg, 0, 'f', 3)
-                                 .arg(result.lengthMm, 0, 'f', 3)
-                                 .arg(result.bevelType)
-                                 .arg(result.qualityCode);
-        }
-    } catch (const std::exception& ex) {
-        result.ok = false;
-        result.message = QStringLiteral("坡口测量抛出异常：%1")
-                             .arg(QString::fromLocal8Bit(ex.what()));
-    } catch (...) {
-        result.ok = false;
-        result.message = QStringLiteral("坡口测量抛出未知异常。");
+    const QFileInfo sourceInfo(cloudPath.trimmed());
+    if (!sourceInfo.exists() || !sourceInfo.isFile()) {
+        result.message = QStringLiteral("坡口测量点云文件不存在：%1").arg(cloudPath);
+        return result;
     }
 
-    return result;
+    const QString suffix = sourceInfo.suffix().toLower();
+    if (suffix == QStringLiteral("ply") || suffix == QStringLiteral("pcd")) {
+        std::vector<float> xyz;
+        const bool loaded = suffix == QStringLiteral("ply")
+            ? scan_tracking::mech_eye::loadPointCloudXyzFromPly(
+                  sourceInfo.absoluteFilePath(),
+                  &xyz,
+                  kBevelOfflineReplayMaxInputPoints)
+            : scan_tracking::mech_eye::loadPointCloudXyzFromPcd(
+                  sourceInfo.absoluteFilePath(),
+                  &xyz,
+                  kBevelOfflineReplayMaxInputPoints);
+        if (!loaded || xyz.empty()) {
+            result.message = QStringLiteral("坡口测量无法解析点云：%1").arg(cloudPath);
+            return result;
+        }
+
+        return invokeBevelAlgorithmFromXyzBuffer(xyz, recipe, angleTolDeg, lengthTolMm);
+    }
+
+    return invokeBevelAlgorithmFromCloudFilePath(
+        sourceInfo.absoluteFilePath(), recipe, angleTolDeg, lengthTolMm);
 }
 
 BevelInspectionResult runBevelMeasurement(

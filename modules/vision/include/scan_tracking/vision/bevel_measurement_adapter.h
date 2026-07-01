@@ -2,10 +2,9 @@
 
 // Po_Kou 坡口测量算法适配层。
 //
-// 将 Mech-Eye 点云帧转换为 PCL 格式，调用第三方 BevelMeasurement（ICP 模板匹配）
-// 输出坡口类型、角度、钝边长度及质量码，供 TrackingService / StateMachine 写寄存器与 HMI 上报。
-// 配置路径由 config.ini [Bevel]、环境变量或 exe 旁 bevel/ 目录解析。
-
+// 在线/离线路径：PointCloudFrame 或 PLY/PCD 文件 → mech_eye 解析（梅卡 camera 头、中文路径）
+// → 内存 float xyz 缓冲 → Po_Kou solveBevelFromXyzBuffer（PCL 仅在 po_kou 模块内分配/释放）。
+// TXT 等文本点云仍直接传路径给 Po_Kou solveBevelFromPointCloudFile。
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
@@ -65,6 +64,13 @@ BevelSolveOptions buildBevelSolveOptions(
  */
 BevelInspectionResult runBevelMeasurement(
     const scan_tracking::mech_eye::PointCloudFrame& cloud,
+    const scan_tracking::common::BevelRecipe& recipe,
+    float angleTolDeg,
+    float lengthTolMm);
+
+/// 从 PCD/PLY/TXT 点云文件执行坡口测量（PCL 加载与释放在 Po_Kou 模块内完成）。
+BevelInspectionResult runBevelMeasurementFromPointCloudFile(
+    const QString& cloudPath,
     const scan_tracking::common::BevelRecipe& recipe,
     float angleTolDeg,
     float lengthTolMm);
