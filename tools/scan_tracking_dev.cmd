@@ -78,6 +78,11 @@ if not exist "D:\HikCameraFTP" mkdir "D:\HikCameraFTP"
 if exist "%ROOT%\third_party\LB\data" robocopy "%ROOT%\third_party\LB\data" "%APP_DEBUG%\data\LB" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
 if exist "%ROOT%\third_party\LB\template_for_scanner_ori.txt" copy /Y "%ROOT%\third_party\LB\template_for_scanner_ori.txt" "%APP_DEBUG%\data\LB\template_for_scanner_ori.txt" >nul
 if exist "%ROOT%\third_party\LBN\data" robocopy "%ROOT%\third_party\LBN\data" "%APP_DEBUG%\data\LBN" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
+if exist "%ROOT%\third_party\Scanner_Self_Check\self_check.ini" (
+  if not exist "%APP_DEBUG%\self_check" mkdir "%APP_DEBUG%\self_check"
+  copy /Y "%ROOT%\third_party\Scanner_Self_Check\self_check.ini" "%APP_DEBUG%\self_check\self_check.ini" >nul
+)
+if exist "%APP_DEBUG%\internal_surface\tmp" rmdir /S /Q "%APP_DEBUG%\internal_surface\tmp"
 if not exist "%APP_DEBUG%\config.ini" (
   copy /Y "%ROOT%\config.ini" "%APP_DEBUG%\config.ini" >nul
   echo [scan_tracking_dev] Created %APP_DEBUG%\config.ini from repo template
@@ -106,13 +111,45 @@ exit /b 0
 
 :package_ipc
 set "PACKAGE_DIR=%DEPLOY_OUTPUT_DIR%"
+set "DEPLOY_BACKUP=%TEMP%\scan_tracking_deploy_backup"
 echo [scan_tracking_dev] Packaging IPC runtime to %PACKAGE_DIR%
+if exist "%DEPLOY_BACKUP%" rmdir /S /Q "%DEPLOY_BACKUP%"
+if exist "%PACKAGE_DIR%" (
+  mkdir "%DEPLOY_BACKUP%"
+  if exist "%PACKAGE_DIR%\config.ini" copy /Y "%PACKAGE_DIR%\config.ini" "%DEPLOY_BACKUP%\config.ini" >nul
+  if exist "%PACKAGE_DIR%\config.ini.field_backup" copy /Y "%PACKAGE_DIR%\config.ini.field_backup" "%DEPLOY_BACKUP%\config.ini.field_backup" >nul
+  if exist "%PACKAGE_DIR%\logs" robocopy "%PACKAGE_DIR%\logs" "%DEPLOY_BACKUP%\logs" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
+  if exist "%PACKAGE_DIR%\output" robocopy "%PACKAGE_DIR%\output" "%DEPLOY_BACKUP%\output" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
+  if exist "%PACKAGE_DIR%\testdata" robocopy "%PACKAGE_DIR%\testdata" "%DEPLOY_BACKUP%\testdata" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
+)
+call :build_debug
+if errorlevel 1 exit /b 1
+call :stage_deploy
+if errorlevel 1 exit /b 1
+if not exist "%APP_DEBUG%\scan-tracking.exe" (
+  echo [scan_tracking_dev] Missing %APP_DEBUG%\scan-tracking.exe - run deploy-debug first
+  exit /b 1
+)
 if exist "%PACKAGE_DIR%" rmdir /S /Q "%PACKAGE_DIR%"
 mkdir "%PACKAGE_DIR%"
 robocopy "%APP_DEBUG%" "%PACKAGE_DIR%" /E /NFL /NDL /NJH /NJS /nc /ns /np ^
-  /XD CMakeFiles scan_tracking_autogen .git .vs .cache app common modules tests ^
+  /XD CMakeFiles scan_tracking_autogen .git .vs .cache app common modules tests internal_surface\tmp ^
   /XF *.obj *.pdb cmake_install.cmake CMakeCache.txt build.ninja .ninja_deps .ninja_log >nul
 if errorlevel 8 exit /b 1
+if exist "%DEPLOY_BACKUP%\config.ini" (
+  copy /Y "%DEPLOY_BACKUP%\config.ini" "%PACKAGE_DIR%\config.ini" >nul
+  echo [scan_tracking_dev] Restored field config.ini from previous deploy
+) else (
+  copy /Y "%ROOT%\config.ini" "%PACKAGE_DIR%\config.ini" >nul
+  echo [scan_tracking_dev] Seeded config.ini from repo template
+)
+if exist "%DEPLOY_BACKUP%\config.ini.field_backup" copy /Y "%DEPLOY_BACKUP%\config.ini.field_backup" "%PACKAGE_DIR%\config.ini.field_backup" >nul
+if exist "%DEPLOY_BACKUP%\logs" robocopy "%DEPLOY_BACKUP%\logs" "%PACKAGE_DIR%\logs" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
+if exist "%DEPLOY_BACKUP%\output" robocopy "%DEPLOY_BACKUP%\output" "%PACKAGE_DIR%\output" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
+if exist "%DEPLOY_BACKUP%\testdata" robocopy "%DEPLOY_BACKUP%\testdata" "%PACKAGE_DIR%\testdata" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
+copy /Y "%ROOT%\tools\deploy\start.bat" "%PACKAGE_DIR%\start.bat" >nul
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\tools\deploy\write_readme.ps1" -OutputDir "%PACKAGE_DIR%" -BuildDir "%APP_DEBUG%" -DeployDir "%DEPLOY_OUTPUT_DIR%"
+if exist "%DEPLOY_BACKUP%" rmdir /S /Q "%DEPLOY_BACKUP%"
 echo [scan_tracking_dev] Package ready: %PACKAGE_DIR%
 echo [scan_tracking_dev] Zip this folder and copy to the IPC machine.
 exit /b 0
