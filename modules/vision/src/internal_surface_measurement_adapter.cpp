@@ -65,7 +65,7 @@ QString buildTempScanCloudPath()
     const QString stamp = QDateTime::currentDateTime()
         .toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
     return QDir(tempDirPath).filePath(
-        QStringLiteral("internal_surface_input_%1.ply").arg(stamp));
+        QStringLiteral("internal_surface_input_%1.pcd").arg(stamp));
 }
 
 bool isPositiveFinite(double value)
@@ -110,8 +110,8 @@ QString resolveInternalSurfaceConfigPathForRun(bool useOfflineReplayAlgorithmCon
     return resolveInternalSurfaceConfigPath();
 }
 
-InternalSurfaceInspectionResult runMeasurementWithPreparedScanPly(
-    const QString& scanPlyPath,
+InternalSurfaceInspectionResult runMeasurementWithPreparedScanCloud(
+    const QString& scanCloudPath,
     bool useOfflineReplayAlgorithmConfig)
 {
     InternalSurfaceInspectionResult result;
@@ -123,8 +123,8 @@ InternalSurfaceInspectionResult runMeasurementWithPreparedScanPly(
         return result;
     }
 
-    if (!QFileInfo::exists(scanPlyPath)) {
-        result.message = QStringLiteral("内表面测量扫描点云不存在：%1").arg(scanPlyPath);
+    if (!QFileInfo::exists(scanCloudPath)) {
+        result.message = QStringLiteral("内表面测量扫描点云不存在：%1").arg(scanCloudPath);
         return result;
     }
 
@@ -137,7 +137,7 @@ InternalSurfaceInspectionResult runMeasurementWithPreparedScanPly(
 
     qInfo(LOG_INTERNAL_SURFACE_ADAPTER).noquote()
         << QStringLiteral("[InternalSurface] 开始测量 config=") << configPath
-        << QStringLiteral(" scan=") << scanPlyPath
+        << QStringLiteral(" scan=") << scanCloudPath
         << QStringLiteral(" templateType=") << surfaceConfig.templateType
         << QStringLiteral("（大点云 ICP/网格化可能需数分钟，非卡死）");
 
@@ -162,7 +162,8 @@ InternalSurfaceInspectionResult runMeasurementWithPreparedScanPly(
 
         MeasurementInput input;
         input.configPath = configPath.toLocal8Bit().toStdString();
-        input.scanCloudPath = QFileInfo(scanPlyPath).absoluteFilePath().toLocal8Bit().toStdString();
+        input.scanCloudPath =
+            QFileInfo(scanCloudPath).absoluteFilePath().toLocal8Bit().toStdString();
         input.templateType = surfaceConfig.templateType;
 
         const ScopedCurrentDir algorithmCwd(QFileInfo(configPath).absolutePath());
@@ -264,12 +265,16 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurement(
     }
 
     const QString scanCloudPath = buildTempScanCloudPath();
-    if (!scan_tracking::mech_eye::savePointCloudFrameToPly(cloud, scanCloudPath)) {
-        result.message = QStringLiteral("内表面测量临时点云保存失败：%1").arg(scanCloudPath);
-        return result;
+    {
+        std::lock_guard<std::mutex> pclGuard(
+            scan_tracking::mech_eye::pointCloudAlgorithmMutex());
+        if (!scan_tracking::mech_eye::savePointCloudFrameToPcd(cloud, scanCloudPath)) {
+            result.message = QStringLiteral("内表面测量临时点云保存失败：%1").arg(scanCloudPath);
+            return result;
+        }
     }
 
-    return runMeasurementWithPreparedScanPly(scanCloudPath, false);
+    return runMeasurementWithPreparedScanCloud(scanCloudPath, false);
 }
 
 InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
@@ -284,8 +289,8 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
     }
 
     const QString suffix = QFileInfo(resolved).suffix().toLower();
-    if (suffix == QStringLiteral("ply") || suffix == QStringLiteral("pcd")) {
-        return runMeasurementWithPreparedScanPly(resolved, true);
+    if (suffix == QStringLiteral("pcd") || suffix == QStringLiteral("ply")) {
+        return runMeasurementWithPreparedScanCloud(resolved, true);
     }
 
     if (suffix != QStringLiteral("txt")) {
@@ -293,13 +298,51 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
         return result;
     }
 
-    const QString convertedPlyPath = buildTempScanCloudPath();
-    if (!scan_tracking::mech_eye::convertTxtPointCloudToPly(resolved, convertedPlyPath)) {
-        result.message = QStringLiteral("内表面测量 TXT 转 PLY 失败：%1").arg(resolved);
+    const QString convertedPcdPath = buildTempScanCloudPath();
+    {
+        std::lock_guard<std::mutex> pclGuard(
+            scan_tracking::mech_eye::pointCloudAlgorithmMutex());
+        if (!scan_tracking::mech_eye::convertTxtPointCloudToPcd(resolved, convertedPcdPath)) {
+            result.message = QStringLiteral("内表面测量 TXT 转 PCD 失败：%1").arg(resolved);
+            return result;
+        }
+    }
+
+    return runMeasurementWithPreparedScanCloud(convertedPcdPath, true);
+}
+
+InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromSegmentFrames(
+    const QList<scan_tracking::mech_eye::PointCloudFrame>& segmentClouds,
+    int sourcePointCount)
+{
+    InternalSurfaceInspectionResult result;
+
+    if (segmentClouds.isEmpty()) {
+        result.message = QStringLiteral("内表面测量缺少有效分段点云。");
         return result;
     }
 
-    return runMeasurementWithPreparedScanPly(convertedPlyPath, true);
+    const QString scanCloudPath = buildTempScanCloudPath();
+    int mergedPointCount = 0;
+    {
+        std::lock_guard<std::mutex> pclGuard(
+            scan_tracking::mech_eye::pointCloudAlgorithmMutex());
+        if (!scan_tracking::mech_eye::mergePointCloudFramesToPcd(
+                segmentClouds, scanCloudPath, &mergedPointCount)) {
+            result.message = QStringLiteral("内表面测量分段合并 PCD 失败。");
+            return result;
+        }
+    }
+
+    qInfo(LOG_INTERNAL_SURFACE_ADAPTER).noquote()
+        << QStringLiteral("[InternalSurface] 分段已合并为 PCD（与 demo 单文件输入一致）")
+        << QStringLiteral(" segmentCount=") << segmentClouds.size()
+        << QStringLiteral(" sourcePointCount=")
+        << (sourcePointCount > 0 ? sourcePointCount : mergedPointCount)
+        << QStringLiteral(" validPoints=") << mergedPointCount
+        << QStringLiteral(" path=") << scanCloudPath;
+
+    return runMeasurementWithPreparedScanCloud(scanCloudPath, false);
 }
 
 }  // namespace scan_tracking::vision::internal_surface

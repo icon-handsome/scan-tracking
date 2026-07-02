@@ -123,6 +123,13 @@ public:
         int inspectionPathId = 0,
         bool notifyListener = true) const;
 
+    /// 内表面正式检测：多扫描分段按序合并后落盘 PCD（与 demo 单文件输入一致）
+    InspectionResult inspectInternalSurfaceFromSegmentFrames(
+        const QList<scan_tracking::mech_eye::PointCloudFrame>& segmentClouds,
+        int sourcePointCount,
+        int inspectionPathId = 0,
+        bool notifyListener = true) const;
+
     /// 坡口离线/文件路径测量：PCL 在 Po_Kou 模块内加载，避免跨模块堆释放崩溃
     InspectionResult inspectBevelPointCloudFile(
         const QString& cloudPath,

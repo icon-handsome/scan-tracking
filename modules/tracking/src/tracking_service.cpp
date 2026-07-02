@@ -586,6 +586,81 @@ InspectionResult TrackingService::inspectInternalSurfaceFromScanFile(
 #endif
 }
 
+InspectionResult TrackingService::inspectInternalSurfaceFromSegmentFrames(
+    const QList<scan_tracking::mech_eye::PointCloudFrame>& segmentClouds,
+    int sourcePointCount,
+    int inspectionPathId,
+    bool notifyListener) const
+{
+    ensureInspectionMeasurementMetaTypeRegistered();
+
+    InspectionResult result;
+    result.sourcePointCount = sourcePointCount;
+
+#ifdef SCAN_TRACKING_HAS_INTERNAL_SURFACE_MEASUREMENT
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    const scan_tracking::common::InspectionType inspectionType =
+        resolveInspectionType(configManager, inspectionPathId);
+    if (inspectionType != scan_tracking::common::InspectionType::InternalSurface) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral(
+            "内表面分段测量失败：路径 %1 的 inspectionType 不是 internal_surface。")
+                             .arg(inspectionPathId);
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    if (segmentClouds.isEmpty() || sourcePointCount <= 0) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral("内表面测量没有可用分段点云。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    const auto detection =
+        scan_tracking::vision::internal_surface::runInternalSurfaceMeasurementFromSegmentFrames(
+            segmentClouds, sourcePointCount);
+    if (detection.downsampledPointCount > 0) {
+        result.sourcePointCount = detection.downsampledPointCount;
+    } else if (detection.filteredPointCount > 0) {
+        result.sourcePointCount = detection.filteredPointCount;
+    }
+
+    if (!detection.invoked) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = detection.message.isEmpty()
+            ? QStringLiteral("内表面测量适配层未启动。")
+            : detection.message;
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    result.measurement = measurementFromInternalSurfaceResult(detection);
+    if (!detection.ok) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 5);
+        result.message = detection.message.isEmpty()
+            ? QStringLiteral("内表面测量算法失败。")
+            : detection.message;
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    result.resultCode = 1;
+    result.message = detection.message;
+    result.measureItemCount = countMeasuredItems(result.measurement);
+    return deliverInspectionResult(result, notifyListener);
+#else
+    Q_UNUSED(segmentClouds);
+    Q_UNUSED(sourcePointCount);
+    Q_UNUSED(inspectionPathId);
+    result.resultCode = 2;
+    result.ngReasonWord0 = (1u << 4);
+    result.message = QStringLiteral(
+        "内表面测量未编译（SCAN_TRACKING_ENABLE_INTERNAL_SURFACE_MEASUREMENT=OFF）。");
+    return deliverInspectionResult(result, notifyListener);
+#endif
+}
+
 InspectionResult TrackingService::inspectBevelPointCloudFile(
     const QString& cloudPath,
     int inspectionPathId,

@@ -18,6 +18,7 @@
  * @endcode
  */
 
+#include <QtCore/QList>
 #include <QtCore/QString>
 
 #include <vector>
@@ -64,6 +65,25 @@ bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absol
  * @brief 将 TXT 点云（每行 x y z）流式转换为 binary PLY，避免整帧驻留内存
  */
 bool convertTxtPointCloudToPly(const QString& txtPath, const QString& plyPath);
+
+/**
+ * @brief 将 PointCloudFrame 保存为 PCL binary PCD（与内表面 demo LoadCloud 输入一致）
+ * @note 仅写入有限 x,y,z；NaN/Inf 点会被跳过
+ */
+bool savePointCloudFrameToPcd(const PointCloudFrame& frame, const QString& absolutePath);
+
+/**
+ * @brief 将 TXT 点云（每行 x y z）转换为 binary PCD
+ */
+bool convertTxtPointCloudToPcd(const QString& txtPath, const QString& pcdPath);
+
+/**
+ * @brief 按序合并多段 PointCloudFrame 并保存为 binary PCD
+ */
+bool mergePointCloudFramesToPcd(
+    const QList<PointCloudFrame>& frames,
+    const QString& absolutePath,
+    int* outPointCount = nullptr);
 
 /**
  * @brief 从 PLY 文件加载点云

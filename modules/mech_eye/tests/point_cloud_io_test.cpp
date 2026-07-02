@@ -3,9 +3,12 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QList>
 #include <QTemporaryDir>
 #include <QTextStream>
 #include <QtTest/QtTest>
+
+#include <limits>
 
 using namespace scan_tracking::mech_eye;
 
@@ -14,6 +17,8 @@ class PointCloudIoTest : public QObject {
 
 private slots:
     void roundTripSaveLoad();
+    void roundTripSaveLoadPcd();
+    void mergeSegmentsToPcd();
     void loadLegacyAsciiPly();
     void plyPathUsesMech3dSubdir();
 };
@@ -69,6 +74,64 @@ void PointCloudIoTest::roundTripSaveLoad()
     QVERIFY(loaded.isValid());
     QVERIFY(!loaded.hasNormals());
     QCOMPARE(loaded.pointsXYZ->size(), static_cast<std::size_t>(9));
+}
+
+void PointCloudIoTest::roundTripSaveLoadPcd()
+{
+    PointCloudFrame frame;
+    frame.pointsXYZ = std::make_shared<std::vector<float>>();
+    frame.pointsXYZ->insert(frame.pointsXYZ->end(), {
+        0.0f, 0.0f, 0.0f,
+        1.0f, 2.0f, 3.0f,
+        std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f,
+        4.0f, 5.0f, 6.0f,
+    });
+    frame.pointCount = 4;
+    frame.width = 4;
+    frame.height = 1;
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString pcdPath = tempDir.filePath(QStringLiteral("roundtrip.pcd"));
+    QVERIFY(savePointCloudFrameToPcd(frame, pcdPath));
+    QVERIFY(QFile::exists(pcdPath));
+
+    PointCloudFrame loaded;
+    QVERIFY(loadPointCloudFrameFromPcd(pcdPath, &loaded));
+    QCOMPARE(loaded.pointCount, 3);
+    QCOMPARE(loaded.pointsXYZ->size(), static_cast<std::size_t>(9));
+    QCOMPARE((*loaded.pointsXYZ)[6], 4.0f);
+    QCOMPARE((*loaded.pointsXYZ)[7], 5.0f);
+    QCOMPARE((*loaded.pointsXYZ)[8], 6.0f);
+}
+
+void PointCloudIoTest::mergeSegmentsToPcd()
+{
+    auto makeFrame = [](std::initializer_list<float> xyz) {
+        PointCloudFrame frame;
+        frame.pointsXYZ = std::make_shared<std::vector<float>>(xyz);
+        frame.pointCount = static_cast<int>(xyz.size() / 3);
+        frame.width = frame.pointCount;
+        frame.height = 1;
+        return frame;
+    };
+
+    QList<PointCloudFrame> segments;
+    segments.push_back(makeFrame({0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f}));
+    segments.push_back(makeFrame({2.0f, 0.0f, 0.0f, 3.0f, 0.0f, 0.0f}));
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString pcdPath = tempDir.filePath(QStringLiteral("merged.pcd"));
+    int mergedPointCount = 0;
+    QVERIFY(mergePointCloudFramesToPcd(segments, pcdPath, &mergedPointCount));
+    QCOMPARE(mergedPointCount, 4);
+
+    PointCloudFrame loaded;
+    QVERIFY(loadPointCloudFrameFromPcd(pcdPath, &loaded));
+    QCOMPARE(loaded.pointCount, 4);
 }
 
 void PointCloudIoTest::loadLegacyAsciiPly()

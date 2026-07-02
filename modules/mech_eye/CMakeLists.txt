@@ -9,7 +9,7 @@
 #
 scan_tracking_require_mech_eye_sdk()
 
-find_package(PCL 1.12 REQUIRED COMPONENTS common filters surface)
+find_package(PCL 1.12 REQUIRED COMPONENTS common io filters surface)
 
 add_library(scan_tracking_mech_eye STATIC
     src/mech_eye_service.cpp

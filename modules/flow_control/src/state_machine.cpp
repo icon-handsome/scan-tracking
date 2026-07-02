@@ -3747,6 +3747,23 @@ tracking::InspectionResult StateMachine::runDebugInspectionOnCachedSegments() co
             segmentClouds, totalPointCount, inspectPathId, false);
     }
 
+    if (inspectionType == scan_tracking::common::InspectionType::InternalSurface) {
+        QList<scan_tracking::mech_eye::PointCloudFrame> segmentClouds;
+        int totalPointCount = 0;
+        int segmentCount = 0;
+        if (!mutableSelf->loadSegmentPointCloudsForInspection(
+                &segmentClouds, &totalPointCount, &segmentCount, &loadError)) {
+            failure.ngReasonWord0 = (1u << 4);
+            failure.message = loadError.isEmpty()
+                ? QStringLiteral("调试综合检测失败：无法加载内表面分段点云。")
+                : loadError;
+            return failure;
+        }
+
+        return m_tracking->inspectInternalSurfaceFromSegmentFrames(
+            segmentClouds, totalPointCount, inspectPathId, false);
+    }
+
     scan_tracking::mech_eye::PointCloudFrame mergedCloud;
     int totalPointCount = 0;
     int segmentCount = 0;
@@ -5594,19 +5611,27 @@ void StateMachine::persistMergedInspectionPointCloudToDisk(
                                  .arg(mergedSegmentCount);
 
     const QString cloudDirectory = poseStitchPointCloudOutputDirectory(m_poseStitchRunRootDirectory);
-    const QString plyFilePath =
-        QDir(cloudDirectory).filePath(baseName + QStringLiteral("_inspection.ply"));
+    const bool usePcdExport = configManager->inspectionTypeForPath(pathId)
+        == scan_tracking::common::InspectionType::InternalSurface;
+    const QString cloudFilePath = QDir(cloudDirectory).filePath(
+        baseName
+        + (usePcdExport ? QStringLiteral("_inspection.pcd")
+                        : QStringLiteral("_inspection.ply")));
 
-    if (!scan_tracking::mech_eye::savePointCloudFrameToPly(mergedCloud, plyFilePath)) {
+    const bool saved = usePcdExport
+        ? scan_tracking::mech_eye::savePointCloudFrameToPcd(mergedCloud, cloudFilePath)
+        : scan_tracking::mech_eye::savePointCloudFrameToPly(mergedCloud, cloudFilePath);
+    if (!saved) {
         qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("[PoseStitchOutput] 写入检测融合点云失败：") << plyFilePath;
+            << QStringLiteral("[PoseStitchOutput] 写入检测融合点云失败：") << cloudFilePath;
         return;
     }
 
     qInfo(LOG_FLOW).noquote()
-        << QStringLiteral("[PoseStitchOutput] 检测融合点云已写入") << plyFilePath
+        << QStringLiteral("[PoseStitchOutput] 检测融合点云已写入") << cloudFilePath
         << QStringLiteral(" 点数=") << mergedCloud.pointCount
-        << QStringLiteral(" 参与段数=") << mergedSegmentCount;
+        << QStringLiteral(" 参与段数=") << mergedSegmentCount
+        << QStringLiteral(" format=") << (usePcdExport ? QStringLiteral("pcd") : QStringLiteral("ply"));
 }
 
 bool StateMachine::ensureSegmentCaptureExportSessionRoot()
