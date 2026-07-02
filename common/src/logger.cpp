@@ -25,6 +25,15 @@ const char* safeCategoryName(const QMessageLogContext& context)
     return "default";
 }
 
+bool isMutedHmiLogCategory(const char* category)
+{
+    if (category == nullptr || category[0] == '\0') {
+        return false;
+    }
+    return std::strcmp(category, "hmi.server") == 0
+        || std::strcmp(category, "hmi.session") == 0;
+}
+
 std::string dailyLogFilePath(const std::string& log_dir, const QDate& date)
 {
     return log_dir + "/scan_tracking_"
@@ -351,6 +360,10 @@ void Logger::log(QtMsgType type, const QMessageLogContext& context, const QStrin
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (getSeverityLevel(type) < getSeverityLevel(min_level_)) {
+        return;
+    }
+
+    if (isMutedHmiLogCategory(safeCategoryName(context))) {
         return;
     }
 

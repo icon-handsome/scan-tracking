@@ -125,38 +125,55 @@ void printCloudInfo(const std::string& name, const CloudConstPtr& cloud) {
 
 CloudPtr preprocess(const CloudConstPtr& input, const MeasureConfig& cfg)
 {
-	// ?�??
-    CloudPtr transformed(new Cloud);
-    pcl::transformPointCloud(*input, *transformed, cfg.poseCorrection);
+    CloudConstPtr working = input;
+    if (!cfg.cropBoxes.empty())
+    {
+        CloudPtr cropped = cropCloudAny(input, cfg.cropBoxes);
+        if (cropped && !cropped->empty())
+        {
+            working = cropped;
+            std::cout << "frame_crop points=" << working->size() << std::endl;
+        }
+    }
 
-	// ?????????????????????? SOR/ICP ?? OOM ????
+    // Voxel before transform/SOR to avoid OOM on multi-million-point scans.
     CloudPtr down(new Cloud);
-    if (cfg.voxelLeafMm > 0.0) 
-	{
+    if (cfg.voxelLeafMm > 0.0)
+    {
         pcl::VoxelGrid<PointT> voxel;
-        voxel.setInputCloud(transformed);
+        voxel.setInputCloud(working);
         const float leaf = static_cast<float>(cfg.voxelLeafMm);
         voxel.setLeafSize(leaf, leaf, leaf);
         voxel.filter(*down);
-    } 
-	else
-	{
-        down = transformed;
+    }
+    else
+    {
+        down = CloudPtr(new Cloud(*working));
     }
 
-	// ?�?�?����?�
+    CloudPtr transformed(new Cloud);
+    if (cfg.poseCorrection.isApprox(Eigen::Matrix4f::Identity(), 1e-6f))
+    {
+        transformed = down;
+    }
+    else
+    {
+        pcl::transformPointCloud(*down, *transformed, cfg.poseCorrection);
+    }
+
     CloudPtr filtered(new Cloud);
-	if (cfg.statisticalMeanK > 0 && down->size() > static_cast<std::size_t>(cfg.statisticalMeanK))
-	{
+    if (cfg.statisticalMeanK > 0
+        && transformed->size() > static_cast<std::size_t>(cfg.statisticalMeanK))
+    {
         pcl::StatisticalOutlierRemoval<PointT> sor;
-		sor.setInputCloud(down);
+        sor.setInputCloud(transformed);
         sor.setMeanK(cfg.statisticalMeanK);
         sor.setStddevMulThresh(cfg.statisticalStddevMul);
         sor.filter(*filtered);
     }
-	else
-	{
-		filtered = down;
+    else
+    {
+        filtered = transformed;
     }
 
     return filtered;

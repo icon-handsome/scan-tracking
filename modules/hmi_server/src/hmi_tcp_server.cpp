@@ -70,9 +70,13 @@ bool isStatusPushType(const QString& type)
 
 void logStatusPushTx(const QString& type, const QString& msgId, const QJsonObject& payload)
 {
-    qInfo(LOG_HMI_SERVER).noquote()
-        << QStringLiteral("[TCPIP] → TX") << type << msgId
-        << summarizeHmiTracePayload(type, payload);
+    Q_UNUSED(type);
+    Q_UNUSED(msgId);
+    Q_UNUSED(payload);
+    // HMI 状态推送摘要日志已关闭，避免 status.system/plc/camera/device 刷屏。
+    // qInfo(LOG_HMI_SERVER).noquote()
+    //     << QStringLiteral("[TCPIP] → TX") << type << msgId
+    //     << summarizeHmiTracePayload(type, payload);
 }
 
 // TODO(hmi): 远程 event.log 转发默认关闭，优先保证 TCP 简洁与主业务打通。

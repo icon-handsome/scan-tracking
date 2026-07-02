@@ -124,6 +124,9 @@ PointCloudFrame clonePointCloudFrameFull(const PointCloudFrame& src)
     return dst;
 }
 
+/** Windows 上对百万级点云跑 SOR/MLS 易触发堆损坏（0xC0000374）；超限仅做深度裁剪+体素降采样 */
+constexpr std::size_t kHeavyFilterMaxPoints = 500'000;
+
 /** @brief 检查滤波后点数是否满足 minPoints 下限，不足时写入 message */
 bool checkMinPoints(const CloudPtr& cloud, int minPoints, const QString& stepLabel, QString* message)
 {
@@ -137,6 +140,30 @@ bool checkMinPoints(const CloudPtr& cloud, int minPoints, const QString& stepLab
         return false;
     }
     return true;
+}
+
+/** @brief 体素降采样；失败时写入 message */
+bool applyVoxelDownsample(
+    CloudPtr& cloud,
+    float leafSizeMm,
+    int minPoints,
+    const QString& stepLabel,
+    QString* message)
+{
+    if (leafSizeMm <= 0.0f || !cloud || cloud->empty()) {
+        return true;
+    }
+
+    pcl::VoxelGrid<pcl::PointXYZ> voxel;
+    voxel.setInputCloud(cloud);
+    voxel.setLeafSize(leafSizeMm, leafSizeMm, leafSizeMm);
+    CloudPtr filtered = pcl::make_shared<Cloud>();
+    voxel.filter(*filtered);
+    cloud = filtered;
+    qDebug(LOG_POINT_CLOUD_PROC).noquote()
+        << QStringLiteral("体素降采样 leaf=") << leafSizeMm
+        << QStringLiteral(" mm，剩余点数=") << cloud->size();
+    return checkMinPoints(cloud, minPoints, stepLabel, message);
 }
 
 /** @brief 返回行优先 4×4 单位矩阵 */
@@ -310,6 +337,15 @@ bool processPointCloudFrame(
 
     const int minPoints = std::max(1, config.minPointsAfterProcessing);
     QString failMessage;
+    bool voxelAlreadyApplied = false;
+    const bool skipHeavyFilters = cloud->size() > kHeavyFilterMaxPoints;
+    if (skipHeavyFilters) {
+        qWarning(LOG_POINT_CLOUD_PROC).noquote()
+            << QStringLiteral("点数=") << cloud->size()
+            << QStringLiteral(" 超过 SOR/MLS 安全上限 ")
+            << kHeavyFilterMaxPoints
+            << QStringLiteral("，跳过离群点去除与表面平滑，优先体素降采样");
+    }
 
     // --- 步骤 1：Z 轴深度裁剪（相机坐标系，单位 mm） ---
     if (config.depthMinMm < config.depthMaxMm) {
@@ -332,8 +368,29 @@ bool processPointCloudFrame(
         }
     }
 
+    // --- 超大点云：深度裁剪后先体素降采样，避免 SOR/MLS 占满内存或损坏堆 ---
+    if (skipHeavyFilters) {
+        const float leafSizeMm =
+            (config.downsampleEnabled && config.voxelLeafSizeMm > 0.0f) ? config.voxelLeafSizeMm : 2.0f;
+        if (!applyVoxelDownsample(
+                cloud,
+                leafSizeMm,
+                minPoints,
+                QStringLiteral("大体素降采样"),
+                &failMessage)) {
+            localReport.message = failMessage;
+            if (report != nullptr) {
+                *report = localReport;
+            }
+            return false;
+        }
+        voxelAlreadyApplied = true;
+    }
+
     // --- 步骤 2：统计离群点去除（点数须大于 meanK 才有意义） ---
-    if (config.outlierRemovalEnabled && cloud->size() > static_cast<std::size_t>(config.outlierMeanK)) {
+    if (!skipHeavyFilters &&
+        config.outlierRemovalEnabled &&
+        cloud->size() > static_cast<std::size_t>(config.outlierMeanK)) {
         pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
         sor.setInputCloud(cloud);
         sor.setMeanK(static_cast<int>(std::max(1, config.outlierMeanK)));
@@ -355,7 +412,10 @@ bool processPointCloudFrame(
     }
 
     // --- 步骤 3：MLS 表面平滑（不计算法向，仅更新 xyz） ---
-    if (config.smoothingEnabled && config.mlsSearchRadiusMm > 0.0f && !cloud->empty()) {
+    if (!skipHeavyFilters &&
+        config.smoothingEnabled &&
+        config.mlsSearchRadiusMm > 0.0f &&
+        !cloud->empty()) {
         pcl::MovingLeastSquares<pcl::PointXYZ, pcl::PointXYZ> mls;
         mls.setInputCloud(cloud);
         mls.setSearchRadius(config.mlsSearchRadiusMm);
@@ -378,20 +438,13 @@ bool processPointCloudFrame(
     }
 
     // --- 步骤 4：体素网格降采样（leaf 为立方体边长 mm） ---
-    if (config.downsampleEnabled && config.voxelLeafSizeMm > 0.0f) {
-        pcl::VoxelGrid<pcl::PointXYZ> voxel;
-        voxel.setInputCloud(cloud);
-        voxel.setLeafSize(
-            config.voxelLeafSizeMm,
-            config.voxelLeafSizeMm,
-            config.voxelLeafSizeMm);
-        CloudPtr filtered = pcl::make_shared<Cloud>();
-        voxel.filter(*filtered);
-        cloud = filtered;
-        qDebug(LOG_POINT_CLOUD_PROC).noquote()
-            << QStringLiteral("体素降采样 leaf=") << config.voxelLeafSizeMm
-            << QStringLiteral(" mm，剩余点数=") << cloud->size();
-        if (!checkMinPoints(cloud, minPoints, QStringLiteral("体素降采样"), &failMessage)) {
+    if (!voxelAlreadyApplied && config.downsampleEnabled && config.voxelLeafSizeMm > 0.0f) {
+        if (!applyVoxelDownsample(
+                cloud,
+                config.voxelLeafSizeMm,
+                minPoints,
+                QStringLiteral("体素降采样"),
+                &failMessage)) {
             localReport.message = failMessage;
             if (report != nullptr) {
                 *report = localReport;
