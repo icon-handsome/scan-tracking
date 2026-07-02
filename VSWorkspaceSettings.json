@@ -1,6 +1,5 @@
 {
   "CMakeTargetsViewExcludedItems": [
-    "CMakeTarget:gemini335_smoke_runner",
     "CMakeTarget:scan_tracking_cxp_smoke",
     "CMakeTarget:scan_tracking_bevel_smoke_test",
     "CMakeTarget:scan_tracking_tracking_smoke_test",

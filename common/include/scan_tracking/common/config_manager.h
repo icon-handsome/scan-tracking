@@ -220,41 +220,6 @@ enum class InspectionType {
 InspectionType inspectionTypeFromString(const QString& value);
 QString inspectionTypeToString(InspectionType type);
 
-/// HMI 显控 TCP 服务配置（[Hmi]）
-struct OrbbecGeminiConfig {
-    bool enabled = false;
-    QString sdkRoot;
-    QString serial;
-    int deviceIndex = 0;
-    int depthWidth = 640;
-    int depthHeight = 480;
-    int fps = 15;
-    int captureTimeoutMs = 5000;
-    int warmupFrameCount = 5;
-    bool saveCaptureToDisk = true;
-    QString captureCacheDir;
-    bool enableColorStream = false;
-    bool captureOnStart = true;
-};
-
-struct LivoxMid360Config {
-    bool enabled = false;
-    QString sdkRoot;
-    /// Livox SDK2 JSON 配置，相对 sdkRoot 或绝对路径
-    QString configFile;
-    /// 空则连接第一台已发现设备
-    QString serial;
-    int discoveryTimeoutMs = 10000;
-};
-
-struct TfminiPlusConfig {
-    bool enabled = false;
-    QString portName;
-    int baudRate = 115200;
-    int collisionThresholdMm = 0;
-    bool logFrames = false;
-};
-
 struct HmiConfig {
     bool enabled = true;       ///< 是否启动 HMI TCP 服务端
     quint16 tcpPort = 9900;    ///< 监听端口
@@ -385,9 +350,6 @@ public:
     QString thicknessConfigPathForPath(int pathId) const;
     int innerScanSegmentIndexForPath(int pathId) const;
     int outerScanSegmentIndexForPath(int pathId) const;
-    const OrbbecGeminiConfig& orbbecGeminiConfig() const;
-    const LivoxMid360Config& livoxMid360Config() const;
-    const TfminiPlusConfig& tfminiPlusConfig() const;
     QString configFilePath() const;
     const HmiConfig& hmiConfig() const;
     const LbPoseConfig& lbPoseConfig() const;
@@ -431,9 +393,6 @@ CameraConfig m_cameraConfig;
     mutable std::mutex m_bevelRecipeMutex;
     BevelRecipe m_runtimeBevelRecipe;
     bool m_runtimeRecipeSet = false;
-    OrbbecGeminiConfig m_orbbecGeminiConfig;
-    LivoxMid360Config m_livoxMid360Config;
-    TfminiPlusConfig m_tfminiPlusConfig;
     QString m_configFilePath;
     HmiConfig m_hmiConfig;
     LbPoseConfig m_lbPoseConfig;

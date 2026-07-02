@@ -58,8 +58,6 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(ProjectOptions)
 include(OpenCvBundle)
 include(MechEyeSdk)
-include(OrbbecSdk)
-include(LivoxSdk2)
 include(HikMvsSdk)
 include(PclRuntime)
 
@@ -71,8 +69,8 @@ option(SCAN_TRACKING_ENABLE_LB_POSE_DETECTION "Build the LB stereo pose detectio
 option(SCAN_TRACKING_ENABLE_LBN_POSE_DETECTION "Build the LBN Mech-Eye pose detection library" ON)
 option(SCAN_TRACKING_ENABLE_SCANNER_SELF_CHECK "Build scanner self-check coded marker algorithm" ON)
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Network SerialPort)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Network SerialPort)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Gui Network)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Network)
 
 if(SCAN_TRACKING_STRICT_TOOLCHAIN AND WIN32)
     if(NOT QT_VERSION_MAJOR EQUAL 5 OR NOT Qt5Core_VERSION VERSION_EQUAL 5.15.2)

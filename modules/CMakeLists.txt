@@ -1,7 +1,4 @@
 add_subdirectory(mech_eye)
-add_subdirectory(orbbec_gemini)
-add_subdirectory(livox_mid360)
-add_subdirectory(tfmini_plus)
 add_subdirectory(vision)
 add_subdirectory(tracking)
 add_subdirectory(modbus)

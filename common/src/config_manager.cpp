@@ -391,9 +391,6 @@ bool ConfigManager::hasActiveBevelRecipe() const
     return bevelRecipe().active;
 }
 
-const OrbbecGeminiConfig& ConfigManager::orbbecGeminiConfig() const { return m_orbbecGeminiConfig; }
-const LivoxMid360Config& ConfigManager::livoxMid360Config() const { return m_livoxMid360Config; }
-const TfminiPlusConfig& ConfigManager::tfminiPlusConfig() const { return m_tfminiPlusConfig; }
 QString ConfigManager::configFilePath() const { return m_configFilePath; }
 const HmiConfig& ConfigManager::hmiConfig() const { return m_hmiConfig; }
 const LbPoseConfig& ConfigManager::lbPoseConfig() const { return m_lbPoseConfig; }
@@ -564,40 +561,6 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.beginGroup("SelfCheck");
     settings.setValue("totalPoints", 2);
     settings.setValue("configPath", "self_check/self_check.ini");
-    settings.endGroup();
-
-    settings.beginGroup("OrbbecGemini");
-    settings.setValue("orbbecGeminiEnabled", false);
-    settings.setValue("orbbecGeminiSdkRoot", QStringLiteral("C:/Program Files/OrbbecSDK 2.8.6"));
-    settings.setValue("orbbecGeminiSerial", QString());
-    settings.setValue("orbbecGeminiDeviceIndex", 0);
-    settings.setValue("orbbecGeminiDepthWidth", 640);
-    settings.setValue("orbbecGeminiDepthHeight", 480);
-    settings.setValue("orbbecGeminiFps", 15);
-    settings.setValue("orbbecGeminiCaptureTimeoutMs", 5000);
-    settings.setValue("orbbecGeminiWarmupFrameCount", 5);
-    settings.setValue("orbbecGeminiSaveCaptureToDisk", true);
-    settings.setValue("orbbecGeminiCaptureCacheDir", QString());
-    settings.setValue("orbbecGeminiEnableColorStream", false);
-    settings.setValue("orbbecGeminiCaptureOnStart", false);
-    settings.endGroup();
-
-    settings.beginGroup("LivoxMid360");
-    settings.setValue("livoxMid360Enabled", false);
-    settings.setValue(
-        "livoxMid360SdkRoot",
-        QStringLiteral("third_party/Livox-SDK2"));
-    settings.setValue("livoxMid360ConfigFile", QStringLiteral("bin/mid360_config.json"));
-    settings.setValue("livoxMid360Serial", QStringLiteral("47MCNCN0035510"));
-    settings.setValue("livoxMid360DiscoveryTimeoutMs", 10000);
-    settings.endGroup();
-
-    settings.beginGroup("TfminiPlus");
-    settings.setValue("tfminiPlusEnabled", false);
-    settings.setValue("tfminiPlusPort", QString());
-    settings.setValue("tfminiPlusBaudRate", 115200);
-    settings.setValue("collisionThresholdMm", 0);
-    settings.setValue("tfminiPlusLogFrames", false);
     settings.endGroup();
 
     settings.beginGroup("Hmi");
@@ -996,53 +959,6 @@ void ConfigManager::load(const QString& filePath)
     m_selfCheckConfig.totalPoints = settings.value("totalPoints", 2).toInt();
     m_selfCheckConfig.configPath = settings.value(
         "configPath", QStringLiteral("self_check/self_check.ini")).toString();
-    settings.endGroup();
-
-    settings.beginGroup("OrbbecGemini");
-    m_orbbecGeminiConfig.enabled = settings.value("orbbecGeminiEnabled", false).toBool();
-    m_orbbecGeminiConfig.sdkRoot = settings.value(
-        "orbbecGeminiSdkRoot",
-        QStringLiteral("C:/Program Files/OrbbecSDK 2.8.6")).toString();
-    m_orbbecGeminiConfig.serial = settings.value("orbbecGeminiSerial", QString()).toString();
-    m_orbbecGeminiConfig.deviceIndex = settings.value("orbbecGeminiDeviceIndex", 0).toInt();
-    m_orbbecGeminiConfig.depthWidth = settings.value("orbbecGeminiDepthWidth", 640).toInt();
-    m_orbbecGeminiConfig.depthHeight = settings.value("orbbecGeminiDepthHeight", 480).toInt();
-    m_orbbecGeminiConfig.fps = settings.value("orbbecGeminiFps", 15).toInt();
-    m_orbbecGeminiConfig.captureTimeoutMs =
-        settings.value("orbbecGeminiCaptureTimeoutMs", 5000).toInt();
-    m_orbbecGeminiConfig.warmupFrameCount =
-        settings.value("orbbecGeminiWarmupFrameCount", 5).toInt();
-    m_orbbecGeminiConfig.saveCaptureToDisk =
-        settings.value("orbbecGeminiSaveCaptureToDisk", true).toBool();
-    m_orbbecGeminiConfig.captureCacheDir =
-        settings.value("orbbecGeminiCaptureCacheDir", QString()).toString().trimmed();
-    m_orbbecGeminiConfig.enableColorStream =
-        settings.value("orbbecGeminiEnableColorStream", false).toBool();
-    m_orbbecGeminiConfig.captureOnStart =
-        settings.value("orbbecGeminiCaptureOnStart", false).toBool();
-    settings.endGroup();
-
-    settings.beginGroup("LivoxMid360");
-    m_livoxMid360Config.enabled = settings.value("livoxMid360Enabled", false).toBool();
-    m_livoxMid360Config.sdkRoot = settings.value(
-        "livoxMid360SdkRoot",
-        QStringLiteral("third_party/Livox-SDK2")).toString();
-    m_livoxMid360Config.configFile = settings.value(
-        "livoxMid360ConfigFile",
-        QStringLiteral("bin/mid360_config.json")).toString();
-    m_livoxMid360Config.serial = settings.value("livoxMid360Serial", QString()).toString();
-    m_livoxMid360Config.discoveryTimeoutMs =
-        settings.value("livoxMid360DiscoveryTimeoutMs", 10000).toInt();
-    settings.endGroup();
-
-    settings.beginGroup("TfminiPlus");
-    m_tfminiPlusConfig.enabled = settings.value("tfminiPlusEnabled", false).toBool();
-    m_tfminiPlusConfig.portName = settings.value("tfminiPlusPort", QString()).toString().trimmed();
-    m_tfminiPlusConfig.baudRate = settings.value("tfminiPlusBaudRate", 115200).toInt();
-    m_tfminiPlusConfig.collisionThresholdMm =
-        settings.value("collisionThresholdMm", 0).toInt();
-    m_tfminiPlusConfig.logFrames =
-        settings.value("tfminiPlusLogFrames", false).toBool();
     settings.endGroup();
 
     settings.beginGroup("Hmi");

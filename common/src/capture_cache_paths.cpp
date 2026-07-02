@@ -60,15 +60,6 @@ QString captureCacheHikMonoDir(const QString& root)
     return ensureDirectoryExists(QDir(resolved).absoluteFilePath(QStringLiteral("hik_mono")));
 }
 
-QString captureCacheOrbbecDir(const QString& root)
-{
-    const QString resolved = ensureDirectoryExists(resolveCaptureCacheRoot(root));
-    if (resolved.isEmpty()) {
-        return QString();
-    }
-    return ensureDirectoryExists(QDir(resolved).absoluteFilePath(QStringLiteral("orbbec")));
-}
-
 QString captureCacheHikMonoCameraDir(const QString& root, const QString& cameraTag)
 {
     const QString hikRoot = captureCacheHikMonoDir(root);

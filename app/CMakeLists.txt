@@ -11,9 +11,6 @@ target_include_directories(scan_tracking
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/common/include
         ${CMAKE_SOURCE_DIR}/modules/mech_eye/include
-        ${CMAKE_SOURCE_DIR}/modules/orbbec_gemini/include
-        ${CMAKE_SOURCE_DIR}/modules/livox_mid360/include
-        ${CMAKE_SOURCE_DIR}/modules/tfmini_plus/include
         ${CMAKE_SOURCE_DIR}/modules/vision/include
         ${CMAKE_SOURCE_DIR}/modules/tracking/include
         ${CMAKE_SOURCE_DIR}/modules/modbus/include
@@ -28,9 +25,6 @@ target_link_libraries(scan_tracking
         scan_tracking_common
         Qt5::Gui
         scan_tracking_mech_eye
-        scan_tracking_orbbec_gemini
-        scan_tracking_livox_mid360
-        scan_tracking_tfmini_plus
         scan_tracking_vision
         scan_tracking_tracking
         scan_tracking_modbus
@@ -64,8 +58,6 @@ if(EXISTS "${CMAKE_PREFIX_PATH}/bin/windeployqt.exe")
 endif()
 
 scan_tracking_deploy_mech_eye_runtime(scan_tracking)
-scan_tracking_deploy_orbbec_runtime(scan_tracking)
-scan_tracking_deploy_livox_runtime(scan_tracking)
 scan_tracking_deploy_hik_mvs_runtime(scan_tracking)
 scan_tracking_deploy_pcl_runtime(scan_tracking)
 scan_tracking_deploy_opencv_runtime(scan_tracking)

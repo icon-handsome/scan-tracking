@@ -25,9 +25,6 @@ QString captureCacheHikMonoDir(const QString& root);
 /// 海康 A/B 分目录：<root>/hik_mono/camera_a 或 camera_b（cameraTag 为 hikA / hikB）
 QString captureCacheHikMonoCameraDir(const QString& root, const QString& cameraTag);
 
-/// Orbbec Gemini 深度/点云：<root>/orbbec
-QString captureCacheOrbbecDir(const QString& root);
-
 /// 同一次分段落盘共用的时间戳：yyyyMMdd_HHmmss_zzz
 QString buildCaptureTimestamp();
 
