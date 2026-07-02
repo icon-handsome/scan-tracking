@@ -90,8 +90,8 @@ if(SCAN_TRACKING_STRICT_TOOLCHAIN AND WIN32)
     endif()
 endif()
 
+add_subdirectory(common)
 add_subdirectory(third_party)
 
-add_subdirectory(common)
 add_subdirectory(modules)
 add_subdirectory(app)

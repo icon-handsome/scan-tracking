@@ -6,6 +6,7 @@ add_library(scan_tracking_common STATIC
     src/config_manager.cpp
     src/station_profile.cpp
     src/capture_cache_paths.cpp
+    src/pcd_xyz_loader.cpp
 )
 
 target_include_directories(scan_tracking_common

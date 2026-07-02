@@ -14,6 +14,8 @@ find_package(PCL 1.12 REQUIRED COMPONENTS
     sample_consensus
 )
 
+find_package(Qt5 REQUIRED COMPONENTS Core)
+
 add_library(po_kou_ce_liang STATIC
     src/BevelMeasurement.cpp
 )
@@ -29,6 +31,8 @@ target_include_directories(po_kou_ce_liang
 target_link_libraries(po_kou_ce_liang
     PUBLIC
         ${PCL_LIBRARIES}
+        scan_tracking_common
+        Qt5::Core
 )
 
 target_compile_features(po_kou_ce_liang PUBLIC cxx_std_17)

@@ -73,6 +73,11 @@ if(BUILD_TESTING)
             scan_tracking_common
     )
 
+    target_compile_definitions(scan_tracking_point_cloud_io_test
+        PRIVATE
+            SCAN_TRACKING_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    )
+
     add_test(NAME scan_tracking_point_cloud_io_test
         COMMAND scan_tracking_point_cloud_io_test
     )

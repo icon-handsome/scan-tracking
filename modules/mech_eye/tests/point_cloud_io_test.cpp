@@ -1,7 +1,9 @@
 #include "scan_tracking/common/capture_cache_paths.h"
+#include "scan_tracking/common/pcd_xyz_loader.h"
 #include "scan_tracking/mech_eye/point_cloud_io.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QList>
 #include <QTemporaryDir>
@@ -9,6 +11,10 @@
 #include <QtTest/QtTest>
 
 #include <limits>
+
+#ifndef SCAN_TRACKING_SOURCE_DIR
+#define SCAN_TRACKING_SOURCE_DIR "."
+#endif
 
 using namespace scan_tracking::mech_eye;
 
@@ -21,6 +27,8 @@ private slots:
     void mergeSegmentsToPcd();
     void loadLegacyAsciiPly();
     void plyPathUsesMech3dSubdir();
+    void loadThirdPartyPcdWithPaddingField();
+    void loadThirdPartyPcdWithRgbField();
 };
 
 void PointCloudIoTest::roundTripSaveLoad()
@@ -173,6 +181,31 @@ void PointCloudIoTest::plyPathUsesMech3dSubdir()
 
     const QString root = scan_tracking::common::captureCacheMech3DDir(tempDir.path());
     QVERIFY(root.endsWith(QStringLiteral("mech_3d")));
+}
+
+void PointCloudIoTest::loadThirdPartyPcdWithPaddingField()
+{
+    const QString pcdPath = QDir(QStringLiteral(SCAN_TRACKING_SOURCE_DIR)).filePath(
+        QStringLiteral("third_party/Po_Kou_Ce_Liang/data/templates/type_0_template.pcd"));
+    QVERIFY2(QFile::exists(pcdPath), qPrintable(QStringLiteral("missing: ") + pcdPath));
+
+    PointCloudFrame loaded;
+    QVERIFY(loadPointCloudFrameFromPcd(pcdPath, &loaded));
+    QVERIFY(loaded.pointCount > 1000);
+    QVERIFY(loaded.isValid());
+    QCOMPARE(loaded.pointsXYZ->size(), static_cast<std::size_t>(loaded.pointCount * 3));
+}
+
+void PointCloudIoTest::loadThirdPartyPcdWithRgbField()
+{
+    const QString pcdPath = QDir(QStringLiteral(SCAN_TRACKING_SOURCE_DIR)).filePath(
+        QStringLiteral("third_party/Thicknessmeasurement/input/inner_surface_sample.pcd"));
+    QVERIFY2(QFile::exists(pcdPath), qPrintable(QStringLiteral("missing: ") + pcdPath));
+
+    std::vector<float> xyz;
+    QVERIFY(scan_tracking::common::loadPointCloudXyzFromPcd(pcdPath, &xyz, 0));
+    QVERIFY(xyz.size() >= 9);
+    QCOMPARE(xyz.size() % 3, static_cast<std::size_t>(0));
 }
 
 QTEST_MAIN(PointCloudIoTest)

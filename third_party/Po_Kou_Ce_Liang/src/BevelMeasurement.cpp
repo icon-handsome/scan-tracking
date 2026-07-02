@@ -1,5 +1,7 @@
 #include "BevelMeasurement.h"
 
+#include "scan_tracking/common/pcd_xyz_loader.h"
+
 #include <Eigen/Geometry>
 #include <Eigen/Eigenvalues>
 #include <pcl/common/common.h>
@@ -24,6 +26,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include <QtCore/QString>
+
 namespace bevel
 {
 namespace
@@ -38,7 +42,7 @@ constexpr std::size_t kEarlyXyzStrideLimitPoints = 200000;
 constexpr float kMaxVoxelDivisionsPerAxis = 256.0f;
 constexpr int64_t kMaxVoxelGridCells = 100000000LL;
 
-/// PCL 滤波/IO 在 Windows DLL 堆上分配点云，若由 exe 侧释放会触发 aligned_free 崩溃。
+/// 将输入点云复制到 exe 堆上的新 CloudT（跨模块/ConstPtr 边界时使用）。
 CloudT::Ptr reownCloudPoints(const CloudT::ConstPtr& input)
 {
     CloudT::Ptr output(new CloudT);
@@ -59,27 +63,15 @@ CloudT::Ptr reownCloudPoints(const CloudT::ConstPtr& input)
     return output;
 }
 
-std::vector<CloudT::Ptr>& adoptedPclIntermediateCloudLeaks()
-{
-    // PCL 滤波/IO 在 Windows DLL 堆上分配点云；进程退出时若析构 static 容器会触发 aligned_free 崩溃。
-    static std::vector<CloudT::Ptr>* leaks = new std::vector<CloudT::Ptr>();
-    return *leaks;
-}
-
-void adoptPclIntermediateCloud(CloudT::Ptr& cloud)
+/** PLY IO 仍在 PCL DLL 堆分配；复制到 exe 堆后暂存原云避免 aligned_free 崩溃。 */
+void adoptPclIoLoadedCloud(CloudT::Ptr& cloud)
 {
     if (!cloud) {
         return;
     }
-    adoptedPclIntermediateCloudLeaks().push_back(cloud);
+    static std::vector<CloudT::Ptr>* ioLeaks = new std::vector<CloudT::Ptr>();
+    ioLeaks->push_back(cloud);
     cloud.reset();
-}
-
-CloudT::Ptr reownFromPclOutput(CloudT::Ptr& pclOutput)
-{
-    CloudT::Ptr owned = reownCloudPoints(pclOutput);
-    adoptPclIntermediateCloud(pclOutput);
-    return owned;
 }
 
 CloudT::Ptr transformCloudInProcessHeap(const CloudT::ConstPtr& input, const Eigen::Matrix4f& matrix)
@@ -305,12 +297,28 @@ std::string fileExtensionLower(const std::string& path)
 
 bool loadCloudAuto(const std::string& path, CloudT::Ptr cloud)
 {
-    CloudT::Ptr loaded(new CloudT);
     const std::string ext = fileExtensionLower(path);
-    bool ok = false;
     if (ext == ".pcd") {
-        ok = pcl::io::loadPCDFile<PointT>(path, *loaded) == 0 && !loaded->empty();
-    } else if (ext == ".ply") {
+        std::vector<float> xyz;
+        if (!scan_tracking::common::loadPointCloudXyzFromPcd(
+                QString::fromStdString(path), &xyz, 0)) {
+            return false;
+        }
+
+        cloud->clear();
+        cloud->points.reserve(xyz.size() / 3);
+        for (std::size_t index = 0; index + 2 < xyz.size(); index += 3) {
+            cloud->points.emplace_back(xyz[index], xyz[index + 1], xyz[index + 2]);
+        }
+        cloud->width = static_cast<std::uint32_t>(cloud->size());
+        cloud->height = 1;
+        cloud->is_dense = true;
+        return !cloud->empty();
+    }
+
+    CloudT::Ptr loaded(new CloudT);
+    bool ok = false;
+    if (ext == ".ply") {
         ok = pcl::io::loadPLYFile<PointT>(path, *loaded) == 0 && !loaded->empty();
     } else {
         ok = loadTextPointCloud(path, loaded);
@@ -322,7 +330,7 @@ bool loadCloudAuto(const std::string& path, CloudT::Ptr cloud)
 
     CloudT::Ptr owned = reownCloudPoints(loaded);
     *cloud = *owned;
-    adoptPclIntermediateCloud(loaded);
+    adoptPclIoLoadedCloud(loaded);
     return !cloud->empty();
 }
 
@@ -456,9 +464,9 @@ CloudT::Ptr preprocess(CloudT::Ptr current, const BevelConfig& cfg)
         sor.setInputCloud(current);
         sor.setMeanK(cfg.sorMeanK);
         sor.setStddevMulThresh(cfg.sorStddevMulThresh);
-        CloudT::Ptr filteredPcl(new CloudT);
+        CloudT::Ptr filteredPcl = pcl::make_shared<CloudT>();
         sor.filter(*filteredPcl);
-        current = reownFromPclOutput(filteredPcl);
+        current = filteredPcl;
     }
 
     return current;
@@ -475,16 +483,14 @@ CloudT::Ptr downsampleForIcp(const CloudT::ConstPtr& cloud, const BevelConfig& c
         pcl::VoxelGrid<PointT> filter;
         filter.setInputCloud(cloud);
         filter.setLeafSize(leaf, leaf, leaf);
-        CloudT::Ptr sampledPcl(new CloudT);
+        CloudT::Ptr sampledPcl = pcl::make_shared<CloudT>();
         filter.filter(*sampledPcl);
         if (!sampledPcl->empty()) {
-            CloudT::Ptr sampled = reownFromPclOutput(sampledPcl);
             if (allowSaveCloud && cfg.saveDownsampledCloud) {
-                pcl::io::savePCDFileBinary(cfg.downsampledCloudPath, *sampled);
+                pcl::io::savePCDFileBinary(cfg.downsampledCloudPath, *sampledPcl);
             }
-            return sampled;
+            return sampledPcl;
         }
-        adoptPclIntermediateCloud(sampledPcl);
         leaf *= 2.0f;
     }
 
@@ -733,9 +739,9 @@ BevelMeasurementResult solveGeometry(const CloudT::ConstPtr& icpScan,
             icp.addCorrespondenceRejector(trimmed);
         }
 
-        CloudT::Ptr alignedPcl(new CloudT);
+        CloudT::Ptr alignedPcl = pcl::make_shared<CloudT>();
         icp.align(*alignedPcl);
-        aligned = reownFromPclOutput(alignedPcl);
+        aligned = alignedPcl;
         scanToTemplate = icp.getFinalTransformation();
         icpFitness = icp.getFitnessScore();
     }
