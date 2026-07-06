@@ -3148,29 +3148,19 @@ int StateMachine::resolvePathIdForIncomingSegment(int segmentIndex) const
         return m_currentPathId > 0 ? m_currentPathId : 1;
     }
 
-    // 仅一条启用路径时（如 internalSurfaceOnlyEnabled）：PLC 段号 1..N 全部映射到该路径，
-    // 避免 m_currentPathId 默认 1 导致误走 path1。
-    if (pathIds.size() == 1) {
-        return pathIds.front();
-    }
-
-    const bool currentPathEnabled =
-        m_currentPathId > 0 && pathIds.contains(m_currentPathId);
-    const int activePathId = currentPathEnabled ? m_currentPathId : pathIds.front();
-
     if (!m_currentPathSegments.contains(segmentIndex)) {
-        return activePathId;
+        return m_currentPathId > 0 ? m_currentPathId : pathIds.front();
     }
 
     if (!isCurrentPathSegmentSetComplete()) {
-        return activePathId;
+        return m_currentPathId;
     }
 
-    const int currentIndex = pathIds.indexOf(activePathId);
+    const int currentIndex = pathIds.indexOf(m_currentPathId);
     if (currentIndex >= 0 && currentIndex + 1 < pathIds.size()) {
         return pathIds[currentIndex + 1];
     }
-    return activePathId;
+    return m_currentPathId;
 }
 
 int StateMachine::totalCachedPointCloudCount() const
@@ -3503,6 +3493,114 @@ bool StateMachine::loadSegmentPointCloudsForInspection(
         << QStringLiteral("[多路径] 路径级点云分段就绪 pathId=") << inspectPathId
         << QStringLiteral(" 参与段数=") << mergedSegmentCount
         << QStringLiteral(" 总点数=") << mergedPointCount;
+
+    return true;
+}
+
+bool StateMachine::loadHoleSegmentPcdPathsForInspection(
+    QStringList* outPcdPaths,
+    int* totalPointCount,
+    int* segmentCount,
+    QString* errorMessage)
+{
+    if (outPcdPaths == nullptr) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("综合检测失败：输出分段路径列表指针为空。");
+        }
+        return false;
+    }
+
+    outPcdPaths->clear();
+
+    if (m_segmentCaptureExportSessionRoot.trimmed().isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Hole 检测：session 落盘目录不可用，将回退内存点云。");
+        }
+        return false;
+    }
+
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager == nullptr) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("综合检测失败：ConfigManager 不可用。");
+        }
+        return false;
+    }
+
+    int inspectPathId = m_activeTask.inspectionPathId;
+    if (inspectPathId <= 0) {
+        inspectPathId = resolvePathIdForInspection();
+    }
+    if (inspectPathId <= 0) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("综合检测失败：没有已扫满的可检测路径。");
+        }
+        return false;
+    }
+
+    const QString ext = scan_tracking::common::pointCloudSaveFormatExtension(
+        configManager->segmentCaptureExportConfig().pointCloudSaveFormat);
+    const QString cloudFileName = QStringLiteral("pointcloud_stitched.") + ext;
+
+    int mergedPointCount = 0;
+    int mergedSegmentCount = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
+
+        if (!m_pathSegmentCaptureResults.contains(inspectPathId)) {
+            if (errorMessage != nullptr) {
+                *errorMessage = QStringLiteral(
+                    "综合检测失败：路径 %1 不存在（尚未扫描）。").arg(inspectPathId);
+            }
+            return false;
+        }
+
+        const auto& pathSegments = m_pathSegmentCaptureResults[inspectPathId];
+        QList<int> segmentIndices = pathSegments.keys();
+        std::sort(segmentIndices.begin(), segmentIndices.end());
+
+        for (int segmentIndex : segmentIndices) {
+            const auto& captureResult = pathSegments[segmentIndex];
+            if (!captureResult.success() || !captureResult.pointCloud.isValid()) {
+                continue;
+            }
+
+            const QString groupDir = segmentCaptureExportGroupDirectory(
+                m_segmentCaptureExportSessionRoot, inspectPathId, segmentIndex);
+            const QString cloudPath = QDir(groupDir).filePath(cloudFileName);
+            if (!QFileInfo::exists(cloudPath)) {
+                if (errorMessage != nullptr) {
+                    *errorMessage = QStringLiteral("Hole 检测：缺少落盘点云文件：%1").arg(cloudPath);
+                }
+                return false;
+            }
+
+            outPcdPaths->push_back(QFileInfo(cloudPath).absoluteFilePath());
+            mergedPointCount += captureResult.pointCloud.pointCount;
+            ++mergedSegmentCount;
+        }
+    }
+
+    if (mergedPointCount <= 0 || mergedSegmentCount <= 0 || outPcdPaths->isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral(
+                "Hole 检测：路径 %1 没有可用的落盘分段点云。").arg(inspectPathId);
+        }
+        return false;
+    }
+
+    if (totalPointCount != nullptr) {
+        *totalPointCount = mergedPointCount;
+    }
+    if (segmentCount != nullptr) {
+        *segmentCount = mergedSegmentCount;
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Hole] 落盘分段点云路径就绪 pathId=") << inspectPathId
+        << QStringLiteral(" 段数=") << mergedSegmentCount
+        << QStringLiteral(" session=") << m_segmentCaptureExportSessionRoot;
 
     return true;
 }
@@ -5099,14 +5197,14 @@ void StateMachine::resetScanSegmentCache()
     m_pathSegmentRawPointClouds.clear();
     
     // 重置路径上下文
-    m_currentPathId = firstEnabledScanPathId();
+    m_currentPathId = 1;
     m_currentPathSegments.clear();
     clearFirstPathStepPauseLatch();
 
     if (totalCacheSize > 0) {
         qInfo(LOG_FLOW).noquote()
             << QStringLiteral("[多路径] 已清空内存点云缓存，总条目数=") << totalCacheSize
-            << QStringLiteral("，路径ID已重置为") << m_currentPathId;
+            << QStringLiteral("，路径ID已重置为1");
     }
 
     m_pathSegmentCalibrationMatrices.clear();
@@ -6094,19 +6192,6 @@ bool StateMachine::validateScanSegmentRequest(const QVector<quint16>& commandBlo
     }
 
     const int targetPathId = resolvePathIdForIncomingSegment(segmentIndex);
-    const QVector<int> enabledPathIds = enabledScanPathIds();
-    if (!enabledPathIds.isEmpty() && enabledPathIds.indexOf(targetPathId) < 0) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral(
-                "扫描段号无效：段号=%1 解析到未启用路径 %2").arg(segmentIndex).arg(targetPathId);
-        }
-        qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("拒绝 Trig_ScanSegment：路径未启用")
-            << QStringLiteral(" 段号=") << segmentIndex
-            << QStringLiteral(" 路径=") << targetPathId;
-        return false;
-    }
-
     const int segmentTotal = segmentTotalForPath(targetPathId);
     const int maxSegmentIndex = segmentTotal > 0 ? qMin(segmentTotal, kMaxScanSegmentIndex)
                                                  : kMaxScanSegmentIndex;

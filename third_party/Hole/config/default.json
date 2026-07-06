@@ -20,7 +20,7 @@
       "crop_max": [331.008, -283.808, 4459.1895]
     }
   ],
-  // 离群点滤波与体素降采样
+  // 离群点滤波与体素降采样（与柱面和开孔测量 V1.3 sample_config 一致）
   "statistical_mean_k": 10,
   "statistical_stddev_mul": 3.0,
   "voxel_leaf_mm": 2.0,
@@ -29,7 +29,7 @@
   "cylinder_distance_threshold_mm": 2.0,
   "cylinder_max_iterations": 200,
 
-  // ICP 匹配参数：模板匹配和局部开孔匹配共用
+  // 全局 ICP 匹配参数：模板整体匹配使用
   "icp_max_correspondence_distance_mm": 50.0,
   "icp_max_iterations": 300,
   "icp_transformation_epsilon": 1e-8,
@@ -89,18 +89,22 @@
     }
   ],
 
-  // 开孔检测：先投影定位圆孔(目前不需要了)，再局部 ICP，最后用模板圆柱特征点拟合开孔柱面
+  // 开孔检测：每个开孔可单独配置局部 ICP 参数，最后用模板圆柱特征点拟合开孔柱面
   "template_openings": [
     {
       "name": "N1",
-      "search_radius_mm": 100.0,
+      "search_radius_mm": 150.0,
       "expected_diameter_mm": 29.0,
       "diameter_tolerance_mm": 3.0,
+      "icp_max_correspondence_distance_mm": 30.0,
+      "icp_max_iterations": 300,
+      "icp_transformation_epsilon": 1e-8,
+      "icp_fitness_epsilon": 1e-6,
       "projection_direction": [0.4319, -0.7518, -0.4983],
       "projection_image_width": 600,
       "projection_image_height": 600,
-      "projection_crop_min": [-831.567, -659.185, 3810.19],
-      "projection_crop_max": [-711.567, -539.185, 3930.19],
+      "projection_crop_min": [-915.50885010, -694.62951660, 3658.92675781],
+      "projection_crop_max": [-612.43914795, -514.05395508, 4009.65405273],
       "cylinder_feature_points": [
       -775.91131592, -578.40905762, 3853.95458984,
       -791.84069824, -587.54357910, 3869.23120117,

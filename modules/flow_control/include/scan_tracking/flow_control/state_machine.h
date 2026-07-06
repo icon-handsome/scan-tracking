@@ -521,6 +521,13 @@ private:
         int* segmentCount,
         QString* errorMessage);
 
+    /// Hole 检测：从 session 落盘目录收集各段 pointcloud_stitched 文件路径（不加载点云）
+    bool loadHoleSegmentPcdPathsForInspection(
+        QStringList* outPcdPaths,
+        int* totalPointCount,
+        int* segmentCount,
+        QString* errorMessage);
+
     // 厚度检测：按路径配置段号加载 inner/outer 两帧点云
     bool loadThicknessPointCloudsForInspection(
         scan_tracking::mech_eye::PointCloudFrame* outInnerCloud,

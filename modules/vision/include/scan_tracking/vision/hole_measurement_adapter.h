@@ -34,4 +34,10 @@ HoleInspectionResult runHoleMeasurementFromSegmentFrames(
     int inspectionPathId = 0,
     int sourcePointCount = 0);
 
+/// 正式检测：从落盘分段 PCD/PLY 逐文件加载，降低内存峰值（推荐 Trig_Inspection 联调）
+HoleInspectionResult runHoleMeasurementFromSegmentPcdFiles(
+    const QStringList& segmentPcdPaths,
+    int inspectionPathId = 0,
+    int sourcePointCount = 0);
+
 }  // namespace scan_tracking::vision::hole

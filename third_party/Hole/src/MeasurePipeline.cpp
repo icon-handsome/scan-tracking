@@ -20,6 +20,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace hm {
 namespace {
@@ -64,22 +65,95 @@ CloudPtr loadCloud(const std::string& path)
     return cloud;
 }
 
-CloudPtr cropCloud(const CloudConstPtr& input, const CropBox& box) 
-{
-    pcl::CropBox<PointT> crop;
-    crop.setInputCloud(input);
-    crop.setMin(Eigen::Vector4f(box.min.x(), box.min.y(), box.min.z(), 1.0f));
-    crop.setMax(Eigen::Vector4f(box.max.x(), box.max.y(), box.max.z(), 1.0f));
-    CloudPtr out(new Cloud);
-    crop.filter(*out);
-    return out;
-}
-
 bool isPointInCropBox(const PointT& point, const CropBox& box)
 {
     return point.x >= box.min.x() && point.x <= box.max.x() &&
            point.y >= box.min.y() && point.y <= box.max.y() &&
            point.z >= box.min.z() && point.z <= box.max.z();
+}
+
+CloudPtr cropCloud(const CloudConstPtr& input, const CropBox& box) 
+{
+    CloudPtr out(new Cloud);
+    if (!input || input->empty())
+    {
+        return out;
+    }
+    out->reserve(input->size() / 16 + 64);
+    for (std::size_t i = 0; i < input->size(); ++i)
+    {
+        if (isPointInCropBox(input->points[i], box))
+        {
+            out->push_back(input->points[i]);
+        }
+    }
+    out->width = static_cast<uint32_t>(out->size());
+    out->height = 1;
+    out->is_dense = true;
+    return out;
+}
+
+std::size_t countPointsInCropBox(const CloudConstPtr& input, const CropBox& box)
+{
+    if (!input || input->empty())
+    {
+        return 0;
+    }
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < input->size(); ++i)
+    {
+        if (isPointInCropBox(input->points[i], box))
+        {
+            ++count;
+        }
+    }
+    return count;
+}
+
+CropBox buildProjectionCropFromFeaturePoints(const std::vector<Eigen::Vector3d>& points, double marginMm)
+{
+    CropBox box;
+    if (points.empty())
+    {
+        return box;
+    }
+
+    Eigen::Vector3d minP = points[0];
+    Eigen::Vector3d maxP = points[0];
+    for (std::size_t pi = 1; pi < points.size(); ++pi)
+    {
+        minP = minP.cwiseMin(points[pi]);
+        maxP = maxP.cwiseMax(points[pi]);
+    }
+    const Eigen::Vector3d margin = Eigen::Vector3d::Constant(marginMm);
+    box.min = (minP - margin).cast<float>();
+    box.max = (maxP + margin).cast<float>();
+    return box;
+}
+
+std::size_t countPointsNear(const CloudConstPtr& input,
+                            const Eigen::Vector3d& query,
+                            double radiusMm)
+{
+    if (!input || input->empty() || radiusMm <= 0.0)
+    {
+        return 0;
+    }
+
+    const double radiusSq = radiusMm * radiusMm;
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < input->size(); ++i)
+    {
+        const PointT& point = input->points[i];
+        const double dx = static_cast<double>(point.x) - query.x();
+        const double dy = static_cast<double>(point.y) - query.y();
+        const double dz = static_cast<double>(point.z) - query.z();
+        if (dx * dx + dy * dy + dz * dz <= radiusSq)
+        {
+            ++count;
+        }
+    }
+    return count;
 }
 
 CloudPtr cropCloudAny(const CloudConstPtr& input, const std::vector<CropBox>& boxes)
@@ -123,58 +197,226 @@ void printCloudInfo(const std::string& name, const CloudConstPtr& cloud) {
               << " max=(" << maxPt.x << "," << maxPt.y << "," << maxPt.z << ")" << std::endl;
 }
 
-CloudPtr preprocess(const CloudConstPtr& input, const MeasureConfig& cfg)
+double effectiveVoxelLeafMm(std::size_t pointCount, double configuredLeaf)
 {
-    CloudConstPtr working = input;
-    if (!cfg.cropBoxes.empty())
+    if (configuredLeaf <= 0.0)
     {
-        CloudPtr cropped = cropCloudAny(input, cfg.cropBoxes);
-        if (cropped && !cropped->empty())
+        return 0.0;
+    }
+    if (pointCount > 1500000)
+    {
+        return std::max(configuredLeaf, 8.0);
+    }
+    if (pointCount > 800000)
+    {
+        return std::max(configuredLeaf, 5.0);
+    }
+    if (pointCount > 400000)
+    {
+        return std::max(configuredLeaf, 3.0);
+    }
+    return configuredLeaf;
+}
+
+struct VoxelKey {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+
+    bool operator==(const VoxelKey& other) const noexcept
+    {
+        return x == other.x && y == other.y && z == other.z;
+    }
+};
+
+struct VoxelKeyHash {
+    std::size_t operator()(const VoxelKey& key) const noexcept
+    {
+        const std::size_t hx = static_cast<std::size_t>(key.x) * 73856093u;
+        const std::size_t hy = static_cast<std::size_t>(key.y) * 19349663u;
+        const std::size_t hz = static_cast<std::size_t>(key.z) * 83492791u;
+        return hx ^ hy ^ hz;
+    }
+};
+
+bool isPointInAnyCropBox(const PointT& point, const std::vector<CropBox>& boxes)
+{
+    if (boxes.empty())
+    {
+        return true;
+    }
+    for (const CropBox& box : boxes)
+    {
+        if (isPointInCropBox(point, box))
         {
-            working = cropped;
-            std::cout << "frame_crop points=" << working->size() << std::endl;
+            return true;
         }
     }
+    return false;
+}
 
-    // Voxel before transform/SOR to avoid OOM on multi-million-point scans.
-    CloudPtr down(new Cloud);
-    if (cfg.voxelLeafMm > 0.0)
+CloudPtr cropVoxelCloudOnePass(
+    const CloudConstPtr& input,
+    const std::vector<CropBox>& boxes,
+    float leafMm)
+{
+    struct VoxelAccum {
+        PointT sum{0.0f, 0.0f, 0.0f};
+        int count = 0;
+    };
+
+    std::unordered_map<VoxelKey, VoxelAccum, VoxelKeyHash> voxels;
+    const std::size_t inputSize = input->size();
+    const std::size_t stride = inputSize > 2500000 ? 4u
+        : (inputSize > 1500000 ? 3u : (inputSize > 800000 ? 2u : 1u));
+    voxels.reserve(std::min<std::size_t>(inputSize / (16 * stride), 250000));
+
+    const float invLeaf = 1.0f / leafMm;
+    for (std::size_t i = 0; i < inputSize; i += stride)
     {
-        pcl::VoxelGrid<PointT> voxel;
-        voxel.setInputCloud(working);
-        const float leaf = static_cast<float>(cfg.voxelLeafMm);
-        voxel.setLeafSize(leaf, leaf, leaf);
-        voxel.filter(*down);
+        const PointT& point = input->points[i];
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z))
+        {
+            continue;
+        }
+        if (!isPointInAnyCropBox(point, boxes))
+        {
+            continue;
+        }
+
+        const VoxelKey key{
+            static_cast<int>(std::floor(point.x * invLeaf)),
+            static_cast<int>(std::floor(point.y * invLeaf)),
+            static_cast<int>(std::floor(point.z * invLeaf)),
+        };
+        VoxelAccum& cell = voxels[key];
+        cell.sum.x += point.x;
+        cell.sum.y += point.y;
+        cell.sum.z += point.z;
+        ++cell.count;
+    }
+
+    CloudPtr out(new Cloud);
+    out->points.reserve(voxels.size());
+    for (const auto& entry : voxels)
+    {
+        const VoxelAccum& cell = entry.second;
+        if (cell.count <= 0)
+        {
+            continue;
+        }
+        const float invCount = 1.0f / static_cast<float>(cell.count);
+        out->points.emplace_back(
+            cell.sum.x * invCount,
+            cell.sum.y * invCount,
+            cell.sum.z * invCount);
+    }
+    out->width = static_cast<uint32_t>(out->points.size());
+    out->height = 1;
+    out->is_dense = true;
+    if (stride > 1)
+    {
+        std::cout << "frame_crop_voxel_stride=" << stride << std::endl;
+    }
+    return out;
+}
+
+CloudPtr preprocess(const CloudConstPtr& input, const MeasureConfig& cfg)
+{
+    if (!input || input->empty())
+    {
+        throw std::runtime_error("preprocess input cloud is empty");
+    }
+
+    constexpr std::size_t kOnePassCropVoxelThreshold = 400000;
+    const double voxelLeafMm = cfg.voxelLeafMm > 0.0
+        ? cfg.voxelLeafMm
+        : effectiveVoxelLeafMm(input->size(), 2.0);
+
+    CloudPtr down;
+    bool usedOnePassCropVoxel = false;
+    if (input->size() > kOnePassCropVoxelThreshold && voxelLeafMm > 0.0)
+    {
+        usedOnePassCropVoxel = true;
+        down = cropVoxelCloudOnePass(
+            input,
+            cfg.cropBoxes,
+            static_cast<float>(voxelLeafMm));
+        std::cout << "frame_crop_voxel_onepass input_points=" << input->size()
+                  << " leaf_mm=" << voxelLeafMm
+                  << " output_points=" << down->size() << std::endl;
     }
     else
     {
-        down = CloudPtr(new Cloud(*working));
+        CloudPtr cropped;
+        CloudConstPtr working = input;
+        if (!cfg.cropBoxes.empty())
+        {
+            cropped = cropCloudAny(input, cfg.cropBoxes);
+            if (cropped && !cropped->empty())
+            {
+                working = cropped;
+                std::cout << "frame_crop points=" << working->size() << std::endl;
+            }
+        }
+
+        down.reset(new Cloud);
+        const double workingLeafMm = effectiveVoxelLeafMm(working->size(), cfg.voxelLeafMm);
+        if (workingLeafMm > 0.0)
+        {
+            pcl::VoxelGrid<PointT> voxel;
+            voxel.setInputCloud(working);
+            const float leaf = static_cast<float>(workingLeafMm);
+            voxel.setLeafSize(leaf, leaf, leaf);
+            voxel.filter(*down);
+            voxel.setInputCloud(CloudConstPtr());
+            std::cout << "frame_voxel leaf_mm=" << workingLeafMm
+                      << " points=" << down->size() << std::endl;
+        }
+        else
+        {
+            pcl::copyPointCloud(*working, *down);
+        }
+        cropped.reset();
     }
 
     CloudPtr transformed(new Cloud);
     if (cfg.poseCorrection.isApprox(Eigen::Matrix4f::Identity(), 1e-6f))
     {
-        transformed = down;
+        pcl::copyPointCloud(*down, *transformed);
     }
     else
     {
         pcl::transformPointCloud(*down, *transformed, cfg.poseCorrection);
     }
+    down.reset();
 
     CloudPtr filtered(new Cloud);
+    constexpr std::size_t kSorMaxInputPoints = 250000;
+    // IPC 多段百万点云：one-pass 已 crop+voxel，跳过 SOR 避免 PCL 堆损坏（配置仍保留 V1.3 参数供离线单帧）
     if (cfg.statisticalMeanK > 0
-        && transformed->size() > static_cast<std::size_t>(cfg.statisticalMeanK))
+        && !usedOnePassCropVoxel
+        && transformed->size() > static_cast<std::size_t>(cfg.statisticalMeanK)
+        && transformed->size() <= kSorMaxInputPoints)
     {
         pcl::StatisticalOutlierRemoval<PointT> sor;
         sor.setInputCloud(transformed);
         sor.setMeanK(cfg.statisticalMeanK);
         sor.setStddevMulThresh(cfg.statisticalStddevMul);
         sor.filter(*filtered);
+        sor.setInputCloud(CloudConstPtr());
+        std::cout << "frame_sor mean_k=" << cfg.statisticalMeanK
+                  << " points=" << filtered->size() << std::endl;
     }
     else
     {
-        filtered = transformed;
+        if (usedOnePassCropVoxel && cfg.statisticalMeanK > 0)
+        {
+            std::cout << "frame_sor skipped reason=onepass_online points=" << transformed->size() << std::endl;
+        }
+        pcl::copyPointCloud(*transformed, *filtered);
     }
+    transformed.reset();
 
     return filtered;
 }
@@ -1083,7 +1325,7 @@ void cylinderBasis(const Eigen::Vector3d& axis, Eigen::Vector3d& u, Eigen::Vecto
     v = axis.cross(u).normalized();
 }
 
-FitReport localIcp(const CloudConstPtr& templ, const CloudConstPtr& scan, const MeasureConfig& cfg, Eigen::Matrix4f& transform) {
+FitReport localIcp(const CloudConstPtr& templ, const CloudConstPtr& scan, const OpeningFeature& feature, Eigen::Matrix4f& transform) {
     FitReport report;
     report.name = "opening_local_icp";
     transform = Eigen::Matrix4f::Identity();
@@ -1095,16 +1337,16 @@ FitReport localIcp(const CloudConstPtr& templ, const CloudConstPtr& scan, const 
     pcl::IterativeClosestPoint<PointT, PointT> icp;
     icp.setInputSource(templ);
     icp.setInputTarget(scan);
-    icp.setMaxCorrespondenceDistance(cfg.icpMaxCorrespondenceDistanceMm);
-    icp.setMaximumIterations(cfg.icpMaxIterations);
-    icp.setTransformationEpsilon(cfg.icpTransformationEpsilon);
-    icp.setEuclideanFitnessEpsilon(cfg.icpFitnessEpsilon);
+    icp.setMaxCorrespondenceDistance(feature.icpMaxCorrespondenceDistanceMm);
+    icp.setMaximumIterations(feature.icpMaxIterations);
+    icp.setTransformationEpsilon(feature.icpTransformationEpsilon);
+    icp.setEuclideanFitnessEpsilon(feature.icpFitnessEpsilon);
     Cloud aligned;
     icp.align(aligned);
     transform = icp.getFinalTransformation();
     report.inlierCount = static_cast<int>(aligned.size());
     report.rmsMm = std::sqrt(std::max(0.0, icp.getFitnessScore()));
-    report.maxAbsMm = cfg.icpMaxCorrespondenceDistanceMm;
+    report.maxAbsMm = feature.icpMaxCorrespondenceDistanceMm;
     std::cout << "icp_status name=" << report.name
               << " converged=" << (icp.hasConverged() ? 1 : 0) << '\n';
     return report;
@@ -1412,11 +1654,70 @@ OpeningResult solveOpeningsByProjectionAndLocalIcp(const MeasureConfig& cfg,
   //      Eigen::Vector3d rotatedScanCenter(rotatedScanCenterHp.x(), rotatedScanCenterHp.y(), rotatedScanCenterHp.z());
 		//// ����??��?���
 
-		CloudPtr localTemplate = cropCloud(templ, feature.projectionCrop); 
-        //CloudPtr localScan = cropCloud(rotatedScan, feature.projectionCrop);
-		CloudPtr localScan = cropCloud(scan, feature.projectionCrop);
-        Eigen::Matrix4f localTf;
-        FitReport fit = localIcp(localTemplate, localScan, cfg, localTf);
+		CropBox effectiveProjectionCrop = feature.projectionCrop;
+		CloudPtr localTemplate = cropCloud(templ, effectiveProjectionCrop);
+		CloudPtr localScan = cropCloud(scan, effectiveProjectionCrop);
+        if ((localTemplate->empty() || localScan->empty())
+            && feature.cylinderFeaturePoints.size() >= 3)
+        {
+            effectiveProjectionCrop =
+                buildProjectionCropFromFeaturePoints(feature.cylinderFeaturePoints, 50.0);
+            localTemplate = cropCloud(templ, effectiveProjectionCrop);
+            localScan = cropCloud(scan, effectiveProjectionCrop);
+            std::cout << "opening_projection_crop_autofix name=" << feature.name
+                      << " template_points=" << localTemplate->size()
+                      << " scan_points=" << localScan->size()
+                      << " min=(" << effectiveProjectionCrop.min.x() << ","
+                      << effectiveProjectionCrop.min.y() << ","
+                      << effectiveProjectionCrop.min.z() << ")"
+                      << " max=(" << effectiveProjectionCrop.max.x() << ","
+                      << effectiveProjectionCrop.max.y() << ","
+                      << effectiveProjectionCrop.max.z() << ")" << std::endl;
+        }
+        const std::size_t scanFullInCrop = countPointsInCropBox(scan, effectiveProjectionCrop);
+        const std::size_t templNearFeature0 =
+            feature.cylinderFeaturePoints.empty()
+                ? 0
+                : countPointsNear(templ,
+                                  feature.cylinderFeaturePoints[0],
+                                  feature.searchRadiusMm);
+        const std::size_t scanNearFeature0 =
+            feature.cylinderFeaturePoints.empty()
+                ? 0
+                : countPointsNear(scan,
+                                  feature.cylinderFeaturePoints[0],
+                                  feature.searchRadiusMm);
+        std::cout << "opening_projection_crop name=" << feature.name
+                  << " templ_total=" << templ->size()
+                  << " scan_total=" << scan->size()
+                  << " template_points=" << localTemplate->size()
+                  << " scan_points=" << localScan->size()
+                  << " templ_near_feature0=" << templNearFeature0
+                  << " scan_full_in_crop=" << scanFullInCrop
+                  << " scan_near_feature0=" << scanNearFeature0
+                  << " min=(" << effectiveProjectionCrop.min.x() << ","
+                  << effectiveProjectionCrop.min.y() << ","
+                  << effectiveProjectionCrop.min.z() << ")"
+                  << " max=(" << effectiveProjectionCrop.max.x() << ","
+                  << effectiveProjectionCrop.max.y() << ","
+                  << effectiveProjectionCrop.max.z() << ")" << std::endl;
+        Eigen::Matrix4f localTf = Eigen::Matrix4f::Identity();
+        FitReport fit;
+        fit.name = "opening_local_icp";
+        if (!localTemplate->empty() && !localScan->empty())
+        {
+            fit = localIcp(localTemplate, localScan, feature, localTf);
+        }
+        else
+        {
+            fit.rmsMm = std::numeric_limits<double>::quiet_NaN();
+            fit.maxAbsMm = std::numeric_limits<double>::quiet_NaN();
+            fit.inlierCount = 0;
+            std::cout << "opening_localIcp status=skip reason="
+                      << (localTemplate->empty() ? "template_crop_empty " : "")
+                      << (localScan->empty() ? "scan_crop_empty " : "")
+                      << "use_global_alignment=1" << std::endl;
+        }
 		std::cout << "opening_localIcp= " << fit.name
                           << " rmse=" << fit.rmsMm
                           << " maxrmse=" << fit.maxAbsMm
@@ -1424,7 +1725,13 @@ OpeningResult solveOpeningsByProjectionAndLocalIcp(const MeasureConfig& cfg,
 		// ����icp��?���
 
 
-		// �?�?���������?������?�������������
+		// 全局 ICP 已将 scan 对齐到模板坐标系；孔缘点稀疏时 local crop 常为空，在完整 scan 上搜最近点更稳。
+        const CloudConstPtr featureSearchCloud = scan;
+        std::cout << "opening_feature_search_cloud name=" << feature.name
+                  << " mode=full_scan"
+                  << " points=" << featureSearchCloud->size()
+                  << " scan_near_feature0=" << scanNearFeature0 << std::endl;
+
         CloudPtr featureCloud(new Cloud);
         for (std::size_t k = 0; k < feature.cylinderFeaturePoints.size(); ++k)
         {
@@ -1437,7 +1744,7 @@ OpeningResult solveOpeningsByProjectionAndLocalIcp(const MeasureConfig& cfg,
                 Eigen::Vector4f mapped = localTf * hp;
                 Eigen::Vector3d mappedFeature(mapped.x(), mapped.y(), mapped.z());
 				PointT np;
-				int status = nearestPoint(localScan, mappedFeature, feature.searchRadiusMm, np);
+				int status = nearestPoint(featureSearchCloud, mappedFeature, feature.searchRadiusMm, np);
 				if (status != 0)
 				{
 					continue;
@@ -1452,6 +1759,10 @@ OpeningResult solveOpeningsByProjectionAndLocalIcp(const MeasureConfig& cfg,
             {
             }
         }
+        std::cout << "opening_feature_search name=" << feature.name
+                  << " hits=" << featureCloud->size()
+                  << " of=" << feature.cylinderFeaturePoints.size()
+                  << " search_radius_mm=" << feature.searchRadiusMm << std::endl;
         if (featureCloud->size() < 5)
         {
             std::cout << "opening name=" << feature.name << " status=skip reason=feature_points_not_enough count=" << featureCloud->size() << std::endl;
@@ -1595,11 +1906,18 @@ OpeningResult solveOpeningsByProjectionAndLocalIcp_1(const MeasureConfig& cfg,
         CloudPtr localTemplate = cropCloud(templ, feature.projectionCrop);
         CloudPtr localScan = cropCloud(rotatedScan, feature.projectionCrop);
         Eigen::Matrix4f localTf;
-        FitReport fit = localIcp(localTemplate, localScan, cfg, localTf);
+        FitReport fit = localIcp(localTemplate, localScan, feature, localTf);
 		// ����icp��?���
 
 
 		// �?�?���������?������?�������������
+        const CloudConstPtr featureSearchCloud =
+            (localScan && !localScan->empty()) ? CloudConstPtr(localScan) : CloudConstPtr(rotatedScan);
+        const bool featureSearchUsesFullScan = featureSearchCloud == rotatedScan;
+        std::cout << "opening_feature_search_cloud name=" << feature.name
+                  << " mode=" << (featureSearchUsesFullScan ? "full_scan" : "local_crop")
+                  << " points=" << featureSearchCloud->size() << std::endl;
+
         CloudPtr featureCloud(new Cloud);
         for (std::size_t k = 0; k < feature.cylinderFeaturePoints.size(); ++k)
         {
@@ -1612,7 +1930,7 @@ OpeningResult solveOpeningsByProjectionAndLocalIcp_1(const MeasureConfig& cfg,
                 Eigen::Vector4f mapped = localTf * hp;
                 Eigen::Vector3d mappedFeature(mapped.x(), mapped.y(), mapped.z());
 				PointT np;
-				int status = nearestPoint(localScan, mappedFeature, feature.searchRadiusMm, np);
+				int status = nearestPoint(featureSearchCloud, mappedFeature, feature.searchRadiusMm, np);
 				if (status != 0)
 				{
 					continue;
@@ -2338,6 +2656,15 @@ void printFit(const FitReport& fit)
 }  // namespace
 
 MeasurePipeline::MeasurePipeline(MeasureConfig config) : config_(config) {}
+
+CloudPtr MeasurePipeline::preprocessScan(const CloudConstPtr& rawScan) const
+{
+    if (!rawScan || rawScan->empty())
+    {
+        throw std::runtime_error("input scan cloud is empty");
+    }
+    return preprocess(rawScan, config_);
+}
 
 MeasureResult MeasurePipeline::runWithScanCloud(const CloudConstPtr& rawScan)
 {

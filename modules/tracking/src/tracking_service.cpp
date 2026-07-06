@@ -1050,6 +1050,60 @@ InspectionResult TrackingService::inspectHolePointCloudFrames(
 #endif
 }
 
+InspectionResult TrackingService::inspectHolePointCloudFromSegmentPcdFiles(
+    const QStringList& segmentPcdPaths,
+    int sourcePointCount,
+    int inspectionPathId,
+    bool notifyListener) const
+{
+    ensureInspectionMeasurementMetaTypeRegistered();
+
+    InspectionResult result;
+    result.sourcePointCount = sourcePointCount;
+
+    if (segmentPcdPaths.isEmpty()) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral("Hole 测量没有可用的分段点云文件。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+#ifdef SCAN_TRACKING_HAS_HOLE_MEASUREMENT
+    const auto detection = scan_tracking::vision::hole::runHoleMeasurementFromSegmentPcdFiles(
+        segmentPcdPaths, inspectionPathId, sourcePointCount);
+
+    if (!detection.invoked) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = detection.message.isEmpty()
+            ? QStringLiteral("Hole 测量适配层未启动。")
+            : detection.message;
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    result.measurement = measurementFromHoleResult(detection);
+
+    if (!detection.ok) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 5);
+        result.message = detection.message.isEmpty()
+            ? QStringLiteral("Hole 测量算法失败。")
+            : detection.message;
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    result.resultCode = 1;
+    result.message = detection.message;
+    result.measureItemCount = countMeasuredItems(result.measurement);
+    return deliverInspectionResult(result, notifyListener);
+#else
+    result.resultCode = 2;
+    result.ngReasonWord0 = (1u << 4);
+    result.message = QStringLiteral("Hole 测量未编译（SCAN_TRACKING_ENABLE_HOLE_MEASUREMENT=OFF）。");
+    return deliverInspectionResult(result, notifyListener);
+#endif
+}
+
 InspectionResult TrackingService::inspectCodeRead(int inspectionPathId, bool notifyListener) const
 {
     ensureInspectionMeasurementMetaTypeRegistered();

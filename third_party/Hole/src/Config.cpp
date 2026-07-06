@@ -230,6 +230,10 @@ MeasureConfig loadConfig(const std::string& path)
         f.projectionDirection = vector3d(numbersForKey(block, "projection_direction"), f.projectionDirection).normalized();
         f.projectionImageWidth = intForKey(block, "projection_image_width", f.projectionImageWidth);
         f.projectionImageHeight = intForKey(block, "projection_image_height", f.projectionImageHeight);
+        f.icpMaxCorrespondenceDistanceMm = numberForKey(block, "icp_max_correspondence_distance_mm", cfg.icpMaxCorrespondenceDistanceMm);
+        f.icpMaxIterations = intForKey(block, "icp_max_iterations", cfg.icpMaxIterations);
+        f.icpTransformationEpsilon = numberForKey(block, "icp_transformation_epsilon", cfg.icpTransformationEpsilon);
+        f.icpFitnessEpsilon = numberForKey(block, "icp_fitness_epsilon", cfg.icpFitnessEpsilon);
         const auto projectionMin = numbersForKey(block, "projection_crop_min");
         const auto projectionMax = numbersForKey(block, "projection_crop_max");
         if (projectionMin.size() == 3)
@@ -246,7 +250,9 @@ MeasureConfig loadConfig(const std::string& path)
             f.cylinderFeaturePoints.push_back(Eigen::Vector3d(openingFeatureValues[i], openingFeatureValues[i + 1], openingFeatureValues[i + 2]));
         }
         std::cout << "opening_config name=" << f.name
-                  << " cylinder_feature_points=" << f.cylinderFeaturePoints.size() << std::endl;
+                  << " cylinder_feature_points=" << f.cylinderFeaturePoints.size()
+                  << " icp_max_correspondence_distance_mm=" << f.icpMaxCorrespondenceDistanceMm
+                  << " icp_max_iterations=" << f.icpMaxIterations << std::endl;
         cfg.templateOpenings.push_back(f);
     }
 

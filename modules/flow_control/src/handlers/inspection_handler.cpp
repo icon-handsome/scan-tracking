@@ -149,6 +149,7 @@ void StateMachine::executeInspectionTask()
             segmentClouds, totalPointCount, m_activeTask.inspectionPathId);
     } else if (inspectionType == scan_tracking::common::InspectionType::Hole) {
         QList<scan_tracking::mech_eye::PointCloudFrame> segmentClouds;
+        QStringList segmentPcdPaths;
         int totalPointCount = 0;
         if (!loadSegmentPointCloudsForInspection(
                 &segmentClouds, &totalPointCount, &segmentCount, &loadError)) {
@@ -178,8 +179,19 @@ void StateMachine::executeInspectionTask()
             return;
         }
 
-        trackingResult = m_tracking->inspectHolePointCloudFrames(
-            segmentClouds, totalPointCount, m_activeTask.inspectionPathId);
+        QString pcdLoadError;
+        const bool useSegmentPcdFiles = loadHoleSegmentPcdPathsForInspection(
+            &segmentPcdPaths, &totalPointCount, &segmentCount, &pcdLoadError);
+        if (useSegmentPcdFiles) {
+            trackingResult = m_tracking->inspectHolePointCloudFromSegmentPcdFiles(
+                segmentPcdPaths, totalPointCount, m_activeTask.inspectionPathId);
+        } else {
+            qInfo(LOG_FLOW).noquote()
+                << QStringLiteral("[Hole] 落盘分段不可用，回退内存点云：")
+                << pcdLoadError;
+            trackingResult = m_tracking->inspectHolePointCloudFrames(
+                segmentClouds, totalPointCount, m_activeTask.inspectionPathId);
+        }
     } else if (inspectionType == scan_tracking::common::InspectionType::InternalSurface) {
         QList<scan_tracking::mech_eye::PointCloudFrame> segmentClouds;
         int totalPointCount = 0;

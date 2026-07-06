@@ -32,6 +32,10 @@ struct OpeningFeature
     int projectionImageHeight{600};
     CropBox projectionCrop;
     std::vector<Eigen::Vector3d> cylinderFeaturePoints;
+    double icpMaxCorrespondenceDistanceMm{10.0};
+    int icpMaxIterations{80};
+    double icpTransformationEpsilon{1e-8};
+    double icpFitnessEpsilon{1e-6};
 };
 
 struct StraightEndpointPair

@@ -156,6 +156,13 @@ public:
         int inspectionPathId = 0,
         bool notifyListener = true) const;
 
+    /// Hole 正式检测：从落盘分段 PCD/PLY 逐文件加载（内存峰值更低）
+    InspectionResult inspectHolePointCloudFromSegmentPcdFiles(
+        const QStringList& segmentPcdPaths,
+        int sourcePointCount,
+        int inspectionPathId = 0,
+        bool notifyListener = true) const;
+
     /// 执行厚度综合检测（inner/outer 双点云，按路径 inspectionType=thickness）
     InspectionResult inspectThicknessPointClouds(
         const scan_tracking::mech_eye::PointCloudFrame& innerCloud,

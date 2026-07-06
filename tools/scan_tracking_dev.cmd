@@ -4,6 +4,7 @@ setlocal EnableExtensions
 rem ScanTracking dev helper (CMakePresets + README). Used by Cursor/VS Code tasks.
 
 for %%I in ("%~dp0..") do set "ROOT=%%~fI"
+cd /d "%ROOT%"
 set "CMAKE=C:\Program Files\CMake\bin\cmake.exe"
 set "PRESET_DEBUG=win-msvc2019-qtcore-ninja-debug"
 set "PRESET_RELEASE=win-msvc2019-qtcore-ninja-release"
