@@ -833,6 +833,92 @@ bool savePointCloudFrameToPcd(const PointCloudFrame& frame, const QString& absol
     return true;
 }
 
+namespace {
+
+bool pointCloudPathUsesPly(const QString& absolutePath)
+{
+    return QFileInfo(absolutePath).suffix().compare(QStringLiteral("ply"), Qt::CaseInsensitive) == 0;
+}
+
+}  // namespace
+
+bool savePointCloudFrameToBinaryFile(const PointCloudFrame& frame, const QString& absolutePath)
+{
+    if (pointCloudPathUsesPly(absolutePath)) {
+        return savePointCloudFrameToPly(frame, absolutePath);
+    }
+    return savePointCloudFrameToPcd(frame, absolutePath);
+}
+
+bool mergePointCloudFramesToBinaryFile(
+    const QList<PointCloudFrame>& frames,
+    const QString& absolutePath,
+    int* outPointCount)
+{
+    if (pointCloudPathUsesPly(absolutePath)) {
+        PclXyzCloud cloud;
+        int mergedPointCount = 0;
+        for (const PointCloudFrame& frame : frames) {
+            if (!frame.isValid() || !frame.pointsXYZ || frame.pointCount <= 0) {
+                continue;
+            }
+
+            const auto& points = *frame.pointsXYZ;
+            const int availablePointCount = static_cast<int>(points.size() / 3);
+            const int pointCount = std::min(frame.pointCount, availablePointCount);
+            if (pointCount <= 0) {
+                continue;
+            }
+
+            cloud.points.reserve(cloud.points.size() + static_cast<std::size_t>(pointCount));
+            for (int index = 0; index < pointCount; ++index) {
+                const auto base = static_cast<std::size_t>(index * 3);
+                const float x = points[base];
+                const float y = points[base + 1];
+                const float z = points[base + 2];
+                if (!isFinitePoint(x, y, z)) {
+                    continue;
+                }
+                cloud.points.emplace_back(x, y, z);
+            }
+            mergedPointCount += pointCount;
+        }
+
+        if (cloud.points.empty()) {
+            qWarning(LOG_POINT_CLOUD_IO) << QStringLiteral("mergePointCloudFramesToBinaryFile：合并结果为空");
+            return false;
+        }
+
+        PointCloudFrame mergedFrame;
+        mergedFrame.pointsXYZ = std::make_shared<std::vector<float>>();
+        mergedFrame.pointsXYZ->reserve(cloud.points.size() * 3);
+        for (const auto& point : cloud.points) {
+            mergedFrame.pointsXYZ->push_back(point.x);
+            mergedFrame.pointsXYZ->push_back(point.y);
+            mergedFrame.pointsXYZ->push_back(point.z);
+        }
+        mergedFrame.pointCount = static_cast<int>(cloud.points.size());
+        mergedFrame.width = mergedFrame.pointCount;
+        mergedFrame.height = 1;
+
+        if (!savePointCloudFrameToPly(mergedFrame, absolutePath)) {
+            return false;
+        }
+
+        if (outPointCount != nullptr) {
+            *outPointCount = mergedFrame.pointCount;
+        }
+        qInfo(LOG_POINT_CLOUD_IO).noquote()
+            << QStringLiteral("多段点云已合并为 PLY：") << absolutePath
+            << QStringLiteral(" validPoints=") << mergedFrame.pointCount
+            << QStringLiteral(" sourcePoints=") << mergedPointCount
+            << QStringLiteral(" segmentCount=") << frames.size();
+        return true;
+    }
+
+    return mergePointCloudFramesToPcd(frames, absolutePath, outPointCount);
+}
+
 bool convertTxtPointCloudToPcd(const QString& txtPath, const QString& pcdPath)
 {
     if (txtPath.trimmed().isEmpty() || pcdPath.trimmed().isEmpty()) {

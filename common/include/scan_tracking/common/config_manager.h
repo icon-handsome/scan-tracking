@@ -85,18 +85,32 @@ struct FlowControlConfig {
     bool algorithmBypassEnabled = false;
     /// 第一条扫描路径联调：0=不暂停跑完全流程；N>0 时路径1第 N 点采集且 CXP 落盘完成后暂停，拒绝后续 Trig_ScanSegment
     int firstPathPauseAfterPoint = 0;
+    /// true=仅执行 scan_paths 中 inspectionType=internal_surface 的路径（PLC 内表面联调用）；false=按 JSON executionConfig 正常跑全流程
+    bool internalSurfaceOnlyEnabled = false;
     /// @deprecated 分段点云/海康已改内存缓存；仅 LatencyTest 等调试落盘仍可读此路径
     QString scanCacheDirectory;
     /// @deprecated 不再用于分段 PLY 生命周期
     bool retainSegmentPly = true;
 };
 
+/// 点云落盘格式：pcd=二进制 PCD；ply=二进制 little-endian PLY
+enum class PointCloudSaveFormat {
+    Pcd,
+    Ply,
+};
+
+PointCloudSaveFormat pointCloudSaveFormatFromString(const QString& value);
+QString pointCloudSaveFormatToString(PointCloudSaveFormat format);
+QString pointCloudSaveFormatExtension(PointCloudSaveFormat format);
+
 /// 每段扫描分组落盘：Mech PLY + CXP 2D + 矩阵/meta 均写入 output/session_*/pathN_segMM/
 struct SegmentCaptureExportConfig {
     bool enabled = false;
     QString outputRoot = QStringLiteral("output");
-    /// false 时不落盘任何 PLY（段级 raw/stitched、Trig_Inspection 融合点云）；矩阵、CXP 2D 与 meta 仍按 enabled 落盘
+    /// false 时不落盘任何点云（段级 raw/stitched、Trig_Inspection 融合点云）；矩阵、CXP 2D 与 meta 仍按 enabled 落盘
     bool saveRawPointCloud = true;
+    /// 点云落盘格式：pcd（默认，PCL binary）或 ply（binary_little_endian xyz）
+    PointCloudSaveFormat pointCloudSaveFormat = PointCloudSaveFormat::Pcd;
 };
 
 /// Mech-Eye 点云 IPC 后处理（深度裁剪 / 离群 / 平滑 / 降采样）

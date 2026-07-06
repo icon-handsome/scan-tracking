@@ -218,6 +218,25 @@ const SelfCheckConfig& ConfigManager::selfCheckConfig() const
     return m_selfCheckConfig;
 }
 
+PointCloudSaveFormat pointCloudSaveFormatFromString(const QString& value)
+{
+    const QString normalized = value.trimmed().toLower();
+    if (normalized == QStringLiteral("ply")) {
+        return PointCloudSaveFormat::Ply;
+    }
+    return PointCloudSaveFormat::Pcd;
+}
+
+QString pointCloudSaveFormatToString(PointCloudSaveFormat format)
+{
+    return format == PointCloudSaveFormat::Ply ? QStringLiteral("ply") : QStringLiteral("pcd");
+}
+
+QString pointCloudSaveFormatExtension(PointCloudSaveFormat format)
+{
+    return format == PointCloudSaveFormat::Ply ? QStringLiteral("ply") : QStringLiteral("pcd");
+}
+
 InspectionType inspectionTypeFromString(const QString& value)
 {
     const QString normalized = value.trimmed().toLower();
@@ -510,12 +529,14 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("simulatedProcessingMs", 300);
     settings.setValue("algorithmBypassEnabled", false);
     settings.setValue("firstPathPauseAfterPoint", 0);
+    settings.setValue("internalSurfaceOnlyEnabled", false);
     settings.endGroup();
 
     settings.beginGroup("SegmentCaptureExport");
     settings.setValue("enabled", true);
     settings.setValue("outputRoot", QStringLiteral("output"));
     settings.setValue("saveRawPointCloud", true);
+    settings.setValue("pointCloudSaveFormat", QStringLiteral("pcd"));
     settings.endGroup();
 
     settings.beginGroup("Tracking");
@@ -760,6 +781,8 @@ void ConfigManager::load(const QString& filePath)
         settings.value("algorithmBypassEnabled", false).toBool();
     m_flowControlConfig.firstPathPauseAfterPoint =
         qMax(0, settings.value("firstPathPauseAfterPoint", 0).toInt());
+    m_flowControlConfig.internalSurfaceOnlyEnabled =
+        settings.value("internalSurfaceOnlyEnabled", false).toBool();
     m_flowControlConfig.scanCacheDirectory = settings.value("scanCacheDirectory").toString().trimmed();
     m_flowControlConfig.retainSegmentPly = settings.value("retainSegmentPly", true).toBool();
     settings.endGroup();
@@ -771,6 +794,12 @@ void ConfigManager::load(const QString& filePath)
             << QStringLiteral("（路径1第 N 点 CXP+梅卡落盘后暂停；改 0 或调大 N 后重启 IPC 再继续）");
     }
 
+    if (m_flowControlConfig.internalSurfaceOnlyEnabled) {
+        qInfo(LOG_CONFIG).noquote()
+            << QStringLiteral("内表面单路径模式已启用（[FlowControl] internalSurfaceOnlyEnabled=true）："
+                              "将仅执行 inspectionType=internal_surface 的扫描路径。");
+    }
+
     settings.beginGroup("SegmentCaptureExport");
     m_segmentCaptureExportConfig.enabled = settings.value("enabled", false).toBool();
     m_segmentCaptureExportConfig.outputRoot = resolveConfigRelativePath(
@@ -778,6 +807,8 @@ void ConfigManager::load(const QString& filePath)
         m_configFilePath);
     m_segmentCaptureExportConfig.saveRawPointCloud =
         settings.value("saveRawPointCloud", true).toBool();
+    m_segmentCaptureExportConfig.pointCloudSaveFormat = pointCloudSaveFormatFromString(
+        settings.value("pointCloudSaveFormat", QStringLiteral("pcd")).toString());
     settings.endGroup();
 
     settings.beginGroup("PointCloudProcessing");
@@ -1131,6 +1162,33 @@ void ConfigManager::loadScanPathsConfig(const QString& jsonFilePath)
     const QJsonObject turntableObj = root.value("turntableConfig").toObject();
     m_scanPathsConfig.turntableEnabled = turntableObj.value("enabled").toBool(true);
     
+    if (m_flowControlConfig.internalSurfaceOnlyEnabled) {
+        std::vector<int> internalSurfacePathIds;
+        internalSurfacePathIds.reserve(m_scanPathsConfig.scanPaths.size());
+        for (const auto& path : m_scanPathsConfig.scanPaths) {
+            if (path.enabled && path.inspectionType == InspectionType::InternalSurface) {
+                internalSurfacePathIds.push_back(path.pathId);
+            }
+        }
+
+        if (internalSurfacePathIds.empty()) {
+            qWarning(LOG_CONFIG).noquote()
+                << QStringLiteral("internalSurfaceOnlyEnabled=true 但未找到启用的 internal_surface 路径，"
+                                  "多路径扫描将不可用。");
+        } else {
+            m_scanPathsConfig.executeAllPaths = false;
+            m_scanPathsConfig.selectedPathIds = std::move(internalSurfacePathIds);
+            QStringList pathLabels;
+            pathLabels.reserve(static_cast<int>(m_scanPathsConfig.selectedPathIds.size()));
+            for (int pathId : m_scanPathsConfig.selectedPathIds) {
+                pathLabels << QStringLiteral("path%1").arg(pathId);
+            }
+            qInfo(LOG_CONFIG).noquote()
+                << QStringLiteral("内表面单路径模式：已覆盖 executionConfig，仅执行 ")
+                << pathLabels.join(QStringLiteral(", "));
+        }
+    }
+
     // 6. 验证配置
     QString validationError;
     if (!validateScanPathsConfig(&validationError)) {

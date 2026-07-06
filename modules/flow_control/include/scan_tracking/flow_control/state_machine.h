@@ -607,11 +607,12 @@ private:
 
     void persistLastPoseStitchArtifactToDisk() const;
 
-    /// 综合检测合并点云落盘（path1_merged_Nsegs_inspection.ply）
-    void persistMergedInspectionPointCloudToDisk(
+    /// 综合检测路径级点云落盘：原始合并 + 拼接后合并（二进制 PLY/PCD）
+    void persistPathLevelMergedPointCloudsToDisk(
         int pathId,
         int mergedSegmentCount,
-        const scan_tracking::mech_eye::PointCloudFrame& mergedCloud) const;
+        const scan_tracking::mech_eye::PointCloudFrame& rawMergedCloud,
+        const scan_tracking::mech_eye::PointCloudFrame& stitchedMergedCloud) const;
 
     bool ensureSegmentCaptureExportSessionRoot();
     void exportSegmentCxp2dImages(
@@ -773,6 +774,7 @@ private:
     
     // === 多路径支持：二维缓存结构（路径ID → 段号 → 数据） ===
     QMap<int, QMap<int, scan_tracking::mech_eye::CaptureResult>> m_pathSegmentCaptureResults;  // 多路径点云缓存
+    QMap<int, QMap<int, scan_tracking::mech_eye::PointCloudFrame>> m_pathSegmentRawPointClouds;  // 采集原始点云（位姿拼接前）
     QMap<int, QMap<int, scan_tracking::vision::MultiCameraCaptureBundle>> m_pathSegmentCaptureBundles;  // 多路径视觉 bundle
     int m_currentPathId = 1;                                // 当前路径ID（自动递增）
     QSet<int> m_currentPathSegments;                        // 当前路径已缓存的段号集合（用于检测重复）

@@ -2298,6 +2298,8 @@ void StateMachine::commitScanSegmentCaptureImmediate(
         std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
         const scan_tracking::mech_eye::CaptureResult cachedResult = cloneCaptureResult(result);
         m_pathSegmentCaptureResults[pathId][segmentIndex] = cachedResult;
+        m_pathSegmentRawPointClouds[pathId][segmentIndex] =
+            clonePointCloudFrame(cachedResult.pointCloud);
         m_pathSegmentCaptureBundles[pathId][segmentIndex] =
             cloneCaptureBundleForCache(bundle, cachedResult.pointCloud);
     }
@@ -3146,19 +3148,29 @@ int StateMachine::resolvePathIdForIncomingSegment(int segmentIndex) const
         return m_currentPathId > 0 ? m_currentPathId : 1;
     }
 
+    // 仅一条启用路径时（如 internalSurfaceOnlyEnabled）：PLC 段号 1..N 全部映射到该路径，
+    // 避免 m_currentPathId 默认 1 导致误走 path1。
+    if (pathIds.size() == 1) {
+        return pathIds.front();
+    }
+
+    const bool currentPathEnabled =
+        m_currentPathId > 0 && pathIds.contains(m_currentPathId);
+    const int activePathId = currentPathEnabled ? m_currentPathId : pathIds.front();
+
     if (!m_currentPathSegments.contains(segmentIndex)) {
-        return m_currentPathId > 0 ? m_currentPathId : pathIds.front();
+        return activePathId;
     }
 
     if (!isCurrentPathSegmentSetComplete()) {
-        return m_currentPathId;
+        return activePathId;
     }
 
-    const int currentIndex = pathIds.indexOf(m_currentPathId);
+    const int currentIndex = pathIds.indexOf(activePathId);
     if (currentIndex >= 0 && currentIndex + 1 < pathIds.size()) {
         return pathIds[currentIndex + 1];
     }
-    return m_currentPathId;
+    return activePathId;
 }
 
 int StateMachine::totalCachedPointCloudCount() const
@@ -3206,6 +3218,13 @@ void StateMachine::clearPathSegmentCache(int pathId)
     }
     m_pathSegmentCalibrationMatrices.remove(pathId);
     m_pathSegmentPoseStitchRecords.remove(pathId);
+    if (m_pathSegmentRawPointClouds.contains(pathId)) {
+        for (auto segIt = m_pathSegmentRawPointClouds[pathId].begin();
+             segIt != m_pathSegmentRawPointClouds[pathId].end(); ++segIt) {
+            scan_tracking::mech_eye::releasePointCloudFrameBuffers(&segIt.value());
+        }
+        m_pathSegmentRawPointClouds.remove(pathId);
+    }
     if (m_currentPathId == pathId) {
         m_currentPathSegments.clear();
     }
@@ -3415,12 +3434,62 @@ bool StateMachine::loadSegmentPointCloudsForInspection(
         ensurePoseStitchRunRootDirectory();
     }
     if (scan_tracking::common::segmentCaptureExportEnabled()) {
-        scan_tracking::mech_eye::PointCloudFrame mergedCloud;
-        mergedCloud.pointsXYZ = mergedPoints;
-        mergedCloud.pointCount = mergedPointCount;
-        mergedCloud.width = mergedPointCount;
-        mergedCloud.height = 1;
-        persistMergedInspectionPointCloudToDisk(inspectPathId, mergedSegmentCount, mergedCloud);
+        scan_tracking::mech_eye::PointCloudFrame stitchedMergedCloud;
+        stitchedMergedCloud.pointsXYZ = mergedPoints;
+        stitchedMergedCloud.pointCount = mergedPointCount;
+        stitchedMergedCloud.width = mergedPointCount;
+        stitchedMergedCloud.height = 1;
+
+        scan_tracking::mech_eye::PointCloudFrame rawMergedCloud;
+        int rawMergedPointCount = 0;
+        int rawMergedSegmentCount = 0;
+        auto rawMergedPoints = std::make_shared<std::vector<float>>();
+        {
+            std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
+            if (m_pathSegmentRawPointClouds.contains(inspectPathId)) {
+                const auto& rawSegments = m_pathSegmentRawPointClouds[inspectPathId];
+                QList<int> rawSegmentIndices = rawSegments.keys();
+                std::sort(rawSegmentIndices.begin(), rawSegmentIndices.end());
+                for (int segmentIndex : rawSegmentIndices) {
+                    const auto& cloud = rawSegments[segmentIndex];
+                    if (!cloud.isValid() || !cloud.pointsXYZ || cloud.pointCount <= 0) {
+                        continue;
+                    }
+
+                    const int availablePointCount =
+                        static_cast<int>(cloud.pointsXYZ->size() / 3);
+                    const int pointCount = std::min(cloud.pointCount, availablePointCount);
+                    if (pointCount <= 0) {
+                        continue;
+                    }
+
+                    rawMergedPoints->reserve(
+                        rawMergedPoints->size() + static_cast<std::size_t>(pointCount * 3));
+                    for (int index = 0; index < pointCount; ++index) {
+                        const auto base = static_cast<std::size_t>(index * 3);
+                        rawMergedPoints->push_back((*cloud.pointsXYZ)[base]);
+                        rawMergedPoints->push_back((*cloud.pointsXYZ)[base + 1]);
+                        rawMergedPoints->push_back((*cloud.pointsXYZ)[base + 2]);
+                    }
+
+                    rawMergedPointCount += pointCount;
+                    ++rawMergedSegmentCount;
+                }
+            }
+        }
+
+        if (rawMergedPointCount > 0 && rawMergedSegmentCount > 0) {
+            rawMergedCloud.pointsXYZ = rawMergedPoints;
+            rawMergedCloud.pointCount = rawMergedPointCount;
+            rawMergedCloud.width = rawMergedPointCount;
+            rawMergedCloud.height = 1;
+        }
+
+        persistPathLevelMergedPointCloudsToDisk(
+            inspectPathId,
+            mergedSegmentCount,
+            rawMergedCloud,
+            stitchedMergedCloud);
     }
 
     if (totalPointCount != nullptr) {
@@ -5021,16 +5090,23 @@ void StateMachine::resetScanSegmentCache()
         }
     }
     m_pathSegmentCaptureResults.clear();
+    for (auto pathIt = m_pathSegmentRawPointClouds.begin();
+         pathIt != m_pathSegmentRawPointClouds.end(); ++pathIt) {
+        for (auto segIt = pathIt->begin(); segIt != pathIt->end(); ++segIt) {
+            scan_tracking::mech_eye::releasePointCloudFrameBuffers(&segIt.value());
+        }
+    }
+    m_pathSegmentRawPointClouds.clear();
     
     // 重置路径上下文
-    m_currentPathId = 1;
+    m_currentPathId = firstEnabledScanPathId();
     m_currentPathSegments.clear();
     clearFirstPathStepPauseLatch();
 
     if (totalCacheSize > 0) {
         qInfo(LOG_FLOW).noquote()
             << QStringLiteral("[多路径] 已清空内存点云缓存，总条目数=") << totalCacheSize
-            << QStringLiteral("，路径ID已重置为1");
+            << QStringLiteral("，路径ID已重置为") << m_currentPathId;
     }
 
     m_pathSegmentCalibrationMatrices.clear();
@@ -5561,24 +5637,32 @@ void StateMachine::persistLastPoseStitchArtifactToDisk() const
                                  .arg(artifact.segmentIndex);
 
     const QString cloudDirectory = poseStitchPointCloudOutputDirectory(m_poseStitchRunRootDirectory);
-    const QString plyFilePath = QDir(cloudDirectory).filePath(baseName + QStringLiteral("_stitched.ply"));
+    const QString ext = configManager != nullptr
+        ? scan_tracking::common::pointCloudSaveFormatExtension(
+              configManager->segmentCaptureExportConfig().pointCloudSaveFormat)
+        : QStringLiteral("pcd");
+    const QString stitchedFilePath =
+        QDir(cloudDirectory).filePath(baseName + QStringLiteral("_stitched.") + ext);
 
-    if (!scan_tracking::mech_eye::savePointCloudFrameToPly(artifact.stitchedPointCloud, plyFilePath)) {
+    if (!scan_tracking::mech_eye::savePointCloudFrameToBinaryFile(
+            artifact.stitchedPointCloud, stitchedFilePath)) {
         qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("[PoseStitchOutput] 写入点云失败：") << plyFilePath;
+            << QStringLiteral("[PoseStitchOutput] 写入点云失败：") << stitchedFilePath;
     } else {
         qInfo(LOG_FLOW).noquote()
-            << QStringLiteral("[PoseStitchOutput] 拼接点云已写入") << plyFilePath
-            << QStringLiteral(" 点数=") << artifact.stitchedPointCloud.pointCount;
+            << QStringLiteral("[PoseStitchOutput] 拼接点云已写入") << stitchedFilePath
+            << QStringLiteral(" 点数=") << artifact.stitchedPointCloud.pointCount
+            << QStringLiteral(" format=") << ext;
     }
 
     scan_tracking::mech_eye::releasePointCloudFrameBuffers(&artifact.stitchedPointCloud);
 }
 
-void StateMachine::persistMergedInspectionPointCloudToDisk(
+void StateMachine::persistPathLevelMergedPointCloudsToDisk(
     int pathId,
     int mergedSegmentCount,
-    const scan_tracking::mech_eye::PointCloudFrame& mergedCloud) const
+    const scan_tracking::mech_eye::PointCloudFrame& rawMergedCloud,
+    const scan_tracking::mech_eye::PointCloudFrame& stitchedMergedCloud) const
 {
     if (!scan_tracking::common::segmentCaptureExportEnabled()) {
         return;
@@ -5589,19 +5673,28 @@ void StateMachine::persistMergedInspectionPointCloudToDisk(
         return;
     }
 
-    if (pathId <= 0 || mergedSegmentCount <= 0 || !mergedCloud.isValid()) {
+    if (pathId <= 0 || mergedSegmentCount <= 0) {
         qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("[PoseStitchOutput] 跳过融合点云落盘：无效输入 pathId=") << pathId
+            << QStringLiteral("[SegmentCaptureExport] 跳过路径级点云落盘：无效输入 pathId=") << pathId
             << QStringLiteral(" 段数=") << mergedSegmentCount;
+        return;
+    }
+
+    if (!rawMergedCloud.isValid() && !stitchedMergedCloud.isValid()) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[SegmentCaptureExport] 跳过路径级点云落盘：原始与拼接点云均无效 pathId=")
+            << pathId;
         return;
     }
 
     if (m_poseStitchRunRootDirectory.isEmpty()) {
         qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("[PoseStitchOutput] 跳过融合点云落盘：运行输出目录未就绪");
+            << QStringLiteral("[SegmentCaptureExport] 跳过路径级点云落盘：运行输出目录未就绪");
         return;
     }
 
+    const QString ext = scan_tracking::common::pointCloudSaveFormatExtension(
+        configManager->segmentCaptureExportConfig().pointCloudSaveFormat);
     const QString timestamp = m_poseStitchOutputTimestamp.isEmpty()
         ? poseStitchOutputTimestamp()
         : m_poseStitchOutputTimestamp;
@@ -5609,29 +5702,34 @@ void StateMachine::persistMergedInspectionPointCloudToDisk(
                                  .arg(timestamp)
                                  .arg(pathId)
                                  .arg(mergedSegmentCount);
-
     const QString cloudDirectory = poseStitchPointCloudOutputDirectory(m_poseStitchRunRootDirectory);
-    const bool usePcdExport = configManager->inspectionTypeForPath(pathId)
-        == scan_tracking::common::InspectionType::InternalSurface;
-    const QString cloudFilePath = QDir(cloudDirectory).filePath(
-        baseName
-        + (usePcdExport ? QStringLiteral("_inspection.pcd")
-                        : QStringLiteral("_inspection.ply")));
 
-    const bool saved = usePcdExport
-        ? scan_tracking::mech_eye::savePointCloudFrameToPcd(mergedCloud, cloudFilePath)
-        : scan_tracking::mech_eye::savePointCloudFrameToPly(mergedCloud, cloudFilePath);
-    if (!saved) {
-        qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("[PoseStitchOutput] 写入检测融合点云失败：") << cloudFilePath;
-        return;
-    }
+    auto saveCloud = [&](const scan_tracking::mech_eye::PointCloudFrame& cloud,
+                         const QString& suffix,
+                         const QString& roleLabel) -> bool {
+        if (!cloud.isValid()) {
+            return false;
+        }
+        const QString cloudFilePath =
+            QDir(cloudDirectory).filePath(baseName + suffix + QStringLiteral(".") + ext);
+        if (!scan_tracking::mech_eye::savePointCloudFrameToBinaryFile(cloud, cloudFilePath)) {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("[SegmentCaptureExport] 写入路径级") << roleLabel
+                << QStringLiteral("点云失败：") << cloudFilePath;
+            return false;
+        }
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[SegmentCaptureExport] 路径级") << roleLabel
+            << QStringLiteral("点云已写入") << cloudFilePath
+            << QStringLiteral(" 点数=") << cloud.pointCount
+            << QStringLiteral(" 参与段数=") << mergedSegmentCount
+            << QStringLiteral(" format=") << ext;
+        return true;
+    };
 
-    qInfo(LOG_FLOW).noquote()
-        << QStringLiteral("[PoseStitchOutput] 检测融合点云已写入") << cloudFilePath
-        << QStringLiteral(" 点数=") << mergedCloud.pointCount
-        << QStringLiteral(" 参与段数=") << mergedSegmentCount
-        << QStringLiteral(" format=") << (usePcdExport ? QStringLiteral("pcd") : QStringLiteral("ply"));
+    saveCloud(rawMergedCloud, QStringLiteral("_raw"), QStringLiteral("原始"));
+    saveCloud(stitchedMergedCloud, QStringLiteral("_stitched"), QStringLiteral("拼接"));
+    saveCloud(stitchedMergedCloud, QStringLiteral("_inspection"), QStringLiteral("检测融合"));
 }
 
 bool StateMachine::ensureSegmentCaptureExportSessionRoot()
@@ -5735,9 +5833,12 @@ void StateMachine::persistSegmentCaptureExportGroup(
     bool comparisonSaved = false;
     bool stitchedSaved = false;
     if (configManager->segmentCaptureExportConfig().saveRawPointCloud) {
+        const QString ext = scan_tracking::common::pointCloudSaveFormatExtension(
+            configManager->segmentCaptureExportConfig().pointCloudSaveFormat);
         if (rawPointCloud.isValid()) {
-            const QString rawPath = QDir(groupDir).filePath(QStringLiteral("pointcloud_raw.ply"));
-            rawSaved = scan_tracking::mech_eye::savePointCloudFrameToPly(rawPointCloud, rawPath);
+            const QString rawPath =
+                QDir(groupDir).filePath(QStringLiteral("pointcloud_raw.") + ext);
+            rawSaved = scan_tracking::mech_eye::savePointCloudFrameToBinaryFile(rawPointCloud, rawPath);
             if (!rawSaved) {
                 qWarning(LOG_FLOW).noquote()
                     << QStringLiteral("[SegmentCaptureExport] 原始点云写入失败：") << rawPath;
@@ -5745,9 +5846,10 @@ void StateMachine::persistSegmentCaptureExportGroup(
         }
 
         if (comparisonPointCloud.isValid()) {
-            const QString comparisonPath = QDir(groupDir).filePath(QStringLiteral("pointcloud_comparison.ply"));
-            comparisonSaved =
-                scan_tracking::mech_eye::savePointCloudFrameToPly(comparisonPointCloud, comparisonPath);
+            const QString comparisonPath =
+                QDir(groupDir).filePath(QStringLiteral("pointcloud_comparison.") + ext);
+            comparisonSaved = scan_tracking::mech_eye::savePointCloudFrameToBinaryFile(
+                comparisonPointCloud, comparisonPath);
             if (!comparisonSaved) {
                 qWarning(LOG_FLOW).noquote()
                     << QStringLiteral("[SegmentCaptureExport] 比较点云写入失败：") << comparisonPath;
@@ -5755,9 +5857,10 @@ void StateMachine::persistSegmentCaptureExportGroup(
         }
 
         if (stitchedPointCloud.isValid()) {
-            const QString stitchedPath = QDir(groupDir).filePath(QStringLiteral("pointcloud_stitched.ply"));
-            stitchedSaved =
-                scan_tracking::mech_eye::savePointCloudFrameToPly(stitchedPointCloud, stitchedPath);
+            const QString stitchedPath =
+                QDir(groupDir).filePath(QStringLiteral("pointcloud_stitched.") + ext);
+            stitchedSaved = scan_tracking::mech_eye::savePointCloudFrameToBinaryFile(
+                stitchedPointCloud, stitchedPath);
             if (!stitchedSaved) {
                 qWarning(LOG_FLOW).noquote()
                     << QStringLiteral("[SegmentCaptureExport] 拼接点云写入失败：") << stitchedPath;
@@ -5773,9 +5876,9 @@ void StateMachine::persistSegmentCaptureExportGroup(
         << QStringLiteral(" CXP右=") << (cxpExportMeta.right.saved ? QStringLiteral("OK") : QStringLiteral("FAIL"))
         << QStringLiteral(" 左pixelMd5=") << cxpExportMeta.left.pixelMd5
         << QStringLiteral(" 右pixelMd5=") << cxpExportMeta.right.pixelMd5
-        << QStringLiteral(" 原始PLY=") << (rawSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"))
-        << QStringLiteral(" 比较PLY=") << (comparisonSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"))
-        << QStringLiteral(" 拼接PLY=") << (stitchedSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"));
+        << QStringLiteral(" 原始点云=") << (rawSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"))
+        << QStringLiteral(" 比较点云=") << (comparisonSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"))
+        << QStringLiteral(" 拼接点云=") << (stitchedSaved ? QStringLiteral("OK") : QStringLiteral("SKIP"));
 }
 
 /**
@@ -5991,6 +6094,19 @@ bool StateMachine::validateScanSegmentRequest(const QVector<quint16>& commandBlo
     }
 
     const int targetPathId = resolvePathIdForIncomingSegment(segmentIndex);
+    const QVector<int> enabledPathIds = enabledScanPathIds();
+    if (!enabledPathIds.isEmpty() && enabledPathIds.indexOf(targetPathId) < 0) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral(
+                "扫描段号无效：段号=%1 解析到未启用路径 %2").arg(segmentIndex).arg(targetPathId);
+        }
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("拒绝 Trig_ScanSegment：路径未启用")
+            << QStringLiteral(" 段号=") << segmentIndex
+            << QStringLiteral(" 路径=") << targetPathId;
+        return false;
+    }
+
     const int segmentTotal = segmentTotalForPath(targetPathId);
     const int maxSegmentIndex = segmentTotal > 0 ? qMin(segmentTotal, kMaxScanSegmentIndex)
                                                  : kMaxScanSegmentIndex;

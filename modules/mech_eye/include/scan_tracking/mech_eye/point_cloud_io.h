@@ -73,6 +73,19 @@ bool convertTxtPointCloudToPly(const QString& txtPath, const QString& plyPath);
 bool savePointCloudFrameToPcd(const PointCloudFrame& frame, const QString& absolutePath);
 
 /**
+ * @brief 按路径后缀保存二进制点云（.pcd → PCL binary；.ply → binary_little_endian xyz；缺省后缀按 pcd）
+ */
+bool savePointCloudFrameToBinaryFile(const PointCloudFrame& frame, const QString& absolutePath);
+
+/**
+ * @brief 按序合并多段 PointCloudFrame 并保存为二进制 PCD 或 PLY（由 absolutePath 后缀决定）
+ */
+bool mergePointCloudFramesToBinaryFile(
+    const QList<PointCloudFrame>& frames,
+    const QString& absolutePath,
+    int* outPointCount = nullptr);
+
+/**
  * @brief 将 TXT 点云（每行 x y z）转换为 binary PCD
  */
 bool convertTxtPointCloudToPcd(const QString& txtPath, const QString& pcdPath);
