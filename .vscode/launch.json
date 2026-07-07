@@ -2,37 +2,42 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug scan-tracking",
-      "type": "lldb",
+      "name": "Debug scan-tracking (MSVC)",
+      "type": "cppvsdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/scan-tracking.exe",
       "args": [],
       "cwd": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug",
-      "env": {
-        "PATH": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/mech_eye_api;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/ThirdParty;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/hik_mvs_runtime;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/OpenNI2;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/OpenNI2/Drivers;C:/Qt/5.15.2/msvc2019_64/bin;C:/Program Files/PCL 1.12.0/bin;C:/Program Files/PCL 1.12.0/3rdParty/VTK/bin;C:/Program Files/OpenNI2/Redist;${workspaceFolder}/third_party/opencv-3.4.3-vc14_vc15/opencv/build/x64/vc15/bin;${workspaceFolder}/third_party/Mech-Eye SDK-2.5.4/API/dll;${workspaceFolder}/third_party/Mech-Eye SDK-2.5.4/API/dll_debug;${env:PATH}"
-      },
-      "stdio": "integratedTerminal",
+      "environment": [
+        {
+          "name": "PATH",
+          "value": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/mech_eye_api;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/ThirdParty;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/hik_mvs_runtime;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/OpenNI2;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/OpenNI2/Drivers;C:/Qt/5.15.2/msvc2019_64/bin;C:/Program Files/PCL 1.12.0/bin;C:/Program Files/PCL 1.12.0/3rdParty/VTK/bin;C:/Program Files/OpenNI2/Redist;${workspaceFolder}/third_party/opencv-3.4.3-vc14_vc15/opencv/build/x64/vc15/bin;${workspaceFolder}/third_party/Mech-Eye SDK-2.5.4/API/dll;${workspaceFolder}/third_party/Mech-Eye SDK-2.5.4/API/dll_debug;${env:PATH}"
+        }
+      ],
+      "console": "integratedTerminal",
       "preLaunchTask": "Build (Ninja Debug)"
     },
     {
-      "name": "Release scan-tracking",
-      "type": "lldb",
+      "name": "Release scan-tracking (MSVC)",
+      "type": "cppvsdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release/scan-tracking.exe",
       "args": [],
       "cwd": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release",
-      "env": {
-        "PATH": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release/mech_eye_api;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release/ThirdParty;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release/hik_mvs_runtime;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release/OpenNI2;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release/OpenNI2/Drivers;C:/Qt/5.15.2/msvc2019_64/bin;C:/Program Files/PCL 1.12.0/bin;C:/Program Files/PCL 1.12.0/3rdParty/VTK/bin;C:/Program Files/OpenNI2/Redist;${workspaceFolder}/third_party/opencv-3.4.3-vc14_vc15/opencv/build/x64/vc15/bin;${workspaceFolder}/third_party/Mech-Eye SDK-2.5.4/API/dll;${env:PATH}"
-      },
-      "stdio": "integratedTerminal",
+      "environment": [
+        {
+          "name": "PATH",
+          "value": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release/mech_eye_api;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release/ThirdParty;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release/hik_mvs_runtime;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release/OpenNI2;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-release/OpenNI2/Drivers;C:/Qt/5.15.2/msvc2019_64/bin;C:/Program Files/PCL 1.12.0/bin;C:/Program Files/PCL 1.12.0/3rdParty/VTK/bin;C:/Program Files/OpenNI2/Redist;${workspaceFolder}/third_party/opencv-3.4.3-vc14_vc15/opencv/build/x64/vc15/bin;${workspaceFolder}/third_party/Mech-Eye SDK-2.5.4/API/dll;${env:PATH}"
+        }
+      ],
+      "console": "integratedTerminal",
       "preLaunchTask": "Build (Ninja Release)"
     },
     {
-      "name": "Attach to scan-tracking",
-      "type": "lldb",
+      "name": "Attach to scan-tracking (MSVC)",
+      "type": "cppvsdbg",
       "request": "attach",
-      "pid": "${command:pickMyProcess}",
-      "stdio": "integratedTerminal"
+      "processId": "${command:pickProcess}"
     }
   ]
 }

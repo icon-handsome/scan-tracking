@@ -6,23 +6,39 @@
     "cmake.launchTarget": "scan_tracking",
     "cmake.debugConfig": {
         "name": "scan-tracking (IPC)",
-        "cwd": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug"
+        "cwd": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug",
+        "environment": [
+            {
+                "name": "PATH",
+                "value": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/mech_eye_api;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/ThirdParty;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/hik_mvs_runtime;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/OpenNI2;${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/OpenNI2/Drivers;C:/Qt/5.15.2/msvc2019_64/bin;C:/Program Files/PCL 1.12.0/bin;C:/Program Files/PCL 1.12.0/3rdParty/VTK/bin;C:/Program Files/OpenNI2/Redist;${workspaceFolder}/third_party/opencv-3.4.3-vc14_vc15/opencv/build/x64/vc15/bin;${workspaceFolder}/third_party/Mech-Eye SDK-2.5.4/API/dll;${workspaceFolder}/third_party/Mech-Eye SDK-2.5.4/API/dll_debug;${env:PATH}"
+            }
+        ]
     },
     "cmake.configureOnOpen": false,
-    "cmake.buildBeforeRun": false,
+    "cmake.copyCompileCommands": "${workspaceFolder}/compile_commands.json",
+    "cmake.buildBeforeRun": true,
     "cmake.automaticReconfigure": false,
     "cmake.buildTask": false,
 
     "task.allowAutomaticTasks": "off",
 
-    "clangd.enable": false,
+    "clangd.enable": true,
+    "clangd.checkUpdates": true,
+    "clangd.arguments": [
+        "--background-index",
+        "--clang-tidy=false",
+        "--header-insertion=never",
+        "--completion-style=detailed"
+    ],
 
-    "C_Cpp.intelliSenseEngine": "Default",
-    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/win-msvc2019-qtcore-ninja-debug/compile_commands.json",
-    "C_Cpp.errorSquiggles": "enabled",
-    "C_Cpp.autocomplete": "default",
-    "C_Cpp.codeAnalysis.runAutomatically": true,
-    "C_Cpp.workspaceSymbols": "None",
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/compile_commands.json",
+    "C_Cpp.default.intelliSenseMode": "msvc-x64",
+    "C_Cpp.default.cppStandard": "c++17",
+    "C_Cpp.default.compilerPath": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.29.30133/bin/Hostx64/x64/cl.exe",
+    "C_Cpp.errorSquiggles": "disabled",
+    "C_Cpp.autocomplete": "disabled",
+    "C_Cpp.codeAnalysis.runAutomatically": false,
     "C_Cpp.enhancedColorization": "Disabled",
     "C_Cpp.formatting": "Disabled",
     "C_Cpp.autoAddFileAssociations": false,

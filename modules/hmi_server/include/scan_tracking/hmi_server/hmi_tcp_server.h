@@ -311,7 +311,8 @@ private:
 
     QTcpServer* m_tcpServer = nullptr;      ///< Qt TCP 服务器
     HmiSession* m_session = nullptr;        ///< 当前客户端会话（单客户端模式）
-    int m_port = 9900;                      ///< 监听端口
+    int m_port = 9900;                      ///< 
+    // 监听端口
     QTimer* m_statusPushTimer = nullptr;    ///< 状态推送定时器
     QTimer* m_heartbeatTimer = nullptr;     ///< 心跳发送定时器
     quint64 m_nextEventId = 1;             ///< 事件 ID 自增序号

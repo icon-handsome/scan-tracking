@@ -394,7 +394,7 @@ private:
     AppConfig m_appConfig;
     LoggerConfig m_loggerConfig;
     ModbusConfig m_modbusConfig;
-CameraConfig m_cameraConfig;
+    CameraConfig m_cameraConfig;
     VisionConfig m_visionConfig;
     FlowControlConfig m_flowControlConfig;
     SegmentCaptureExportConfig m_segmentCaptureExportConfig;

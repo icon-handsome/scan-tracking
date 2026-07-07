@@ -76,6 +76,56 @@
       "problemMatcher": []
     },
     {
+      "label": "Stage Deploy (Debug)",
+      "type": "shell",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "${workspaceFolder}/tools/scan_tracking_dev.cmd",
+        "stage-deploy"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "showReuseMessage": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "First-time Setup (Configure + Stage)",
+      "dependsOn": [
+        "Configure (Ninja Debug)",
+        "Stage Deploy (Debug)"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build and Stage (Debug)",
+      "dependsOn": [
+        "Build (Ninja Debug)",
+        "Stage Deploy (Debug)"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Build, Stage and Run (Debug)",
+      "dependsOn": [
+        "Build (Ninja Debug)",
+        "Stage Deploy (Debug)",
+        "Run scan-tracking (Debug)"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
       "label": "Configure (Ninja Release)",
       "type": "shell",
       "command": "cmd",

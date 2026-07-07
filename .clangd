@@ -1,8 +1,5 @@
-# 已禁用：本项目使用 CLion 内置 C++ 引擎，不再启用 clangd。
-# 若需恢复，重命名为 .clangd 并在 IDE 中重新开启 clangd。
-#
-# 原配置：与 Ninja 构建目录中的 compile_commands.json 配合使用。
-# 路径相对仓库根目录，换机器时只需保持同一 preset 的 build 目录即可。
+# Cursor / VS Code：配合 compile_commands.json 提供代码跳转、引用查找与补全。
+# 构建目录与 CMakePresets.json 中 win-msvc2019-qtcore-ninja-debug 保持一致。
 
 CompileFlags:
   CompilationDatabase: build/win-msvc2019-qtcore-ninja-debug
@@ -16,7 +13,7 @@ Index:
 
 ---
 
-# 不索引生成物与 IDE 本地库（减轻卡顿；不影响 VS 的 .vs 索引）
+# 不索引生成物与 IDE 本地库（减轻卡顿）
 If:
   PathMatch: .*/(build|\.vs|\.cache)(/|$).*
 

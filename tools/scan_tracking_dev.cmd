@@ -27,11 +27,21 @@ goto usage
 
 :configure_debug
 "%CMAKE%" --preset %PRESET_DEBUG% -S "%ROOT%"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :sync_compile_commands "%APP_DEBUG%"
 exit /b %ERRORLEVEL%
 
 :configure_release
 "%CMAKE%" --preset %PRESET_RELEASE% -S "%ROOT%"
+if errorlevel 1 exit /b %ERRORLEVEL%
+call :sync_compile_commands "%APP_RELEASE%"
 exit /b %ERRORLEVEL%
+
+:sync_compile_commands
+if exist "%~1\compile_commands.json" (
+  copy /Y "%~1\compile_commands.json" "%ROOT%\compile_commands.json" >nul
+)
+exit /b 0
 
 :build_debug
 "%CMAKE%" --build --preset %PRESET_DEBUG%
@@ -157,7 +167,7 @@ exit /b 0
 
 :apply_runtime_path
 set "APP_DIR=%~1"
-set "PATH=%APP_DIR%;%APP_DIR%\mech_eye_api;%APP_DIR%\ThirdParty;%APP_DIR%\hik_mvs_runtime;%APP_DIR%\OpenNI2;%APP_DIR%\OpenNI2\Drivers;C:\Qt\5.15.2\msvc2019_64\bin;C:\Program Files\PCL 1.12.0\bin;C:\Program Files\PCL 1.12.0\3rdParty\VTK\bin;C:\Program Files\OpenNI2\Redist;%ROOT%\third_party\LB\opencv-3.4.3-vc14_vc15\opencv\build\x64\vc15\bin;%ROOT%\third_party\Mech-Eye SDK-2.5.4\API\dll;%ROOT%\third_party\Mech-Eye SDK-2.5.4\API\dll_debug;%PATH%"
+set "PATH=%APP_DIR%;%APP_DIR%\mech_eye_api;%APP_DIR%\ThirdParty;%APP_DIR%\hik_mvs_runtime;%APP_DIR%\OpenNI2;%APP_DIR%\OpenNI2\Drivers;C:\Qt\5.15.2\msvc2019_64\bin;C:\Program Files\PCL 1.12.0\bin;C:\Program Files\PCL 1.12.0\3rdParty\VTK\bin;C:\Program Files\OpenNI2\Redist;%ROOT%\third_party\opencv-3.4.3-vc14_vc15\opencv\build\x64\vc15\bin;%ROOT%\third_party\Mech-Eye SDK-2.5.4\API\dll;%ROOT%\third_party\Mech-Eye SDK-2.5.4\API\dll_debug;%PATH%"
 exit /b 0
 
 :usage

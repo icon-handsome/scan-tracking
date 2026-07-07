@@ -101,9 +101,9 @@
       "pathId": 2,
       "pathName": "路径2-完整内表面",
       "inspectionType": "internal_surface",
-      "description": "19个扫描点，完整内表面测量",
+      "description": "24个扫描点，完整内表面测量",
       "enabled": true,
-      "totalPoints": 19,
+      "totalPoints": 24,
       "points": [
         {
           "pointIndex": 1,
@@ -234,6 +234,41 @@
         {
           "pointIndex": 19,
           "pointName": "路径2-点19",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 20,
+          "pointName": "路径2-点20",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 21,
+          "pointName": "路径2-点21",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 22,
+          "pointName": "路径2-点22",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 23,
+          "pointName": "路径2-点23",
+          "needRotation": false,
+          "rotationAngle": 0,
+          "description": "仅3D"
+        },
+        {
+          "pointIndex": 24,
+          "pointName": "路径2-点24",
           "needRotation": false,
           "rotationAngle": 0,
           "description": "仅3D"
@@ -1385,9 +1420,10 @@
   ],
   "executionConfig": {
     "executeAllPaths": false,
-    "description": "路径1单路径联调：path1=柱面开孔(7段)，段级 Mech3D+CXP2D+矩阵落盘",
+    "description": "路径1+2联调：path1=柱面开孔(7段) path2=内表面(24段)",
     "selectedPathIds": [
-      1
+      1,
+      2
     ],
     "pathExecutionOrder": "sequential",
     "allowPathSkipOnError": false
