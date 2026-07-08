@@ -117,11 +117,12 @@ public:
         int inspectionPathId = 0,
         bool notifyListener = true) const;
 
-    /// 内表面离线联调：从磁盘点云文件执行测量（不经过 PointCloudFrame 内存路径）
+    /// 内表面：从磁盘点云文件执行测量（不经过 PointCloudFrame 内存路径）
     InspectionResult inspectInternalSurfaceFromScanFile(
         const QString& scanCloudPath,
         int inspectionPathId = 0,
-        bool notifyListener = true) const;
+        bool notifyListener = true,
+        bool useOfflineReplayAlgorithmConfig = false) const;
 
     /// 内表面正式检测：多扫描分段按序合并后落盘 PCD（与 demo 单文件输入一致）
     InspectionResult inspectInternalSurfaceFromSegmentFrames(

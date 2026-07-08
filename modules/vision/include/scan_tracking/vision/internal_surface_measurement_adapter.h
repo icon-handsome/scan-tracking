@@ -25,9 +25,10 @@ QString resolveInternalSurfaceConfigPath();
 InternalSurfaceInspectionResult runInternalSurfaceMeasurement(
     const scan_tracking::mech_eye::PointCloudFrame& cloud);
 
-/// 离线联调：直接从扫描点云文件（.txt/.ply/.pcd）执行内表面测量
+/// 从扫描点云文件（.txt/.ply/.pcd）执行内表面测量
 InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
-    const QString& scanCloudPath);
+    const QString& scanCloudPath,
+    bool useOfflineReplayAlgorithmConfig = false);
 
 /// 正式检测：多扫描分段按序合并后落盘 PCD，与 demo 单文件输入一致
 InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromSegmentFrames(

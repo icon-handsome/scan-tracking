@@ -296,6 +296,22 @@ QString poseStitchPointCloudOutputDirectory(const QString& runRoot)
     return QDir(runRoot).filePath(QStringLiteral("pointcloud"));
 }
 
+QString buildPathLevelMergedCloudFilePath(
+    const QString& runRoot,
+    const QString& timestamp,
+    int pathId,
+    int mergedSegmentCount,
+    const QString& suffix,
+    const QString& ext)
+{
+    const QString baseName = QStringLiteral("%1_path%2_merged_%3segs")
+                                 .arg(timestamp)
+                                 .arg(pathId)
+                                 .arg(mergedSegmentCount);
+    return QDir(poseStitchPointCloudOutputDirectory(runRoot))
+        .filePath(baseName + suffix + QStringLiteral(".") + ext);
+}
+
 QString segmentCaptureExportGroupDirectory(const QString& sessionRoot, int pathId, int segmentIndex)
 {
     return QDir(sessionRoot).filePath(
@@ -3187,7 +3203,7 @@ int StateMachine::selfCheckCachePathId() const
     return kSelfCheckCacheBucketId;
 }
 
-void StateMachine::clearPathSegmentCache(int pathId)
+void StateMachine::clearPathSegmentCache(int pathId, bool preservePathProgress)
 {
     std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
     if (m_pathSegmentCaptureBundles.contains(pathId)) {
@@ -3215,9 +3231,25 @@ void StateMachine::clearPathSegmentCache(int pathId)
         }
         m_pathSegmentRawPointClouds.remove(pathId);
     }
-    if (m_currentPathId == pathId) {
+    if (!preservePathProgress && m_currentPathId == pathId) {
         m_currentPathSegments.clear();
     }
+}
+
+void StateMachine::markPathInspectionCompleted(int pathId)
+{
+    if (pathId <= 0 || pathId == kSelfCheckCacheBucketId) {
+        return;
+    }
+    m_inspectedPathIds.insert(pathId);
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[多路径] 路径已完成综合检测 pathId=") << pathId
+        << QStringLiteral("，后续 Trig_ScanSegment 须 Trig_ResultReset 后再扫。");
+}
+
+bool StateMachine::isPathInspectionCompleted(int pathId) const
+{
+    return pathId > 0 && m_inspectedPathIds.contains(pathId);
 }
 
 bool StateMachine::hasSelfCheckCaptureReady() const
@@ -3309,13 +3341,21 @@ bool StateMachine::loadSegmentPointCloudsForInspection(
     QList<scan_tracking::mech_eye::PointCloudFrame>* outSegments,
     int* totalPointCount,
     int* segmentCount,
-    QString* errorMessage)
+    QString* errorMessage,
+    QString* outMergedInspectionPcdPath)
 {
-    if (outSegments == nullptr) {
+    if (outSegments == nullptr && outMergedInspectionPcdPath == nullptr) {
         if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("综合检测失败：输出分段列表指针为空。");
+            *errorMessage = QStringLiteral("综合检测失败：分段列表与落盘路径输出不能同时为空。");
         }
         return false;
+    }
+
+    if (outSegments != nullptr) {
+        outSegments->clear();
+    }
+    if (outMergedInspectionPcdPath != nullptr) {
+        outMergedInspectionPcdPath->clear();
     }
 
     int maxJoinMs = kBackgroundRefinementJoinTimeoutMs;
@@ -3359,7 +3399,6 @@ bool StateMachine::loadSegmentPointCloudsForInspection(
         return false;
     }
 
-    outSegments->clear();
     int mergedPointCount = 0;
     int mergedSegmentCount = 0;
     auto mergedPoints = std::make_shared<std::vector<float>>();
@@ -3397,7 +3436,9 @@ bool StateMachine::loadSegmentPointCloudsForInspection(
                 continue;
             }
 
-            outSegments->push_back(cloud);
+            if (outSegments != nullptr) {
+                outSegments->push_back(cloud);
+            }
             mergedPoints->reserve(
                 mergedPoints->size() + static_cast<std::size_t>(pointCount * 3));
             for (int index = 0; index < pointCount; ++index) {
@@ -3487,6 +3528,61 @@ bool StateMachine::loadSegmentPointCloudsForInspection(
     }
     if (segmentCount != nullptr) {
         *segmentCount = mergedSegmentCount;
+    }
+
+    if (outMergedInspectionPcdPath != nullptr) {
+        scan_tracking::mech_eye::PointCloudFrame stitchedMergedCloud;
+        stitchedMergedCloud.pointsXYZ = mergedPoints;
+        stitchedMergedCloud.pointCount = mergedPointCount;
+        stitchedMergedCloud.width = mergedPointCount;
+        stitchedMergedCloud.height = 1;
+
+        const QString ext = scan_tracking::common::pointCloudSaveFormatExtension(
+            configManager->segmentCaptureExportConfig().pointCloudSaveFormat);
+
+        QString inspectionPath;
+        const bool exportEnabled = scan_tracking::common::segmentCaptureExportEnabled()
+            && !m_poseStitchRunRootDirectory.isEmpty();
+        if (exportEnabled) {
+            const QString timestamp = m_poseStitchOutputTimestamp.isEmpty()
+                ? poseStitchOutputTimestamp()
+                : m_poseStitchOutputTimestamp;
+            inspectionPath = buildPathLevelMergedCloudFilePath(
+                m_poseStitchRunRootDirectory,
+                timestamp,
+                inspectPathId,
+                mergedSegmentCount,
+                QStringLiteral("_inspection"),
+                ext);
+        }
+
+        if (inspectionPath.isEmpty() || !QFileInfo::exists(inspectionPath)) {
+            const QDir root(QCoreApplication::applicationDirPath());
+            const QString tempDirPath = root.filePath(QStringLiteral("internal_surface/tmp"));
+            QDir().mkpath(tempDirPath);
+            const QString stamp = QDateTime::currentDateTime()
+                .toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
+            inspectionPath = QDir(tempDirPath).filePath(
+                QStringLiteral("path%1_%2segs_inspection_%3.pcd")
+                    .arg(inspectPathId)
+                    .arg(mergedSegmentCount)
+                    .arg(stamp));
+            std::lock_guard<std::mutex> pclGuard(
+                scan_tracking::mech_eye::pointCloudAlgorithmMutex());
+            if (!scan_tracking::mech_eye::savePointCloudFrameToPcd(
+                    stitchedMergedCloud, inspectionPath)) {
+                if (errorMessage != nullptr) {
+                    *errorMessage = QStringLiteral(
+                        "综合检测失败：内表面检测融合点云落盘失败：%1").arg(inspectionPath);
+                }
+                return false;
+            }
+            qInfo(LOG_FLOW).noquote()
+                << QStringLiteral("[InternalSurface] 检测融合点云已写入") << inspectionPath
+                << QStringLiteral(" 点数=") << mergedPointCount;
+        }
+
+        *outMergedInspectionPcdPath = inspectionPath;
     }
 
     qInfo(LOG_FLOW).noquote()
@@ -4082,7 +4178,7 @@ tracking::InspectionResult StateMachine::runOfflineInternalSurfaceInspectionFrom
         << QStringLiteral("[InternalSurface] 离线回放从文件执行测量（不加载整帧到内存）");
 
     const tracking::InspectionResult result =
-        m_tracking->inspectInternalSurfaceFromScanFile(cloudPath, pathId, false);
+        m_tracking->inspectInternalSurfaceFromScanFile(cloudPath, pathId, false, true);
 
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[InternalSurface] 离线回放完成 resultCode=") << result.resultCode
@@ -5199,6 +5295,7 @@ void StateMachine::resetScanSegmentCache()
     // 重置路径上下文
     m_currentPathId = 1;
     m_currentPathSegments.clear();
+    m_inspectedPathIds.clear();
     clearFirstPathStepPauseLatch();
 
     if (totalCacheSize > 0) {
@@ -6192,6 +6289,17 @@ bool StateMachine::validateScanSegmentRequest(const QVector<quint16>& commandBlo
     }
 
     const int targetPathId = resolvePathIdForIncomingSegment(segmentIndex);
+    if (isPathInspectionCompleted(targetPathId)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral(
+                "路径 %1 已完成综合检测，请 Trig_ResultReset 后再扫描。").arg(targetPathId);
+        }
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("拒绝 Trig_ScanSegment：路径已检测 pathId=") << targetPathId
+            << QStringLiteral(" 段号=") << segmentIndex;
+        return false;
+    }
+
     const int segmentTotal = segmentTotalForPath(targetPathId);
     const int maxSegmentIndex = segmentTotal > 0 ? qMin(segmentTotal, kMaxScanSegmentIndex)
                                                  : kMaxScanSegmentIndex;

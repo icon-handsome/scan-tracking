@@ -526,7 +526,8 @@ InspectionResult TrackingService::inspectPointCloud(
 InspectionResult TrackingService::inspectInternalSurfaceFromScanFile(
     const QString& scanCloudPath,
     int inspectionPathId,
-    bool notifyListener) const
+    bool notifyListener,
+    bool useOfflineReplayAlgorithmConfig) const
 {
     ensureInspectionMeasurementMetaTypeRegistered();
 
@@ -547,7 +548,7 @@ InspectionResult TrackingService::inspectInternalSurfaceFromScanFile(
 
     const auto detection =
         scan_tracking::vision::internal_surface::runInternalSurfaceMeasurementFromScanFile(
-            scanCloudPath);
+            scanCloudPath, useOfflineReplayAlgorithmConfig);
     result.sourcePointCount = detection.downsampledPointCount > 0
         ? detection.downsampledPointCount
         : detection.filteredPointCount;

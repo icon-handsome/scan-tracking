@@ -515,11 +515,13 @@ private:
         QString* errorMessage);
 
     // 坡口检测：从内存缓存按分段取出点云（不合并，供逐段测量取均值）
+    // outSegments 与 outMergedInspectionPcdPath 至少填其一；内表面检测仅需后者
     bool loadSegmentPointCloudsForInspection(
         QList<scan_tracking::mech_eye::PointCloudFrame>* outSegments,
         int* totalPointCount,
         int* segmentCount,
-        QString* errorMessage);
+        QString* errorMessage,
+        QString* outMergedInspectionPcdPath = nullptr);
 
     /// Hole 检测：从 session 落盘目录收集各段 pointcloud_stitched 文件路径（不加载点云）
     bool loadHoleSegmentPcdPathsForInspection(
@@ -559,7 +561,9 @@ private:
     /// 检查指定路径的指定段号是否已缓存
     bool hasSegmentInPath(int pathId, int segmentIndex) const;
     int selfCheckCachePathId() const;
-    void clearPathSegmentCache(int pathId);
+    void clearPathSegmentCache(int pathId, bool preservePathProgress = false);
+    void markPathInspectionCompleted(int pathId);
+    bool isPathInspectionCompleted(int pathId) const;
     bool hasSelfCheckCaptureReady() const;
 
     /// 本次 Trig_ScanSegment 应写入的路径 ID（段号重复且当前路径已满则切下一路径）
@@ -787,6 +791,7 @@ private:
     QSet<int> m_currentPathSegments;                        // 当前路径已缓存的段号集合（用于检测重复）
     QSet<int> m_emittedPathStarted;                         // 本工件已推送 path.started 的路径
     QSet<int> m_emittedPathFinished;                        // 本工件已推送 path.finished 的路径
+    QSet<int> m_inspectedPathIds;                           // 已完成 Trig_Inspection 的路径（复位前拒绝再扫）
     bool m_emittedAllPathsFinished = false;                 // 本工件已推送 scan_paths.all_finished
     bool m_firstPathStepPauseLatched = false;               // 路径1联调：已达暂停点，拒绝后续扫描
     int m_firstPathStepPauseAtSegment = 0;                  // 路径1联调：已暂停的点位号

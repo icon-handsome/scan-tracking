@@ -2,7 +2,11 @@
 
 #include "scan_tracking/flow_control/state_machine.h"
 
+#include <QtCore/QFileInfo>
 #include <QtCore/QLoggingCategory>
+
+#include <future>
+#include <thread>
 
 namespace scan_tracking {
 namespace flow_control {
@@ -17,6 +21,31 @@ namespace {
 constexpr quint16 kInspectionResOk = 1;
 /// IPC 侧处理失败（Tracking 不可用、点云加载失败等），与算法 NG(2) 区分
 constexpr quint16 kInspectionResProcessingFail = 7;
+
+tracking::InspectionResult runInternalSurfaceInspectionInWorker(
+    scan_tracking::tracking::TrackingService* tracking,
+    const QString& mergedPcdPath,
+    int inspectionPathId)
+{
+    if (tracking == nullptr) {
+        tracking::InspectionResult failure;
+        failure.resultCode = 2;
+        failure.ngReasonWord0 = (1u << 4);
+        failure.message = QStringLiteral("综合检测失败：Tracking 服务不可用。");
+        return failure;
+    }
+
+    std::packaged_task<tracking::InspectionResult()> task(
+        [tracking, mergedPcdPath, inspectionPathId]() {
+            return tracking->inspectInternalSurfaceFromScanFile(
+                mergedPcdPath, inspectionPathId, false, false);
+        });
+    std::future<tracking::InspectionResult> future = task.get_future();
+    std::thread worker(std::move(task));
+    tracking::InspectionResult result = future.get();
+    worker.join();
+    return result;
+}
 }
 
 void StateMachine::executeInspectionTask()
@@ -193,10 +222,14 @@ void StateMachine::executeInspectionTask()
                 segmentClouds, totalPointCount, m_activeTask.inspectionPathId);
         }
     } else if (inspectionType == scan_tracking::common::InspectionType::InternalSurface) {
-        QList<scan_tracking::mech_eye::PointCloudFrame> segmentClouds;
+        QString mergedInspectionPcdPath;
         int totalPointCount = 0;
         if (!loadSegmentPointCloudsForInspection(
-                &segmentClouds, &totalPointCount, &segmentCount, &loadError)) {
+                nullptr,
+                &totalPointCount,
+                &segmentCount,
+                &loadError,
+                &mergedInspectionPcdPath)) {
             qWarning(LOG_FLOW).noquote()
                 << QStringLiteral("Trig_Inspection 加载内表面分段点云失败：") << loadError
                 << multiPathCacheStatusText();
@@ -223,8 +256,47 @@ void StateMachine::executeInspectionTask()
             return;
         }
 
-        trackingResult = m_tracking->inspectInternalSurfaceFromSegmentFrames(
-            segmentClouds, totalPointCount, m_activeTask.inspectionPathId);
+        if (mergedInspectionPcdPath.trimmed().isEmpty()
+            || !QFileInfo::exists(mergedInspectionPcdPath)) {
+            loadError = QStringLiteral("内表面检测融合点云不存在：%1").arg(mergedInspectionPcdPath);
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("Trig_Inspection 内表面落盘点云不可用：") << loadError
+                << multiPathCacheStatusText();
+            writeInspectionResult({2, 1u << 4, 0, 0});
+            if (m_inspectionResultPublisher) {
+                tracking::InspectionResult failure;
+                failure.resultCode = 2;
+                failure.ngReasonWord0 = (1u << 4);
+                failure.message = loadError;
+                m_inspectionResultPublisher(failure);
+            }
+            completeActiveTask(
+                kInspectionResProcessingFail,
+                protocol::AckState::Completed,
+                false);
+            clearActiveTask();
+            m_ipcState = protocol::IpcState::Ready;
+            m_currentStage = protocol::Stage::Idle;
+            m_progress = 0;
+            setState(AppState::Ready);
+            publishIpcStatus();
+            return;
+        }
+
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[InternalSurface] 从落盘 PCD 执行测量（后台线程，避免主线程大点云堆损坏）")
+            << QStringLiteral(" path=") << mergedInspectionPcdPath
+            << QStringLiteral(" 总点数=") << totalPointCount
+            << QStringLiteral(" 参与段数=") << segmentCount;
+
+        // 落盘完成后释放路径段点云缓存（保留段号进度，避免 PLC 再发段1 被误判为新一轮 path2）。
+        clearPathSegmentCache(m_activeTask.inspectionPathId, true);
+
+        trackingResult = runInternalSurfaceInspectionInWorker(
+            m_tracking, mergedInspectionPcdPath, m_activeTask.inspectionPathId);
+        if (trackingResult.sourcePointCount <= 0 && totalPointCount > 0) {
+            trackingResult.sourcePointCount = totalPointCount;
+        }
     } else {
         scan_tracking::mech_eye::PointCloudFrame mergedCloud;
         int totalPointCount = 0;
@@ -284,6 +356,7 @@ void StateMachine::executeInspectionTask()
         << QStringLiteral(" ngReasonWord1=") << summary.ngReasonWord1
         << QStringLiteral(" measureItemCount=") << summary.measureItemCount;
     completeActiveTask(plcRes, protocol::AckState::Completed, plcRes == kInspectionResOk);
+    markPathInspectionCompleted(m_activeTask.inspectionPathId);
     emit inspectionFinished(
         summary.resultCode, summary.ngReasonWord0, summary.ngReasonWord1,
         summary.measureItemCount, trackingResult.measurement, trackingResult.message);

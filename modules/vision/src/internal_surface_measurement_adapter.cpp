@@ -1,6 +1,7 @@
 #include "scan_tracking/vision/internal_surface_measurement_adapter.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <atomic>
@@ -151,9 +152,12 @@ InternalSurfaceInspectionResult runMeasurementWithPreparedScanCloud(
                     break;
                 }
                 elapsedSec += 15;
-                qInfo(LOG_INTERNAL_SURFACE_ADAPTER).noquote()
-                    << QStringLiteral("[InternalSurface] 算法仍在运行，已耗时约")
-                    << elapsedSec << QStringLiteral("s（ICP/法向/三角网格阶段）");
+                // 心跳线程禁止 qInfo：Qt 日志非线程安全，与主线程/算法线程并发时可能触发堆损坏。
+                std::fprintf(
+                    stderr,
+                    "[InternalSurface] 算法仍在运行，已耗时约 %d s（ICP/法向/三角网格阶段）\n",
+                    elapsedSec);
+                std::fflush(stderr);
             }
         });
 
@@ -170,6 +174,15 @@ InternalSurfaceInspectionResult runMeasurementWithPreparedScanCloud(
 
         MeasurementResult algoResult;
         const bool algoOk = RunMeasurement(input, &algoResult);
+        // 算法返回后立刻拷贝输出字段，避免第三方库析构时堆损坏波及 QString 构造。
+        const QString algoMessage = QString::fromLocal8Bit(algoResult.message);
+        const double lowestDistanceToPlaneMm = algoResult.lowestDistanceToPlaneMm;
+        const double volumeLiter = algoResult.volumeLiter;
+        const int filteredPointCount = algoResult.filteredPointCount;
+        const int downsampledPointCount = algoResult.downsampledPointCount;
+        const int meshVertexCount = algoResult.meshVertexCount;
+        const int meshFaceCount = algoResult.meshFaceCount;
+
         algorithmDone.store(true, std::memory_order_release);
         if (heartbeatThread.joinable()) {
             heartbeatThread.join();
@@ -179,19 +192,18 @@ InternalSurfaceInspectionResult runMeasurementWithPreparedScanCloud(
             << QStringLiteral("[InternalSurface] RunMeasurement 已返回 ok=") << algoOk;
 
         if (!algoOk) {
-            result.message = QStringLiteral("内表面测量算法失败：%1")
-                                 .arg(QString::fromLocal8Bit(algoResult.message));
+            result.message = QStringLiteral("内表面测量算法失败：%1").arg(algoMessage);
             qWarning(LOG_INTERNAL_SURFACE_ADAPTER).noquote() << result.message;
             return result;
         }
 
-        result.headDepthMm = algoResult.lowestDistanceToPlaneMm;
-        result.volumeLiter = algoResult.volumeLiter;
-        result.headVolumeM3 = algoResult.volumeLiter / 1000.0;
-        result.filteredPointCount = algoResult.filteredPointCount;
-        result.downsampledPointCount = algoResult.downsampledPointCount;
-        result.meshVertexCount = algoResult.meshVertexCount;
-        result.meshFaceCount = algoResult.meshFaceCount;
+        result.headDepthMm = lowestDistanceToPlaneMm;
+        result.volumeLiter = volumeLiter;
+        result.headVolumeM3 = volumeLiter / 1000.0;
+        result.filteredPointCount = filteredPointCount;
+        result.downsampledPointCount = downsampledPointCount;
+        result.meshVertexCount = meshVertexCount;
+        result.meshFaceCount = meshFaceCount;
 
         const bool depthOk =
             isPositiveFinite(result.headDepthMm)
@@ -278,7 +290,8 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurement(
 }
 
 InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
-    const QString& scanCloudPath)
+    const QString& scanCloudPath,
+    bool useOfflineReplayAlgorithmConfig)
 {
     InternalSurfaceInspectionResult result;
 
@@ -290,7 +303,7 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
 
     const QString suffix = QFileInfo(resolved).suffix().toLower();
     if (suffix == QStringLiteral("pcd") || suffix == QStringLiteral("ply")) {
-        return runMeasurementWithPreparedScanCloud(resolved, true);
+        return runMeasurementWithPreparedScanCloud(resolved, useOfflineReplayAlgorithmConfig);
     }
 
     if (suffix != QStringLiteral("txt")) {
@@ -308,7 +321,7 @@ InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromScanFile(
         }
     }
 
-    return runMeasurementWithPreparedScanCloud(convertedPcdPath, true);
+    return runMeasurementWithPreparedScanCloud(convertedPcdPath, useOfflineReplayAlgorithmConfig);
 }
 
 InternalSurfaceInspectionResult runInternalSurfaceMeasurementFromSegmentFrames(
