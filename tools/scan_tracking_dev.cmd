@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions
 
-rem ScanTracking dev helper (CMakePresets + README). Used by Cursor/VS Code tasks.
+rem ScanTracking dev helper (CMakePresets + README).
 
 for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 cd /d "%ROOT%"
@@ -27,21 +27,11 @@ goto usage
 
 :configure_debug
 "%CMAKE%" --preset %PRESET_DEBUG% -S "%ROOT%"
-if errorlevel 1 exit /b %ERRORLEVEL%
-call :sync_compile_commands "%APP_DEBUG%"
 exit /b %ERRORLEVEL%
 
 :configure_release
 "%CMAKE%" --preset %PRESET_RELEASE% -S "%ROOT%"
-if errorlevel 1 exit /b %ERRORLEVEL%
-call :sync_compile_commands "%APP_RELEASE%"
 exit /b %ERRORLEVEL%
-
-:sync_compile_commands
-if exist "%~1\compile_commands.json" (
-  copy /Y "%~1\compile_commands.json" "%ROOT%\compile_commands.json" >nul
-)
-exit /b 0
 
 :build_debug
 "%CMAKE%" --build --preset %PRESET_DEBUG%

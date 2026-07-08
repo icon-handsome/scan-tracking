@@ -150,6 +150,17 @@ void ConsoleRuntime::initModules()
             << QStringLiteral(" (reserved, not enforced in stage1)");
     }
 
+    // Mech-Eye worker 使用 QThread，必须在 exec() 进入事件循环后再 start()
+    QTimer::singleShot(0, &application_, [this, startupStage]() {
+        initMechEyeModule(startupStage);
+    });
+}
+
+void ConsoleRuntime::initMechEyeModule(int startupStage)
+{
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+
+    qInfo(appLog) << QStringLiteral("[启动] 创建 MechEyeService...");
     mechEyeService_ = std::make_unique<scan_tracking::mech_eye::MechEyeService>();
 
     QObject::connect(
@@ -214,6 +225,7 @@ void ConsoleRuntime::initModules()
 
     if (startupStage < 2) {
         qInfo(appLog) << QStringLiteral("启动阶段仅到 MechEye/辅助传感器。");
+        qInfo(appLog) << QStringLiteral("所有模块已初始化。");
         return;
     }
 
@@ -347,7 +359,9 @@ void ConsoleRuntime::initVisionFlowModules(
 
     qInfo(appLog) << QStringLiteral("[启动] 调用 VisionPipelineService::start...");
     visionPipelineService_->start(visionConfig);
-    qInfo(appLog) << QStringLiteral("视觉集成框架已启动。");
+    qInfo(appLog) << QStringLiteral("视觉集成框架已启动。")
+                  << QStringLiteral(" visionPipeline ptr=") << Qt::hex
+                  << reinterpret_cast<quintptr>(visionPipelineService_.get()) << Qt::dec;
 
     if (startupStage < 4) {
         qInfo(appLog) << QStringLiteral("启动阶段仅到 VisionPipeline。");
@@ -371,7 +385,9 @@ void ConsoleRuntime::initVisionFlowModules(
         visionPipelineService_.get(),
         trackingService_.get(),
         &application_);
-    qInfo(appLog) << QStringLiteral("[启动] StateMachine 已创建。");
+    qInfo(appLog) << QStringLiteral("[启动] StateMachine 已创建。")
+                  << QStringLiteral(" visionPipeline ptr=") << Qt::hex
+                  << reinterpret_cast<quintptr>(visionPipelineService_.get()) << Qt::dec;
 
     // HMI：先注入依赖并绑定信号，再 listen / 启动状态机，避免 start() 内重复 connect 或漏接早期事件
     const auto& hmiConfig = scan_tracking::common::ConfigManager::instance()->hmiConfig();

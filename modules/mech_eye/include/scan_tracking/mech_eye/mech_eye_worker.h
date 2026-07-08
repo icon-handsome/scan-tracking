@@ -142,6 +142,9 @@ private:
     /* 连接成功后打印相机基础参数（曝光、增益、分辨率等） */
     void printCameraParameters();
 
+    /* 启动后延迟后台连接，避免阻塞主流程初始化 */
+    void attemptInitialConnect();
+
     QString m_defaultCameraKey;
     CameraRuntimeState m_state = CameraRuntimeState::Idle;
     CameraInfoSnapshot m_cameraInfo;

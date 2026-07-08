@@ -34,7 +34,7 @@
         "SCAN_TRACKING_ENABLE_LBN_POSE_DETECTION": "ON",
         "SCAN_TRACKING_OPENCV_DIR": "D:/work/LY/IPC-192.168.110.173_track-main/third_party/opencv-3.4.3-vc14_vc15/opencv/build/x64/vc15/lib",
         "PCL_DIR": "C:/Program Files/PCL 1.12.0/cmake",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "OFF"
       }
     },
     {

@@ -80,12 +80,20 @@ void MechEyeService::start()
 
     registerMetaTypes();
 
-    // 读取 config.ini [Camera] 默认相机与超时；ConfigManager 不可用时使用 5s 兜底
+    // 读取 config.ini [Vision] mechEyeCameraKey；回退 [Camera] defaultCamera
     const auto* configManager = common::ConfigManager::instance();
     if (configManager != nullptr) {
+        const auto visionConfig = configManager->visionConfig();
         const auto cameraConfig = configManager->cameraConfig();
-        m_defaultCameraKey = cameraConfig.defaultCamera;
-        m_defaultCaptureTimeoutMs = cameraConfig.scanTimeoutMs > 0 ? cameraConfig.scanTimeoutMs : 5000;
+        m_defaultCameraKey = !visionConfig.mechEyeCameraKey.trimmed().isEmpty()
+            ? visionConfig.mechEyeCameraKey.trimmed()
+            : cameraConfig.defaultCamera;
+        if (visionConfig.mechCaptureTimeoutMs > 0) {
+            m_defaultCaptureTimeoutMs = visionConfig.mechCaptureTimeoutMs;
+        } else {
+            m_defaultCaptureTimeoutMs =
+                cameraConfig.scanTimeoutMs > 0 ? cameraConfig.scanTimeoutMs : 5000;
+        }
     } else {
         m_defaultCameraKey.clear();
         m_defaultCaptureTimeoutMs = 5000;

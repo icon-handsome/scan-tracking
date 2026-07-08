@@ -53,6 +53,16 @@ struct VisionConfig {
     int mechDepthRangeMax;
     /// 调试：同次额外采一帧（Noise=Off），与主流程（Noise=Normal）对比落盘
     bool mechPointCloudProcessingComparisonEnabled = false;
+    /// Mech-Eye 3D 单曝光（SDK Scan3DExposureSequence，单位 ms）
+    bool mechScan3DSingleExposureEnabled = true;
+    double mechScan3DSingleExposureMs = 40.0;
+    /// Mech-Eye 3D 多曝光 HDR（预留，当前未接入代码）
+    bool mechScan3DMultiExposureEnabled = false;
+    QString mechScan3DMultiExposureSequenceMs;
+    /// 以下 Mech-Eye 参数预留，当前未接入代码
+    double mechScan2DExposureMs = 0.0;
+    double mechScan3DGain = 0.0;
+    bool mechSaveExposureToDevice = false;
     int hikConnectTimeoutMs;
     int hikCaptureTimeoutMs;
     float hikExposureTimeUs = 50000.0f;  ///< 海康 A/B 双目曝光（微秒），连接时写入相机

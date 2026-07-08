@@ -58,6 +58,13 @@ target_compile_definitions(scan_tracking_mech_eye
 
 target_compile_features(scan_tracking_mech_eye PUBLIC cxx_std_17)
 
+if(MSVC)
+    set_source_files_properties(
+        src/mech_eye_worker.cpp
+        PROPERTIES COMPILE_OPTIONS "/EHa"
+    )
+endif()
+
 if(BUILD_TESTING)
     find_package(Qt5 REQUIRED COMPONENTS Test)
 

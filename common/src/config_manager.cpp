@@ -457,6 +457,13 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.beginGroup("Vision");
     settings.setValue("mechEyeCameraKey", "Mech-Eye Nano");
     settings.setValue("mechCaptureTimeoutMs", 5000);
+    settings.setValue("mechScan3DSingleExposureEnabled", true);
+    settings.setValue("mechScan3DSingleExposureMs", 40.0);
+    settings.setValue("mechScan3DMultiExposureEnabled", false);
+    settings.setValue("mechScan3DMultiExposureSequenceMs", "5,10,20");
+    settings.setValue("mechScan2DExposureMs", 0.0);
+    settings.setValue("mechScan3DGain", 0.0);
+    settings.setValue("mechSaveExposureToDevice", false);
     settings.setValue("hikConnectTimeoutMs", 3000);
     settings.setValue("hikCaptureTimeoutMs", 1000);
     settings.setValue("hikExposureTimeUs", 50000);
@@ -676,6 +683,20 @@ void ConfigManager::load(const QString& filePath)
     m_visionConfig.mechDepthRangeMax = settings.value("mechDepthRangeMax", 2000).toInt();
     m_visionConfig.mechPointCloudProcessingComparisonEnabled =
         settings.value("mechPointCloudProcessingComparisonEnabled", false).toBool();
+    m_visionConfig.mechScan3DSingleExposureEnabled =
+        settings.value("mechScan3DSingleExposureEnabled", true).toBool();
+    m_visionConfig.mechScan3DSingleExposureMs =
+        settings.value("mechScan3DSingleExposureMs", 40.0).toDouble();
+    m_visionConfig.mechScan3DMultiExposureEnabled =
+        settings.value("mechScan3DMultiExposureEnabled", false).toBool();
+    m_visionConfig.mechScan3DMultiExposureSequenceMs =
+        settings.value("mechScan3DMultiExposureSequenceMs").toString();
+    m_visionConfig.mechScan2DExposureMs =
+        settings.value("mechScan2DExposureMs", 0.0).toDouble();
+    m_visionConfig.mechScan3DGain =
+        settings.value("mechScan3DGain", 0.0).toDouble();
+    m_visionConfig.mechSaveExposureToDevice =
+        settings.value("mechSaveExposureToDevice", false).toBool();
     m_visionConfig.hikConnectTimeoutMs = settings.value("hikConnectTimeoutMs", 3000).toInt();
     m_visionConfig.hikCaptureTimeoutMs = settings.value("hikCaptureTimeoutMs", 1000).toInt();
     m_visionConfig.hikExposureTimeUs =

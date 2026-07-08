@@ -92,9 +92,11 @@ VisionPipelineService::VisionPipelineService(
 
 void VisionPipelineService::start(const scan_tracking::common::VisionConfig& config)
 {
+    qInfo() << QStringLiteral("[VisionPipeline] start 入口");
     m_config = config;
     m_pending = PendingCaptureContext{};
     m_processing = false;
+    qInfo() << QStringLiteral("[VisionPipeline] start 读取位姿配置...");
     if (const auto* configManager = scan_tracking::common::ConfigManager::instance()) {
         m_lbPoseConfig = configManager->lbPoseConfig();
         m_lbnPoseConfig = configManager->lbnPoseConfig();
@@ -102,10 +104,12 @@ void VisionPipelineService::start(const scan_tracking::common::VisionConfig& con
         m_lbPoseConfig = {};
         m_lbnPoseConfig = {};
     }
+    qInfo() << QStringLiteral("[VisionPipeline] start 设置 Ready 状态...");
     m_started = true;
     setState(
         VisionPipelineState::Ready,
         QStringLiteral("视觉流水线已启动，等待采集请求。"));
+    qInfo() << QStringLiteral("[VisionPipeline] start 完成");
 }
 
 void VisionPipelineService::stop()

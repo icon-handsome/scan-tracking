@@ -53,12 +53,27 @@ void StateMachine::executeScanSegmentTask()
     }
 
     // 检查相机是否处于就绪状态且当前没有正在进行的采集
-    if (m_visionPipeline->state() != vision::VisionPipelineState::Ready || m_visionPipeline->isStarted() == false) {
+    const auto pipelineState = m_visionPipeline->state();
+    const bool pipelineStarted = m_visionPipeline->isStarted();
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[ScanSegment] 视觉流水线前置检查")
+        << QStringLiteral(" ptr=") << Qt::hex << reinterpret_cast<quintptr>(m_visionPipeline) << Qt::dec
+        << QStringLiteral(" started=") << pipelineStarted
+        << QStringLiteral(" state=") << static_cast<int>(pipelineState)
+        << QStringLiteral(" (0=Idle,1=Ready,2=Capturing,3=Error,4=Stopped)");
+    if (m_mechEye != nullptr) {
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[ScanSegment] MechEye state=") << static_cast<int>(m_mechEye->state())
+            << QStringLiteral(" (3=Ready)");
+    }
+    if (pipelineState != vision::VisionPipelineState::Ready || pipelineStarted == false) {
         finishScanSegmentFailure(
             5,                    // Res 码：5 = 设备未就绪
             2,                    // 报警级别：2 = 警告
             721,                  // 报警代码：721 = 视觉编排忙或未就绪
-            QStringLiteral("视觉流水线忙或未就绪"),
+            QStringLiteral("视觉流水线忙或未就绪 (started=%1 state=%2)")
+                .arg(pipelineStarted ? 1 : 0)
+                .arg(static_cast<int>(pipelineState)),
             QStringLiteral("视觉流水线忙或未就绪"));
         return;
     }

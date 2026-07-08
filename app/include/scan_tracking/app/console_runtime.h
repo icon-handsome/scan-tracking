@@ -52,6 +52,9 @@ private:
     /* 按 startupStage 分级创建模块、连接信号、启动服务 */
     void initModules();
 
+    /* Mech-Eye / CXP 须在 QCoreApplication::exec() 之后启动 worker 线程 */
+    void initMechEyeModule(int startupStage);
+
     /* 在事件循环启动后初始化海康 C（避免与 MechEye SDK 同步初始化冲突） */
     void initFlowModules(int startupStage, scan_tracking::common::VisionConfig visionConfig);
 
