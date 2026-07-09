@@ -65,7 +65,8 @@ public:
         int segmentIndex,
         quint32 taskId,
         scan_tracking::mech_eye::CaptureMode mechCaptureMode,
-        bool mechComparisonCaptureEnabled);
+        bool mechComparisonCaptureEnabled,
+        bool skipHikPoseCapture = false);
 
     /// 从 config.ini [Vision] 读取边缘伪点去除与对比采集开关
     quint64 requestCaptureBundle(

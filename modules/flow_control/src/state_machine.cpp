@@ -88,8 +88,21 @@ bool isAlgorithmBypassEnabled()
     return configMgr != nullptr && configMgr->flowControlConfig().algorithmBypassEnabled;
 }
 
+bool isPath4BevelOnly3dMode(int pathId)
+{
+    if (pathId != 4) {
+        return false;
+    }
+    const auto* configMgr = scan_tracking::common::ConfigManager::instance();
+    return configMgr != nullptr &&
+           configMgr->inspectionTypeForPath(pathId) == scan_tracking::common::InspectionType::Bevel;
+}
+
 int countHikImagesInBundle(const scan_tracking::vision::MultiCameraCaptureBundle& bundle)
 {
+    if (bundle.request.skipHikPoseCapture) {
+        return 0;
+    }
     int imageCount = 0;
     if (bundle.hikCameraAResult.success() && bundle.hikCameraAResult.frame.isValid()) {
         ++imageCount;
@@ -2227,8 +2240,9 @@ void StateMachine::onVisionBundleCaptureFinished(scan_tracking::vision::MultiCam
     // TODO: MechEye 暂时屏蔽（已验证通过），当前只测试海康 A/B
     // 当 MechEye 恢复后，需检查 bundle.mechEyeResult.success()
 
-    // 海康 A/B 采集失败则报错终止
-    if (!bundle.hikCameraAResult.success() || !bundle.hikCameraBResult.success()) {
+    // path4 坡口路径按设计跳过 CXP；其余路径仍记录海康 A/B 采集异常。
+    if (!bundle.request.skipHikPoseCapture &&
+        (!bundle.hikCameraAResult.success() || !bundle.hikCameraBResult.success())) {
         qWarning(LOG_FLOW).noquote()
             << QStringLiteral("海康 A/B 采集失败")
             << QStringLiteral(" hikA=") << bundle.hikCameraAResult.errorMessage
@@ -2321,7 +2335,7 @@ void StateMachine::commitScanSegmentCaptureImmediate(
     }
 
     int imageCount = countHikImagesInBundle(bundle);
-    if (imageCount == 0) {
+    if (imageCount == 0 && !bundle.request.skipHikPoseCapture) {
         imageCount = 1;
     }
     const int cloudFrameCount = result.pointCloud.pointCount > 0 ? 1 : 0;
@@ -2406,7 +2420,7 @@ void StateMachine::commitBypassScanSegmentCapture(
     }
 
     int imageCount = countHikImagesInBundle(bundle);
-    if (imageCount == 0) {
+    if (imageCount == 0 && !bundle.request.skipHikPoseCapture) {
         imageCount = 1;
     }
     const int cloudFrameCount = capturedPointCount > 0 ? 1 : 0;

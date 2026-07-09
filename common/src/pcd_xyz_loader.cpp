@@ -148,74 +148,109 @@ bool finalizePcdHeader(ParsedPcdHeader* header)
         && header->zOffsetBytes >= 0;
 }
 
-bool parsePcdHeader(QTextStream& stream, ParsedPcdHeader* header)
+bool parsePcdHeaderLine(const QString& line, ParsedPcdHeader* header, bool* sawDataLine)
 {
-    if (header == nullptr) {
+    if (header == nullptr || sawDataLine == nullptr) {
+        return false;
+    }
+
+    if (line.isEmpty() || line.startsWith(QLatin1Char('#'))) {
+        return true;
+    }
+
+    if (line.startsWith(QStringLiteral("FIELDS"))) {
+        header->fields = line.mid(QStringLiteral("FIELDS").size())
+                             .trimmed()
+                             .split(QRegularExpression(QStringLiteral("\\s+")),
+                                    Qt::SkipEmptyParts);
+    } else if (line.startsWith(QStringLiteral("SIZE"))) {
+        if (!parseIntList(line, QStringLiteral("SIZE"), &header->sizes)) {
+            return false;
+        }
+    } else if (line.startsWith(QStringLiteral("TYPE"))) {
+        if (!parseTypeList(line, QStringLiteral("TYPE"), &header->types)) {
+            return false;
+        }
+    } else if (line.startsWith(QStringLiteral("COUNT"))) {
+        if (!parseIntList(line, QStringLiteral("COUNT"), &header->counts)) {
+            return false;
+        }
+    } else if (line.startsWith(QStringLiteral("WIDTH"))) {
+        bool ok = false;
+        header->width = line.mid(QStringLiteral("WIDTH").size()).trimmed().toInt(&ok);
+        if (!ok) {
+            return false;
+        }
+    } else if (line.startsWith(QStringLiteral("HEIGHT"))) {
+        bool ok = false;
+        header->height = line.mid(QStringLiteral("HEIGHT").size()).trimmed().toInt(&ok);
+        if (!ok) {
+            return false;
+        }
+    } else if (line.startsWith(QStringLiteral("POINTS"))) {
+        bool ok = false;
+        header->points = line.mid(QStringLiteral("POINTS").size()).trimmed().toInt(&ok);
+        if (!ok) {
+            return false;
+        }
+    } else if (line.startsWith(QStringLiteral("DATA"))) {
+        const QString dataToken =
+            line.mid(QStringLiteral("DATA").size()).trimmed().toLower();
+        if (dataToken == QStringLiteral("binary")) {
+            header->dataFormat = PcdDataFormat::Binary;
+        } else if (dataToken == QStringLiteral("ascii")) {
+            header->dataFormat = PcdDataFormat::Ascii;
+        } else if (dataToken == QStringLiteral("binary_compressed")) {
+            header->dataFormat = PcdDataFormat::BinaryCompressed;
+        } else {
+            return false;
+        }
+        *sawDataLine = true;
+    }
+
+    return true;
+}
+
+bool readPcdHeader(QFile& file, ParsedPcdHeader* header, qint64* bodyOffset)
+{
+    if (header == nullptr || bodyOffset == nullptr) {
         return false;
     }
 
     *header = ParsedPcdHeader{};
+    *bodyOffset = -1;
+
+    if (!file.seek(0)) {
+        return false;
+    }
+
+    constexpr qint64 kMaxPcdHeaderBytes = 64 * 1024;
+    qint64 consumedBytes = 0;
     bool sawDataLine = false;
 
-    while (!stream.atEnd()) {
-        const QString line = stream.readLine().trimmed();
-        if (line.isEmpty()) {
-            continue;
+    while (!file.atEnd()) {
+        const QByteArray rawLine = file.readLine();
+        if (rawLine.isEmpty()) {
+            break;
         }
 
-        if (line.startsWith(QStringLiteral("FIELDS"))) {
-            header->fields = line.mid(QStringLiteral("FIELDS").size())
-                                 .trimmed()
-                                 .split(QRegularExpression(QStringLiteral("\\s+")),
-                                        Qt::SkipEmptyParts);
-        } else if (line.startsWith(QStringLiteral("SIZE"))) {
-            if (!parseIntList(line, QStringLiteral("SIZE"), &header->sizes)) {
-                return false;
-            }
-        } else if (line.startsWith(QStringLiteral("TYPE"))) {
-            if (!parseTypeList(line, QStringLiteral("TYPE"), &header->types)) {
-                return false;
-            }
-        } else if (line.startsWith(QStringLiteral("COUNT"))) {
-            if (!parseIntList(line, QStringLiteral("COUNT"), &header->counts)) {
-                return false;
-            }
-        } else if (line.startsWith(QStringLiteral("WIDTH"))) {
-            bool ok = false;
-            header->width = line.mid(QStringLiteral("WIDTH").size()).trimmed().toInt(&ok);
-            if (!ok) {
-                return false;
-            }
-        } else if (line.startsWith(QStringLiteral("HEIGHT"))) {
-            bool ok = false;
-            header->height = line.mid(QStringLiteral("HEIGHT").size()).trimmed().toInt(&ok);
-            if (!ok) {
-                return false;
-            }
-        } else if (line.startsWith(QStringLiteral("POINTS"))) {
-            bool ok = false;
-            header->points = line.mid(QStringLiteral("POINTS").size()).trimmed().toInt(&ok);
-            if (!ok) {
-                return false;
-            }
-        } else if (line.startsWith(QStringLiteral("DATA"))) {
-            const QString dataToken =
-                line.mid(QStringLiteral("DATA").size()).trimmed().toLower();
-            if (dataToken == QStringLiteral("binary")) {
-                header->dataFormat = PcdDataFormat::Binary;
-            } else if (dataToken == QStringLiteral("ascii")) {
-                header->dataFormat = PcdDataFormat::Ascii;
-            } else if (dataToken == QStringLiteral("binary_compressed")) {
-                header->dataFormat = PcdDataFormat::BinaryCompressed;
-            } else {
-                return false;
-            }
-            sawDataLine = true;
+        consumedBytes += rawLine.size();
+        if (consumedBytes > kMaxPcdHeaderBytes) {
+            qWarning(LOG_PCD_XYZ_LOADER) << QStringLiteral("PCD header 过大，拒绝继续解析");
+            return false;
+        }
+
+        const QString line = QString::fromLatin1(rawLine).trimmed();
+        if (!parsePcdHeaderLine(line, header, &sawDataLine)) {
+            return false;
+        }
+        if (sawDataLine) {
+            *bodyOffset = file.pos();
             break;
         }
     }
 
-    if (!sawDataLine || header->dataFormat == PcdDataFormat::Unknown) {
+    if (!sawDataLine || header->dataFormat == PcdDataFormat::Unknown || *bodyOffset < 0) {
         return false;
     }
 
@@ -372,14 +407,11 @@ bool loadPointCloudXyzFromPcd(
     }
 
     ParsedPcdHeader header;
-    {
-        QTextStream headerStream(&file);
-        headerStream.setCodec("UTF-8");
-        if (!parsePcdHeader(headerStream, &header)) {
-            qWarning(LOG_PCD_XYZ_LOADER).noquote()
-                << QStringLiteral("PCD 头解析失败：") << absolutePath;
-            return false;
-        }
+    qint64 bodyOffset = -1;
+    if (!readPcdHeader(file, &header, &bodyOffset)) {
+        qWarning(LOG_PCD_XYZ_LOADER).noquote()
+            << QStringLiteral("PCD 头解析失败：") << absolutePath;
+        return false;
     }
 
     if (header.dataFormat == PcdDataFormat::BinaryCompressed) {
@@ -390,8 +422,18 @@ bool loadPointCloudXyzFromPcd(
 
     bool loaded = false;
     if (header.dataFormat == PcdDataFormat::Binary) {
+        if (!file.seek(bodyOffset)) {
+            qWarning(LOG_PCD_XYZ_LOADER).noquote()
+                << QStringLiteral("PCD binary body 定位失败：") << absolutePath;
+            return false;
+        }
         loaded = loadBinaryPcdBody(file, header, outXyz, maxPointCount);
     } else if (header.dataFormat == PcdDataFormat::Ascii) {
+        if (!file.seek(bodyOffset)) {
+            qWarning(LOG_PCD_XYZ_LOADER).noquote()
+                << QStringLiteral("PCD ascii body 定位失败：") << absolutePath;
+            return false;
+        }
         QTextStream bodyStream(&file);
         bodyStream.setCodec("UTF-8");
         loaded = loadAsciiPcdBodyWithFieldTokens(bodyStream, header, outXyz, maxPointCount);

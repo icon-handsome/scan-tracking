@@ -147,7 +147,8 @@ quint64 VisionPipelineService::requestCaptureBundle(
     int segmentIndex,
     quint32 taskId,
     scan_tracking::mech_eye::CaptureMode mechCaptureMode,
-    bool mechComparisonCaptureEnabled)
+    bool mechComparisonCaptureEnabled,
+    bool skipHikPoseCapture)
 {
     // ---- 前置校验 ----
     if (!m_started) {
@@ -158,7 +159,9 @@ quint64 VisionPipelineService::requestCaptureBundle(
         emit fatalError(VisionErrorCode::Busy, QStringLiteral("视觉采集请求正在进行中。"));
         return 0;
     }
-    if (m_mechEyeService == nullptr || m_hikCameraAService == nullptr || m_hikCameraBService == nullptr) {
+    if (m_mechEyeService == nullptr ||
+        (!skipHikPoseCapture &&
+         (m_hikCameraAService == nullptr || m_hikCameraBService == nullptr))) {
         emit fatalError(VisionErrorCode::InvalidConfig, QStringLiteral("视觉服务不完整。"));
         return 0;
     }
@@ -169,6 +172,7 @@ quint64 VisionPipelineService::requestCaptureBundle(
     request.taskId = taskId;
     request.segmentIndex = segmentIndex;
     request.mechCaptureMode = mechCaptureMode;
+    request.skipHikPoseCapture = skipHikPoseCapture;
     // Capture2DAnd3D 表示转盘段，后续会跑 LBN 而非 LB
     request.needMechEye2D =
         mechCaptureMode == scan_tracking::mech_eye::CaptureMode::Capture2DAnd3D;
@@ -186,6 +190,7 @@ quint64 VisionPipelineService::requestCaptureBundle(
 
     qInfo() << QStringLiteral("[VisionPipeline] 段号=") << segmentIndex
             << QStringLiteral(" 需梅卡2D=") << request.needMechEye2D
+            << QStringLiteral(" 跳过CXP=") << request.skipHikPoseCapture
             << QStringLiteral(" 梅卡模式=") << static_cast<int>(mechCaptureMode)
             << QStringLiteral(" CXP延迟ms=") << kMechToHikCaptureDelayMs;
     pending.mechRequestId = m_mechEyeService->requestCapture(
@@ -198,13 +203,15 @@ quint64 VisionPipelineService::requestCaptureBundle(
         return 0;
     }
     pending.mechDone = false;
-    pending.hikADone = false;
-    pending.hikBDone = false;
+    pending.hikADone = request.skipHikPoseCapture;
+    pending.hikBDone = request.skipHikPoseCapture;
 
     m_pending = pending;
-    setState(
-        VisionPipelineState::Capturing,
-        QStringLiteral("梅卡采集已启动（CXP 将在梅卡完成后延迟 %1ms）").arg(kMechToHikCaptureDelayMs));
+    const QString startupDescription = request.skipHikPoseCapture
+        ? QStringLiteral("梅卡采集已启动（path4 坡口路径跳过 CXP/LB/LBN）。")
+        : QStringLiteral("梅卡采集已启动（CXP 将在梅卡完成后延迟 %1ms）")
+              .arg(kMechToHikCaptureDelayMs);
+    setState(VisionPipelineState::Capturing, startupDescription);
     return request.requestId;
 }
 
@@ -266,6 +273,21 @@ void VisionPipelineService::onMechEyeCaptureFinished(scan_tracking::mech_eye::Ca
     m_pending.bundle.mechEyeResult = result;
     m_pending.mechDone = true;
 
+    if (m_pending.bundle.request.skipHikPoseCapture) {
+        auto& bundle = m_pending.bundle;
+        bundle.hikCameraAResult.errorMessage = QStringLiteral("path4 坡口路径跳过 CXP 双目采集。");
+        bundle.hikCameraBResult.errorMessage = QStringLiteral("path4 坡口路径跳过 CXP 双目采集。");
+        bundle.lbPoseResult.invoked = false;
+        bundle.lbPoseResult.success = false;
+        bundle.lbPoseResult.message = QStringLiteral("path4 坡口路径跳过 LB 位姿检测。");
+        bundle.lbnPoseResult.invoked = false;
+        bundle.lbnPoseResult.success = false;
+        bundle.lbnPoseResult.message = QStringLiteral("path4 坡口路径跳过 LBN 位姿检测。");
+        qInfo() << QStringLiteral("[VisionPipeline] path4 坡口路径：Mech-Eye 完成后直接收尾，跳过 CXP/LB/LBN");
+        finishBundleIfReady();
+        return;
+    }
+
     // 梅卡先完成，延迟后再启动 CXP，避免硬件/光照冲突
     qInfo() << QStringLiteral("[VisionPipeline] 梅卡采集结束，%1ms 后启动 CXP 双目")
                    .arg(kMechToHikCaptureDelayMs);
@@ -320,16 +342,19 @@ void VisionPipelineService::finishBundleIfReady()
         return;
     }
 
-    const bool hikReady =
-        bundle.hikCameraAResult.success() && bundle.hikCameraBResult.success();
+    const bool hikSkipped = bundle.request.skipHikPoseCapture;
+    const bool hikReady = hikSkipped ||
+        (bundle.hikCameraAResult.success() && bundle.hikCameraBResult.success());
     // 转盘段 + 配置启用 → LBN；封头段 → LB（见下方 runLb 分支）
-    const bool runLbn = bundle.request.needMechEye2D && m_lbnPoseConfig.enabled;
+    const bool runLbn = !hikSkipped && bundle.request.needMechEye2D && m_lbnPoseConfig.enabled;
 
     m_processing = true;
     setState(
         VisionPipelineState::Capturing,
         QStringLiteral("Mech-Eye 采集完成，正在处理视觉结果（海康=%1, LBN=%2）")
-            .arg(hikReady ? QStringLiteral("就绪") : QStringLiteral("跳过"))
+            .arg(hikSkipped
+                     ? QStringLiteral("按路径跳过")
+                     : (hikReady ? QStringLiteral("就绪") : QStringLiteral("失败")))
             .arg(runLbn ? QStringLiteral("开") : QStringLiteral("关")));
 
     const auto lbConfig = m_lbPoseConfig;
@@ -337,7 +362,7 @@ void VisionPipelineService::finishBundleIfReady()
     const bool verbosePoseLogs = scan_tracking::common::segmentCaptureExportEnabled();
     QPointer<VisionPipelineService> self(this);
     // 位姿检测为 CPU 密集型，放到 detached 后台线程，完成后 invokeMethod 回主线程
-    std::thread([self, bundle, lbConfig, lbnConfig, hikReady, runLbn, verbosePoseLogs]() mutable {
+    std::thread([self, bundle, lbConfig, lbnConfig, hikReady, hikSkipped, runLbn, verbosePoseLogs]() mutable {
         auto completedBundle = bundle;
 
         if (runLbn) {
@@ -361,6 +386,11 @@ void VisionPipelineService::finishBundleIfReady()
                 qInfo() << QStringLiteral("[LBN位姿] 完成：已调用=") << lbn.invoked << QStringLiteral(" 成功=") << lbn.success
                         << QStringLiteral(" 说明=") << lbn.message << QStringLiteral(" 匹配点数=") << lbn.matchedPointCount;
             }
+        } else if (hikSkipped) {
+            completedBundle.lbnPoseResult.invoked = false;
+            completedBundle.lbnPoseResult.success = false;
+            completedBundle.lbnPoseResult.message =
+                QStringLiteral("path4 坡口路径跳过 LBN 位姿检测。");
         } else {
             completedBundle.lbnPoseResult.invoked = false;
             completedBundle.lbnPoseResult.message =
@@ -370,7 +400,7 @@ void VisionPipelineService::finishBundleIfReady()
         }
 
         // 转盘段（needMechEye2D）仅 LBN 标定；封头段用 CXP 双目跑 LB
-        const bool runLb = hikReady && !bundle.request.needMechEye2D;
+        const bool runLb = !hikSkipped && hikReady && !bundle.request.needMechEye2D;
         if (runLb) {
             if (verbosePoseLogs) {
                 qInfo() << QStringLiteral("[LB位姿] 开始检测，左目(CameraA)=")
@@ -406,6 +436,14 @@ void VisionPipelineService::finishBundleIfReady()
                     }
                 }
             }
+        } else if (hikSkipped) {
+            completedBundle.lbPoseResult.invoked = false;
+            completedBundle.lbPoseResult.success = false;
+            completedBundle.lbPoseResult.message =
+                QStringLiteral("path4 坡口路径跳过 LB 位姿检测。");
+            if (verbosePoseLogs) {
+                qInfo() << QStringLiteral("[LB位姿] path4 坡口路径跳过 CXP/LB");
+            }
         } else if (hikReady && bundle.request.needMechEye2D) {
             completedBundle.lbPoseResult.invoked = false;
             completedBundle.lbPoseResult.success = false;
@@ -427,7 +465,7 @@ void VisionPipelineService::finishBundleIfReady()
         // 切回主线程 emit 结果，保证线程安全
         QMetaObject::invokeMethod(
             self.data(),
-            [self, completedBundle, hikReady]() mutable {
+            [self, completedBundle, hikReady, hikSkipped]() mutable {
                 if (!self || !self->m_started) {
                     return;
                 }
@@ -443,16 +481,18 @@ void VisionPipelineService::finishBundleIfReady()
                     }
                     return false;
                 }();
-                const bool ok = bypassEnabled
+                const bool ok = bypassEnabled || hikSkipped
                     ? mechOk
                     : (mechOk
                        && completedBundle.hikCameraAResult.success()
                        && completedBundle.hikCameraBResult.success());
                 QString description;
                 if (ok) {
-                    description = bypassEnabled
+                    description = hikSkipped
+                        ? QStringLiteral("视觉组合采集完成（path4 坡口路径：仅 Mech-Eye 3D）。")
+                        : (bypassEnabled
                         ? QStringLiteral("视觉组合采集完成（旁路模式：MechEye 成功，CXP 失败不阻断）。")
-                        : QStringLiteral("视觉组合采集成功完成。");
+                        : QStringLiteral("视觉组合采集成功完成。"));
                 } else {
                     description = QStringLiteral("视觉组合采集完成但有错误。");
                 }

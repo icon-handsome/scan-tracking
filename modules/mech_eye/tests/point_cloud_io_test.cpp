@@ -185,15 +185,17 @@ void PointCloudIoTest::plyPathUsesMech3dSubdir()
 
 void PointCloudIoTest::loadThirdPartyPcdWithPaddingField()
 {
+    constexpr int kExpectedPointCount = 622375;
+
     const QString pcdPath = QDir(QStringLiteral(SCAN_TRACKING_SOURCE_DIR)).filePath(
         QStringLiteral("third_party/Po_Kou_Ce_Liang/data/templates/type_0_template.pcd"));
     QVERIFY2(QFile::exists(pcdPath), qPrintable(QStringLiteral("missing: ") + pcdPath));
 
     PointCloudFrame loaded;
     QVERIFY(loadPointCloudFrameFromPcd(pcdPath, &loaded));
-    QVERIFY(loaded.pointCount > 1000);
+    QCOMPARE(loaded.pointCount, kExpectedPointCount);
     QVERIFY(loaded.isValid());
-    QCOMPARE(loaded.pointsXYZ->size(), static_cast<std::size_t>(loaded.pointCount * 3));
+    QCOMPARE(loaded.pointsXYZ->size(), static_cast<std::size_t>(kExpectedPointCount * 3));
 }
 
 void PointCloudIoTest::loadThirdPartyPcdWithRgbField()

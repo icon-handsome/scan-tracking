@@ -177,6 +177,7 @@ struct MultiCameraCaptureRequest {
     quint32 taskId = 0;
     int segmentIndex = 0;
     bool needMechEye2D = false;
+    bool skipHikPoseCapture = false;
     scan_tracking::mech_eye::CaptureMode mechCaptureMode =
         scan_tracking::mech_eye::CaptureMode::Capture3DOnly;
     bool mechComparisonCaptureEnabled = false;
@@ -199,6 +200,9 @@ struct MultiCameraCaptureBundle {
     /// 梅卡 + 双目 + 已调用位姿算法均成功（LBN 未调用时不计入）
     bool success() const
     {
+        if (request.skipHikPoseCapture) {
+            return mechEyeResult.success();
+        }
         return mechEyeResult.success() &&
                hikCameraAResult.success() &&
                hikCameraBResult.success() &&
@@ -210,6 +214,13 @@ struct MultiCameraCaptureBundle {
         const auto flag = [](bool ok) {
             return ok ? QStringLiteral("成功") : QStringLiteral("失败");
         };
+        const auto flagOrSkip = [](bool skipped, bool ok) {
+            if (skipped) {
+                return QStringLiteral("跳过");
+            }
+            return ok ? QStringLiteral("成功") : QStringLiteral("失败");
+        };
+        const bool skipHik = request.skipHikPoseCapture;
         const QString lbnFlag = lbnPoseResult.invoked
             ? (lbnPoseResult.success ? QStringLiteral("成功") : QStringLiteral("失败"))
             : QStringLiteral("跳过");
@@ -219,10 +230,10 @@ struct MultiCameraCaptureBundle {
             .arg(request.taskId)
             .arg(request.segmentIndex)
             .arg(flag(mechEyeResult.success()))
-            .arg(flag(hikCameraAResult.success()))
-            .arg(flag(hikCameraBResult.success()))
-            .arg(flag(lbPoseResult.success))
-            .arg(lbnFlag);
+            .arg(flagOrSkip(skipHik, hikCameraAResult.success()))
+            .arg(flagOrSkip(skipHik, hikCameraBResult.success()))
+            .arg(flagOrSkip(skipHik, lbPoseResult.success))
+            .arg(skipHik ? QStringLiteral("跳过") : lbnFlag);
     }
 };
 

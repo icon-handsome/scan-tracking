@@ -17,6 +17,16 @@ void ScanSegmentHandler::execute(TaskHandlerContext& ctx) { ctx.machine.executeS
 
 namespace {
 constexpr int kDefaultScanSegmentCaptureTimeoutMs = 30000;
+
+bool isPath4BevelOnly3dMode(int pathId)
+{
+    if (pathId != 4) {
+        return false;
+    }
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    return configManager != nullptr &&
+           configManager->inspectionTypeForPath(pathId) == scan_tracking::common::InspectionType::Bevel;
+}
 }
 
 /**
@@ -88,6 +98,8 @@ void StateMachine::executeScanSegmentTask()
     const bool needMechEye2D = forceSelfCheckCapture
         ? true
         : resolveNeedRotationForSegment(pathIdForCapture, m_activeTask.scanSegmentIndex);
+    const bool skipHikPoseCapture =
+        !forceSelfCheckCapture && isPath4BevelOnly3dMode(pathIdForCapture);
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[ScanSync] 触发") << QDateTime::currentMSecsSinceEpoch();
     const auto mechCaptureMode = needMechEye2D
@@ -100,7 +112,8 @@ void StateMachine::executeScanSegmentTask()
         m_activeTask.scanSegmentIndex,
         m_activeTask.taskId,
         mechCaptureMode,
-        visionConfig.mechPointCloudProcessingComparisonEnabled);
+        visionConfig.mechPointCloudProcessingComparisonEnabled,
+        skipHikPoseCapture);
 
     if (requestId == 0) {
         finishScanSegmentFailure(
@@ -123,6 +136,7 @@ void StateMachine::executeScanSegmentTask()
         << QStringLiteral(" 段号=") << m_activeTask.scanSegmentIndex
         << QStringLiteral(" 段总数=") << m_activeTask.scanSegmentTotal
         << QStringLiteral(" 需梅卡2D=") << needMechEye2D
+        << QStringLiteral(" 跳过CXP=") << skipHikPoseCapture
         << QStringLiteral(" 超时ms=") << captureTimeoutMs;
     maybeEmitPathStarted(pathIdForCapture);
     emit scanStarted(m_activeTask.scanSegmentIndex, m_activeTask.taskId);
