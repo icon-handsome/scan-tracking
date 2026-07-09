@@ -16,12 +16,17 @@ void CodeReadHandler::execute(TaskHandlerContext& ctx) { ctx.machine.executeCode
 
 void StateMachine::executeCodeReadTask()
 {
-    qInfo(LOG_FLOW).noquote() << QStringLiteral("收到 Trig_CodeRead，当前为占位实现。");
+    static const QString kStubCodeValue = QStringLiteral("STUB-OK");
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("收到 Trig_CodeRead，联调占位返回 OK，编号=") << kStubCodeValue;
     if (m_modbus && m_modbus->isConnected()) {
-        writeAsciiPlaceholder(protocol::registers::kCodeValueAscii, protocol::registers::kCodeValueRegisterCount, QStringLiteral("RD"));
+        writeAsciiPlaceholder(
+            protocol::registers::kCodeValueAscii,
+            protocol::registers::kCodeValueRegisterCount,
+            kStubCodeValue);
     }
-    completeActiveTask(9, protocol::AckState::Failed, false);
-    emit codeReadFinished(9, QStringLiteral("RD"));
+    completeActiveTask(1, protocol::AckState::Completed, true);
+    emit codeReadFinished(1, kStubCodeValue);
 }
 
 

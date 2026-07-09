@@ -1114,11 +1114,13 @@ InspectionResult TrackingService::inspectCodeRead(int inspectionPathId, bool not
     result.measurement.algorithm = InspectionAlgorithm::CodeRead;
     result.measureItemCount = 1;
 
-    Q_UNUSED(inspectionPathId);
     // TODO: 接入 HikCameraCController CaptureType::NumberRecognition → kCodeValueAscii
+    static const QString kStubCodeValue = QStringLiteral("STUB-OK");
     result.resultCode = 1;
     result.message = QStringLiteral(
-        "编号识别已执行（占位）：路径 %1，待接入海康 C OCR。").arg(inspectionPathId);
+        "编号识别通过（联调占位 OK）：路径 %1，编号=%2。")
+                         .arg(inspectionPathId)
+                         .arg(kStubCodeValue);
     qInfo(LOG_TRACKING).noquote() << result.message;
     return deliverInspectionResult(result, notifyListener);
 }
