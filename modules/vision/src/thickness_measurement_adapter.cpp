@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -28,7 +29,7 @@ namespace {
 pcl::PointCloud<pcl::PointXYZ>::Ptr toPclPointCloud(
     const scan_tracking::mech_eye::PointCloudFrame& frame)
 {
-    auto cloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    auto cloud = std::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>(new pcl::PointCloud<pcl::PointXYZ>());
 
     const auto pointsPtr = frame.pointsXYZ;
     if (!pointsPtr || frame.pointCount <= 0) {

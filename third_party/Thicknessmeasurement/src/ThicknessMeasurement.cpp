@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -13,7 +14,6 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/ply_io.h>
-#include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
@@ -21,6 +21,10 @@ namespace
 {
 typedef pcl::PointXYZ PointT;
 typedef pcl::PointCloud<PointT> CloudT;
+
+// Windows 下 PCL SOR/KdTree 在大点云或跨 DLL 堆上易触发堆损坏
+constexpr std::size_t kMaxOutlierRemovalPoints = 80000;
+constexpr std::size_t kMaxPointsBeforePclFilters = 500000;
 
 Point3d FromEigen(const Eigen::Vector3d& value)
 {
@@ -48,6 +52,68 @@ std::string LowerExtension(const std::string& path)
         }
     }
     return ext;
+}
+
+CloudT::Ptr reownCloudPoints(const CloudT::ConstPtr& input)
+{
+    CloudT::Ptr output(new CloudT);
+    if (input == nullptr || input->empty())
+    {
+        output->width = 0;
+        output->height = 1;
+        output->is_dense = true;
+        return output;
+    }
+
+    output->points.reserve(input->points.size());
+    for (const PointT& point : input->points)
+    {
+        output->points.push_back(point);
+    }
+    output->width = input->width;
+    output->height = input->height;
+    output->is_dense = input->is_dense;
+    return output;
+}
+
+void adoptPclOwnedCloud(CloudT::Ptr& cloud)
+{
+    if (!cloud)
+    {
+        return;
+    }
+    static std::vector<CloudT::Ptr>* leaks = new std::vector<CloudT::Ptr>();
+    leaks->push_back(cloud);
+    cloud.reset();
+}
+
+CloudT::Ptr detachPclFilterOutput(CloudT::Ptr pclOutput)
+{
+    CloudT::Ptr owned = reownCloudPoints(pclOutput);
+    adoptPclOwnedCloud(pclOutput);
+    return owned;
+}
+
+CloudT::Ptr strideDownsampleIfNeeded(const CloudT::ConstPtr& input, std::size_t maxPoints)
+{
+    CloudT::Ptr owned = reownCloudPoints(input);
+    if (owned->size() <= maxPoints)
+    {
+        return owned;
+    }
+
+    const std::size_t stride =
+        (owned->size() + maxPoints - 1) / maxPoints;
+    CloudT::Ptr reduced(new CloudT);
+    reduced->points.reserve((owned->size() + stride - 1) / stride);
+    for (std::size_t index = 0; index < owned->size(); index += stride)
+    {
+        reduced->points.push_back(owned->points[index]);
+    }
+    reduced->width = static_cast<std::uint32_t>(reduced->points.size());
+    reduced->height = 1;
+    reduced->is_dense = owned->is_dense;
+    return reduced;
 }
 
 bool LoadCloud(const std::string& path, CloudT::Ptr cloud, std::string* error)
@@ -89,34 +155,39 @@ bool LoadCloud(const std::string& path, CloudT::Ptr cloud, std::string* error)
         return false;
     }
 
+    CloudT::Ptr loaded = cloud;
+    cloud = reownCloudPoints(loaded);
+    adoptPclOwnedCloud(loaded);
     return true;
 }
 
 CloudT::Ptr PreprocessCloud(const CloudT::ConstPtr& input, const PreprocessConfig& config)
 {
-    CloudT::Ptr current(new CloudT);
-    pcl::copyPointCloud(*input, *current);
+    CloudT::Ptr current = strideDownsampleIfNeeded(input, kMaxPointsBeforePclFilters);
 
-    if (config.enableVoxelDownsample)
+    if (config.enableVoxelDownsample && !current->empty())
     {
         pcl::VoxelGrid<PointT> voxel;
-        CloudT::Ptr filtered(new CloudT);
+        CloudT::Ptr filteredPcl = pcl::make_shared<CloudT>();
         const float leaf = static_cast<float>(config.leafSize);
         voxel.setInputCloud(current);
         voxel.setLeafSize(leaf, leaf, leaf);
-        voxel.filter(*filtered);
-        current = filtered;
+        voxel.filter(*filteredPcl);
+        current = detachPclFilterOutput(filteredPcl);
     }
 
-    if (config.enableOutlierRemoval && current->size() > static_cast<std::size_t>(config.meanK))
+    if (config.enableOutlierRemoval
+        && !current->empty()
+        && current->size() > static_cast<std::size_t>(config.meanK)
+        && current->size() <= kMaxOutlierRemovalPoints)
     {
         pcl::StatisticalOutlierRemoval<PointT> sor;
-        CloudT::Ptr filtered(new CloudT);
+        CloudT::Ptr filteredPcl = pcl::make_shared<CloudT>();
         sor.setInputCloud(current);
         sor.setMeanK(config.meanK);
         sor.setStddevMulThresh(config.stddevMulThresh);
-        sor.filter(*filtered);
-        current = filtered;
+        sor.filter(*filteredPcl);
+        current = detachPclFilterOutput(filteredPcl);
     }
 
     return current;
@@ -146,26 +217,26 @@ bool FindNearestPoint(
         return false;
     }
 
-    pcl::KdTreeFLANN<PointT> tree;
-    tree.setInputCloud(cloud);
-
-    PointT point;
-    point.x = static_cast<float>(query.x());
-    point.y = static_cast<float>(query.y());
-    point.z = static_cast<float>(query.z());
-
-    std::vector<int> indices(1);
-    std::vector<float> distances(1);
-    if (tree.nearestKSearch(point, 1, indices, distances) <= 0)
+    const double qx = query.x();
+    const double qy = query.y();
+    const double qz = query.z();
+    std::size_t bestIndex = 0;
+    double bestDistSq = std::numeric_limits<double>::max();
+    for (std::size_t index = 0; index < cloud->size(); ++index)
     {
-        if (error != NULL)
+        const PointT& point = cloud->points[index];
+        const double dx = static_cast<double>(point.x) - qx;
+        const double dy = static_cast<double>(point.y) - qy;
+        const double dz = static_cast<double>(point.z) - qz;
+        const double distSq = dx * dx + dy * dy + dz * dz;
+        if (distSq < bestDistSq)
         {
-            *error = "nearest point search failed";
+            bestDistSq = distSq;
+            bestIndex = index;
         }
-        return false;
     }
 
-    const PointT& found = cloud->points[indices[0]];
+    const PointT& found = cloud->points[bestIndex];
     *nearest = Eigen::Vector3d(found.x, found.y, found.z);
     return true;
 }
@@ -276,7 +347,9 @@ bool MeasureThicknessFromScanClouds(
         return false;
     }
 
-    return MeasureThicknessOnScanClouds(config, innerScanCloud, outerScanCloud, result, error);
+    const CloudT::ConstPtr innerOwned = reownCloudPoints(innerScanCloud);
+    const CloudT::ConstPtr outerOwned = reownCloudPoints(outerScanCloud);
+    return MeasureThicknessOnScanClouds(config, innerOwned, outerOwned, result, error);
 }
 
 bool SaveResult(const std::string& path, const ThicknessResult& result, std::string* error)
