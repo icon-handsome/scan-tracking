@@ -144,10 +144,14 @@ void StateMachine::executeInspectionTask()
             outerPointCount,
             m_activeTask.inspectionPathId);
     } else if (inspectionType == scan_tracking::common::InspectionType::Bevel) {
-        QList<scan_tracking::mech_eye::PointCloudFrame> segmentClouds;
+        QString mergedInspectionPcdPath;
         int totalPointCount = 0;
         if (!loadSegmentPointCloudsForInspection(
-                &segmentClouds, &totalPointCount, &segmentCount, &loadError)) {
+                nullptr,
+                &totalPointCount,
+                &segmentCount,
+                &loadError,
+                &mergedInspectionPcdPath)) {
             qWarning(LOG_FLOW).noquote()
                 << QStringLiteral("Trig_Inspection 加载坡口分段点云失败：") << loadError
                 << multiPathCacheStatusText();
@@ -174,8 +178,44 @@ void StateMachine::executeInspectionTask()
             return;
         }
 
-        trackingResult = m_tracking->inspectBevelPointCloudFramesAveraged(
-            segmentClouds, totalPointCount, m_activeTask.inspectionPathId);
+        if (mergedInspectionPcdPath.trimmed().isEmpty()
+            || !QFileInfo::exists(mergedInspectionPcdPath)) {
+            loadError = QStringLiteral("坡口检测融合点云不存在：%1").arg(mergedInspectionPcdPath);
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("Trig_Inspection 坡口落盘点云不可用：") << loadError
+                << multiPathCacheStatusText();
+            writeInspectionResult({2, 1u << 4, 0, 0});
+            if (m_inspectionResultPublisher) {
+                tracking::InspectionResult failure;
+                failure.resultCode = 2;
+                failure.ngReasonWord0 = (1u << 4);
+                failure.message = loadError;
+                m_inspectionResultPublisher(failure);
+            }
+            completeActiveTask(
+                kInspectionResProcessingFail,
+                protocol::AckState::Completed,
+                false);
+            clearActiveTask();
+            m_ipcState = protocol::IpcState::Ready;
+            m_currentStage = protocol::Stage::Idle;
+            m_progress = 0;
+            setState(AppState::Ready);
+            publishIpcStatus();
+            return;
+        }
+
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[Bevel] 从落盘融合 PCD 执行测量（避免主线程持有千万级分段点云）")
+            << QStringLiteral(" path=") << mergedInspectionPcdPath
+            << QStringLiteral(" 总点数=") << totalPointCount
+            << QStringLiteral(" 参与段数=") << segmentCount;
+
+        trackingResult = m_tracking->inspectBevelPointCloudFile(
+            mergedInspectionPcdPath, m_activeTask.inspectionPathId);
+        if (trackingResult.sourcePointCount <= 0 && totalPointCount > 0) {
+            trackingResult.sourcePointCount = totalPointCount;
+        }
     } else if (inspectionType == scan_tracking::common::InspectionType::Hole) {
         QList<scan_tracking::mech_eye::PointCloudFrame> segmentClouds;
         QStringList segmentPcdPaths;

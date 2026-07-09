@@ -4979,6 +4979,14 @@ bool StateMachine::reportPersonZoneAlarm(bool alarm)
 {
     namespace safety = protocol::safety_bits;
 
+    if (const auto* configMgr = common::ConfigManager::instance();
+        configMgr && !configMgr->flowControlConfig().personZoneAlarmToPlcEnabled) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("人员区域报警已忽略（[FlowControl] personZoneAlarmToPlcEnabled=false）：")
+            << (alarm ? QStringLiteral("有人") : QStringLiteral("无人"));
+        return true;
+    }
+
     if (alarm) {
         if (m_personZoneAlarmActive &&
             (m_ipcSafetyActionWord & safety::kAiPersonIntrusion) != 0) {

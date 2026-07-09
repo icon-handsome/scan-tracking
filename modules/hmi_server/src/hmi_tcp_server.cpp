@@ -1094,8 +1094,16 @@ void HmiTcpServer::handleCmdReportPersonZoneAlarm(const QJsonObject& message)
         return;
     }
 
+    const bool personZoneAlarmToPlcEnabled =
+        common::ConfigManager::instance()
+        && common::ConfigManager::instance()->flowControlConfig().personZoneAlarmToPlcEnabled;
+
     QString responseMessage;
-    if (stateChanged) {
+    if (!personZoneAlarmToPlcEnabled) {
+        responseMessage = alarm
+            ? QStringLiteral("人员区域报警已收到（测试模式，未联锁 PLC）")
+            : QStringLiteral("人员区域解除已收到（测试模式，未联锁 PLC）");
+    } else if (stateChanged) {
         responseMessage = alarm
             ? QStringLiteral("人员区域报警已上报 PLC")
             : QStringLiteral("人员区域报警已解除");

@@ -537,6 +537,7 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("algorithmBypassEnabled", false);
     settings.setValue("firstPathPauseAfterPoint", 0);
     settings.setValue("internalSurfaceOnlyEnabled", false);
+    settings.setValue("personZoneAlarmToPlcEnabled", true);
     settings.endGroup();
 
     settings.beginGroup("SegmentCaptureExport");
@@ -804,6 +805,8 @@ void ConfigManager::load(const QString& filePath)
         qMax(0, settings.value("firstPathPauseAfterPoint", 0).toInt());
     m_flowControlConfig.internalSurfaceOnlyEnabled =
         settings.value("internalSurfaceOnlyEnabled", false).toBool();
+    m_flowControlConfig.personZoneAlarmToPlcEnabled =
+        settings.value("personZoneAlarmToPlcEnabled", true).toBool();
     m_flowControlConfig.scanCacheDirectory = settings.value("scanCacheDirectory").toString().trimmed();
     m_flowControlConfig.retainSegmentPly = settings.value("retainSegmentPly", true).toBool();
     settings.endGroup();
@@ -819,6 +822,12 @@ void ConfigManager::load(const QString& filePath)
         qInfo(LOG_CONFIG).noquote()
             << QStringLiteral("内表面单路径模式已启用（[FlowControl] internalSurfaceOnlyEnabled=true）："
                               "将仅执行 inspectionType=internal_surface 的扫描路径。");
+    }
+
+    if (!m_flowControlConfig.personZoneAlarmToPlcEnabled) {
+        qWarning(LOG_CONFIG).noquote()
+            << QStringLiteral("人员区域报警 PLC 联锁已关闭（[FlowControl] personZoneAlarmToPlcEnabled=false）："
+                              "显控上报不会写 IPC_SafetyAction_Word，流程不会因人员报警停止。");
     }
 
     settings.beginGroup("SegmentCaptureExport");

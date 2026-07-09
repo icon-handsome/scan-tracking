@@ -919,8 +919,7 @@ InspectionResult TrackingService::inspectBevelPointCloudFramesAveraged(
             segmentCloud,
             recipe,
             bevelConfig.angleTolDeg,
-            bevelConfig.lengthTolMm,
-            0);
+            bevelConfig.lengthTolMm);
 
         if (!detection.invoked) {
             result.resultCode = 2;

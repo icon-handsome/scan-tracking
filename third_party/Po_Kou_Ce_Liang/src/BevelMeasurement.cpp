@@ -11,7 +11,6 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/ply_io.h>
-#include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/registration/correspondence_rejection_trimmed.h>
 #include <pcl/registration/icp.h>
 
@@ -72,6 +71,14 @@ void adoptPclIoLoadedCloud(CloudT::Ptr& cloud)
     static std::vector<CloudT::Ptr>* ioLeaks = new std::vector<CloudT::Ptr>();
     ioLeaks->push_back(cloud);
     cloud.reset();
+}
+
+/** SOR/VoxelGrid/ICP 等 PCL 滤波输出：复制到 exe 堆，原 Ptr 泄漏避免跨 DLL 析构。 */
+CloudT::Ptr detachPclFilterOutput(CloudT::Ptr pclOutput)
+{
+    CloudT::Ptr owned = reownCloudPoints(pclOutput);
+    adoptPclIoLoadedCloud(pclOutput);
+    return owned;
 }
 
 CloudT::Ptr transformCloudInProcessHeap(const CloudT::ConstPtr& input, const Eigen::Matrix4f& matrix)
@@ -466,7 +473,7 @@ CloudT::Ptr preprocess(CloudT::Ptr current, const BevelConfig& cfg)
         sor.setStddevMulThresh(cfg.sorStddevMulThresh);
         CloudT::Ptr filteredPcl = pcl::make_shared<CloudT>();
         sor.filter(*filteredPcl);
-        current = filteredPcl;
+        current = detachPclFilterOutput(filteredPcl);
     }
 
     return current;
@@ -489,7 +496,7 @@ CloudT::Ptr downsampleForIcp(const CloudT::ConstPtr& cloud, const BevelConfig& c
             if (allowSaveCloud && cfg.saveDownsampledCloud) {
                 pcl::io::savePCDFileBinary(cfg.downsampledCloudPath, *sampledPcl);
             }
-            return sampledPcl;
+            return detachPclFilterOutput(sampledPcl);
         }
         leaf *= 2.0f;
     }
@@ -696,17 +703,32 @@ BevelMeasurementResult computePlaneFitMeasurement(const std::map<std::string, Ei
     return buildMeasurementResult(angleDeg, length, icpFitness, scanToTemplate, cfg);
 }
 
-Eigen::Vector3f nearestPoint(pcl::KdTreeFLANN<PointT>& tree,
-                             const CloudT::ConstPtr& cloud,
-                             const Eigen::Vector3f& query)
+/// 在进程堆点云上暴力最近邻（crop 后通常 <2 万点）；避免 PCL KdTree 跨 DLL 析构堆损坏。
+Eigen::Vector3f nearestPointInCloud(const CloudT::ConstPtr& cloud,
+                                    const Eigen::Vector3f& query)
 {
-    std::vector<int> indices(1);
-    std::vector<float> sqrDistances(1);
-    PointT p(query.x(), query.y(), query.z());
-    if (tree.nearestKSearch(p, 1, indices, sqrDistances) <= 0) {
-        throw std::runtime_error("Nearest point search failed");
+    if (cloud == nullptr || cloud->empty()) {
+        throw std::runtime_error("Nearest point search failed: empty cloud");
     }
-    const PointT& found = cloud->points[indices[0]];
+
+    const float qx = query.x();
+    const float qy = query.y();
+    const float qz = query.z();
+    std::size_t bestIndex = 0;
+    float bestDistSq = std::numeric_limits<float>::max();
+    for (std::size_t index = 0; index < cloud->size(); ++index) {
+        const PointT& point = cloud->points[index];
+        const float dx = point.x - qx;
+        const float dy = point.y - qy;
+        const float dz = point.z - qz;
+        const float distSq = dx * dx + dy * dy + dz * dz;
+        if (distSq < bestDistSq) {
+            bestDistSq = distSq;
+            bestIndex = index;
+        }
+    }
+
+    const PointT& found = cloud->points[bestIndex];
     return Eigen::Vector3f(found.x, found.y, found.z);
 }
 
@@ -721,7 +743,6 @@ BevelMeasurementResult solveGeometry(const CloudT::ConstPtr& icpScan,
 
     Eigen::Matrix4f scanToTemplate = Eigen::Matrix4f::Identity();
     double icpFitness = 0.0;
-    CloudT::Ptr aligned;
 
     {
         pcl::IterativeClosestPoint<PointT, PointT> icp;
@@ -739,11 +760,12 @@ BevelMeasurementResult solveGeometry(const CloudT::ConstPtr& icpScan,
             icp.addCorrespondenceRejector(trimmed);
         }
 
+        // ICP 对齐云仅用于求变换矩阵；结果在 PCL DLL 堆上，须泄漏原 Ptr（见 detachPclFilterOutput）。
         CloudT::Ptr alignedPcl = pcl::make_shared<CloudT>();
         icp.align(*alignedPcl);
-        aligned = alignedPcl;
         scanToTemplate = icp.getFinalTransformation();
         icpFitness = icp.getFitnessScore();
+        adoptPclIoLoadedCloud(alignedPcl);
     }
 
     CloudT::Ptr scanAlignedToTemplate =
@@ -754,23 +776,18 @@ BevelMeasurementResult solveGeometry(const CloudT::ConstPtr& icpScan,
 
     std::map<std::string, Eigen::Vector3f> actual;
     std::map<std::string, Eigen::Vector3f> templateFeature;
+    for (const TemplateFeature& feature : features)
     {
-        pcl::KdTreeFLANN<PointT> alignedTree;
-        alignedTree.setInputCloud(scanAlignedToTemplate);
-
-        for (const TemplateFeature& feature : features)
+        templateFeature[feature.name] = feature.point;
+        if (feature.name == "project_normal" || feature.name == "project_point")
         {
-            templateFeature[feature.name] = feature.point;
-            if (feature.name == "project_normal" || feature.name == "project_point")
-            {
-                continue;
-            }
-            actual[feature.name] = nearestPoint(alignedTree, scanAlignedToTemplate, feature.point);
-            std::cout << "matched feature point: " << feature.name << " "
-                      << actual[feature.name].x() << " "
-                      << actual[feature.name].y() << " "
-                      << actual[feature.name].z() << std::endl;
+            continue;
         }
+        actual[feature.name] = nearestPointInCloud(scanAlignedToTemplate, feature.point);
+        std::cout << "matched feature point: " << feature.name << " "
+                  << actual[feature.name].x() << " "
+                  << actual[feature.name].y() << " "
+                  << actual[feature.name].z() << std::endl;
     }
 
     if (cfg.measurementMethod == "direct_points")
