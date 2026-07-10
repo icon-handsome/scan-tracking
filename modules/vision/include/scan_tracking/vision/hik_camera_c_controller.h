@@ -53,8 +53,17 @@ public:
     /* 向已连接的智能相机发送拍照指令（TCP start\r\n），类型决定后续 FTP 文件名解析 */
     bool requestCapture(CaptureType type = CaptureType::SurfaceDefect);
 
-    /* 触发一次编号识别并等待 OCR 文本返回 */
+    /* 触发一次编号识别并等待 OCR 文本返回（发 start + 同步等待） */
     bool captureAndWaitForOcr(QString* codeValue, QString* errorMessage = nullptr, int timeoutMs = -1);
+
+    /* path3 方案 B：Trig_ScanSegment 仅发 start，不等待 OCR */
+    bool triggerCodeReadCapture(QString* errorMessage = nullptr);
+
+    /* path3 方案 B：Trig_Inspection 读取 ScanSegment 阶段触发的 OCR（不再发 start） */
+    bool collectCodeReadResult(
+        QString* codeValue,
+        QString* errorMessage = nullptr,
+        int timeoutMs = -1);
 
     /* 启用周期性自动拍照（联调/冒烟，默认 10s 间隔） */
     void enableTestMode(bool enable, int intervalMs = 10000);
@@ -110,6 +119,8 @@ private:
     QString m_lastOcrText;        ///< OCR 结果限频：上次已打印文本
     qint64 m_lastOcrLogMs = 0;
     int m_suppressedOcrLogCount = 0;
+
+    QString m_codeReadSessionValue;  ///< 当前编号识别会话 OCR（trigger 后由 TCP 回包写入）
 };
 
 }  // namespace vision

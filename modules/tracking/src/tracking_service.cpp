@@ -1149,6 +1149,72 @@ InspectionResult TrackingService::inspectCodeRead(int inspectionPathId, bool not
     return deliverInspectionResult(result, notifyListener);
 }
 
+bool TrackingService::triggerCodeReadCapture(QString* errorMessage) const
+{
+    if (m_hikCameraCController == nullptr) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("编号识别失败：海康 C 控制器未注入。");
+        }
+        return false;
+    }
+    return m_hikCameraCController->triggerCodeReadCapture(errorMessage);
+}
+
+namespace {
+
+QString defaultCodeReadPlaceholder()
+{
+    // TODO(code_read): OCR 完善后移除占位，未收到 TCP 文本时再决定是否仍默认 OK
+    return QStringLiteral("DEFAULT");
+}
+
+}  // namespace
+
+InspectionResult TrackingService::finalizeCodeReadInspection(int inspectionPathId, bool notifyListener) const
+{
+    ensureInspectionMeasurementMetaTypeRegistered();
+
+    InspectionResult result;
+    result.sourcePointCount = 0;
+    result.measurement.algorithm = InspectionAlgorithm::CodeRead;
+    result.measureItemCount = 1;
+    result.measurement.qualityCode = 1;
+
+    if (m_hikCameraCController == nullptr) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral("编号识别失败：海康 C 控制器未注入。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    QString codeValue;
+    QString errorMessage;
+    if (!m_hikCameraCController->collectCodeReadResult(&codeValue, &errorMessage)) {
+        codeValue = defaultCodeReadPlaceholder();
+        result.resultCode = 1;
+        result.measurement.qualityCode = 0;
+        result.codeValue = codeValue;
+        result.message = QStringLiteral(
+                             "编号识别占位通过：路径 %1，OCR 未就绪，已写入默认编号=%2。（%3）")
+                             .arg(inspectionPathId)
+                             .arg(codeValue)
+                             .arg(errorMessage.isEmpty()
+                                      ? QStringLiteral("Trig_Inspection 时 OCR 结果尚未就绪")
+                                      : errorMessage);
+        qWarning(LOG_TRACKING).noquote() << result.message;
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    result.resultCode = 1;
+    result.measurement.qualityCode = 0;
+    result.codeValue = codeValue;
+    result.message = QStringLiteral("编号识别通过：路径 %1，编号=%2。")
+                         .arg(inspectionPathId)
+                         .arg(codeValue);
+    qInfo(LOG_TRACKING).noquote() << result.message;
+    return deliverInspectionResult(result, notifyListener);
+}
+
 InspectionResult TrackingService::inspectSurfaceDefect(int inspectionPathId, bool notifyListener) const
 {
     ensureInspectionMeasurementMetaTypeRegistered();

@@ -181,8 +181,14 @@ public:
         int inspectionPathId = 0,
         bool notifyListener = true) const;
 
-    /// 编号识别（inspectionType=code_read，不依赖点云合并）
+    /// 编号识别（inspectionType=code_read，不依赖点云合并；Trig_CodeRead 一次性触发+等待）
     InspectionResult inspectCodeRead(int inspectionPathId = 0, bool notifyListener = true) const;
+
+    /// path3 方案 B：Trig_ScanSegment 仅向海康 C 发 start
+    bool triggerCodeReadCapture(QString* errorMessage = nullptr) const;
+
+    /// path3 方案 B：Trig_Inspection 收集 OCR 并返回结果（不再发 start）
+    InspectionResult finalizeCodeReadInspection(int inspectionPathId = 0, bool notifyListener = true) const;
 
     /// 表面缺陷识别（inspectionType=defect，不依赖点云合并）
     InspectionResult inspectSurfaceDefect(int inspectionPathId = 0, bool notifyListener = true) const;

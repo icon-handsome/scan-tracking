@@ -80,19 +80,21 @@ void StateMachine::executeInspectionTask()
     }
 
     QString loadError;
-    ensurePoseStitchRunRootDirectory();
-    persistInspectionPoseStitchOutput(m_activeTask.inspectionPathId);
-
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
     const auto inspectionType = configManager != nullptr
         ? configManager->inspectionTypeForPath(m_activeTask.inspectionPathId)
         : scan_tracking::common::InspectionType::Bevel;
 
+    if (inspectionType != scan_tracking::common::InspectionType::CodeRead) {
+        ensurePoseStitchRunRootDirectory();
+        persistInspectionPoseStitchOutput(m_activeTask.inspectionPathId);
+    }
+
     tracking::InspectionResult trackingResult;
     int segmentCount = 0;
 
     if (inspectionType == scan_tracking::common::InspectionType::CodeRead) {
-        trackingResult = m_tracking->inspectCodeRead(m_activeTask.inspectionPathId);
+        trackingResult = m_tracking->finalizeCodeReadInspection(m_activeTask.inspectionPathId);
     } else if (inspectionType == scan_tracking::common::InspectionType::Defect) {
         trackingResult = m_tracking->inspectSurfaceDefect(m_activeTask.inspectionPathId);
     } else if (inspectionType == scan_tracking::common::InspectionType::Thickness) {

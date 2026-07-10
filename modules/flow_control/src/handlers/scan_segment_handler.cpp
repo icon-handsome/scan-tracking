@@ -1,6 +1,7 @@
 #include "scan_tracking/flow_control/handlers/scan_segment_handler.h"
 
 #include "scan_tracking/flow_control/state_machine.h"
+#include "scan_tracking/tracking/tracking_service.h"
 #include "scan_tracking/vision/vision_pipeline_service.h"
 
 #include <QtCore/QDateTime>
@@ -27,6 +28,13 @@ bool isPath4BevelOnly3dMode(int pathId)
     return configManager != nullptr &&
            configManager->inspectionTypeForPath(pathId) == scan_tracking::common::InspectionType::Bevel;
 }
+
+bool isPathCodeReadOnly(int pathId)
+{
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    return configManager != nullptr &&
+           configManager->inspectionTypeForPath(pathId) == scan_tracking::common::InspectionType::CodeRead;
+}
 }
 
 /**
@@ -43,6 +51,18 @@ bool isPath4BevelOnly3dMode(int pathId)
  */
 void StateMachine::executeScanSegmentTask()
 {
+    QString validationError;
+    if (!validateScanSegmentRequest(m_lastCommandBlock, &validationError)) {
+        finishScanSegmentFailure(9, 2, 724, validationError, validationError);
+        return;
+    }
+
+    const int pathIdForCapture = resolvePathIdForIncomingSegment(m_activeTask.scanSegmentIndex);
+    if (isPathCodeReadOnly(pathIdForCapture)) {
+        executeCodeReadScanSegmentTask(pathIdForCapture);
+        return;
+    }
+
     // 优先走视觉编排层：梅卡点云 + 海康双目黑白图同时采集。
     if (m_visionPipeline == nullptr) {
         finishScanSegmentFailure(
@@ -51,14 +71,6 @@ void StateMachine::executeScanSegmentTask()
             720,                  // 报警代码：720 = 视觉编排服务不可用
             QStringLiteral("视觉流水线服务不可用"),
             QStringLiteral("视觉流水线服务不可用"));
-        return;
-    }
-
-    // 验证扫描分段请求的参数合法性
-    QString validationError;
-    if (!validateScanSegmentRequest(m_lastCommandBlock, &validationError)) {
-        // 段号错误或重复触发会污染分段缓存，因此在拍照前就拒绝本次业务。
-        finishScanSegmentFailure(9, 2, 724, validationError, validationError);
         return;
     }
 
@@ -93,7 +105,6 @@ void StateMachine::executeScanSegmentTask()
         ? static_cast<int>(m_activeTask.timeoutSeconds) * 1000
         : kDefaultScanSegmentCaptureTimeoutMs;
 
-    const int pathIdForCapture = resolvePathIdForIncomingSegment(m_activeTask.scanSegmentIndex);
     const bool forceSelfCheckCapture = isSelfCheckSessionActive();
     const bool needMechEye2D = forceSelfCheckCapture
         ? true
@@ -140,6 +151,83 @@ void StateMachine::executeScanSegmentTask()
         << QStringLiteral(" 超时ms=") << captureTimeoutMs;
     maybeEmitPathStarted(pathIdForCapture);
     emit scanStarted(m_activeTask.scanSegmentIndex, m_activeTask.taskId);
+}
+
+bool StateMachine::isPathCodeReadOnly(int pathId) const
+{
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    return configManager != nullptr &&
+           configManager->inspectionTypeForPath(pathId) == scan_tracking::common::InspectionType::CodeRead;
+}
+
+void StateMachine::executeCodeReadScanSegmentTask(int pathIdForCapture)
+{
+    if (m_tracking == nullptr) {
+        finishScanSegmentFailure(
+            5,
+            3,
+            720,
+            QStringLiteral("编号识别扫描失败：Tracking 服务不可用"),
+            QStringLiteral("编号识别扫描失败：Tracking 服务不可用"));
+        return;
+    }
+
+    QString errorMessage;
+    if (!m_tracking->triggerCodeReadCapture(&errorMessage)) {
+        finishScanSegmentFailure(
+            5,
+            2,
+            721,
+            errorMessage.isEmpty()
+                ? QStringLiteral("编号识别扫描失败：海康 C 未就绪")
+                : errorMessage,
+            errorMessage.isEmpty()
+                ? QStringLiteral("编号识别扫描失败：海康 C 未就绪")
+                : errorMessage);
+        return;
+    }
+
+    m_progress = 100;
+    publishIpcStatus();
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("Trig_ScanSegment 编号识别：已发 start，跳过梅卡/CXP")
+        << QStringLiteral(" 路径=") << pathIdForCapture
+        << QStringLiteral(" 段号=") << m_activeTask.scanSegmentIndex;
+
+    maybeEmitPathStarted(pathIdForCapture);
+    emit scanStarted(m_activeTask.scanSegmentIndex, m_activeTask.taskId);
+    commitCodeReadScanSegmentComplete(pathIdForCapture, m_activeTask.scanSegmentIndex);
+}
+
+void StateMachine::commitCodeReadScanSegmentComplete(int pathId, int segmentIndex)
+{
+    if (pathId != m_currentPathId) {
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[多路径] 切换路径（编号识别）")
+            << QStringLiteral(" 段号=") << segmentIndex
+            << QStringLiteral(" 旧路径ID=") << m_currentPathId
+            << QStringLiteral(" 新路径ID=") << pathId;
+        m_currentPathId = pathId;
+        m_currentPathSegments.clear();
+    }
+
+    m_currentPathSegments.insert(segmentIndex);
+    {
+        std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
+        m_codeReadCompletedSegments[pathId].insert(segmentIndex);
+    }
+
+    writeScanSegmentResult(segmentIndex, 1, 0);
+    completeActiveTask(1);
+    emit scanFinished(segmentIndex, 1, 1, 0);
+
+    maybeLatchFirstPathStepPause(pathId, segmentIndex);
+    maybeEmitPathFinished(pathId);
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[CodeRead] 扫描段握手完成")
+        << QStringLiteral(" [路径") << pathId << QStringLiteral("][段") << segmentIndex << QStringLiteral("]");
 }
 
 

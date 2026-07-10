@@ -424,6 +424,13 @@ private:
     // 执行扫描分段任务
     void executeScanSegmentTask();
 
+    // path3/code_read：Trig_ScanSegment 仅发海康 C start，不采集梅卡/CXP
+    void executeCodeReadScanSegmentTask(int pathIdForCapture);
+
+    void commitCodeReadScanSegmentComplete(int pathId, int segmentIndex);
+
+    bool isPathCodeReadOnly(int pathId) const;
+
     // 执行检测任务
     void executeInspectionTask();
 
@@ -787,6 +794,7 @@ private:
     QMap<int, QMap<int, scan_tracking::mech_eye::CaptureResult>> m_pathSegmentCaptureResults;  // 多路径点云缓存
     QMap<int, QMap<int, scan_tracking::mech_eye::PointCloudFrame>> m_pathSegmentRawPointClouds;  // 采集原始点云（位姿拼接前）
     QMap<int, QMap<int, scan_tracking::vision::MultiCameraCaptureBundle>> m_pathSegmentCaptureBundles;  // 多路径视觉 bundle
+    QMap<int, QSet<int>> m_codeReadCompletedSegments;  // code_read 路径：已完成 Trig_ScanSegment 的段号
     int m_currentPathId = 1;                                // 当前路径ID（自动递增）
     QSet<int> m_currentPathSegments;                        // 当前路径已缓存的段号集合（用于检测重复）
     QSet<int> m_emittedPathStarted;                         // 本工件已推送 path.started 的路径

@@ -295,6 +295,124 @@ bool HikCameraCController::requestCapture(CaptureType type)
     return m_tcpServer->sendStartCaptureToCamera(m_smartCameraIp);
 }
 
+bool HikCameraCController::triggerCodeReadCapture(QString* errorMessage)
+{
+    m_codeReadSessionValue.clear();
+    m_currentCaptureType = CaptureType::NumberRecognition;
+    m_captureCounter++;
+
+    if (!requestCapture(CaptureType::NumberRecognition)) {
+        if (errorMessage != nullptr) {
+            if (!isTcpServerRunning()) {
+                *errorMessage = QStringLiteral("海康 C 编号识别触发失败：TCP 服务器未运行。");
+            } else if (!isCameraConnectedToTcp()) {
+                *errorMessage = QStringLiteral("海康 C 编号识别触发失败：相机未就绪或 TCP 未连接。");
+            } else {
+                *errorMessage = QStringLiteral("海康 C 编号识别触发失败：无法发送 start。");
+            }
+        }
+        return false;
+    }
+
+    qInfo(hikCControllerLog) << QStringLiteral("编号识别已触发（仅 start，等待 Trig_Inspection 收集 OCR）");
+    return true;
+}
+
+bool HikCameraCController::collectCodeReadResult(
+    QString* codeValue,
+    QString* errorMessage,
+    int timeoutMs)
+{
+    if (codeValue != nullptr) {
+        codeValue->clear();
+    }
+
+    if (!m_started) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("海康 C 控制器未启动。");
+        }
+        return false;
+    }
+
+    const int effectiveTimeoutMs =
+        timeoutMs >= 0 ? timeoutMs : (m_config.hikCaptureTimeoutMs > 0 ? m_config.hikCaptureTimeoutMs : 5000);
+
+    const auto takeIfReady = [&]() -> bool {
+        const QString normalized = m_codeReadSessionValue.trimmed();
+        if (normalized.isEmpty()) {
+            return false;
+        }
+        if (codeValue != nullptr) {
+            *codeValue = normalized;
+        }
+        return true;
+    };
+
+    if (takeIfReady()) {
+        return true;
+    }
+
+    if (effectiveTimeoutMs <= 0) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("编号识别结果尚未就绪。");
+        }
+        return false;
+    }
+
+    QString capturedCodeValue;
+    bool received = false;
+    QEventLoop loop;
+    QTimer timeoutTimer;
+    timeoutTimer.setSingleShot(true);
+
+    const auto ocrConn = QObject::connect(
+        this,
+        &HikCameraCController::ocrResultReceived,
+        &loop,
+        [&](CaptureType type, const QString& value) {
+            if (type != CaptureType::NumberRecognition) {
+                return;
+            }
+            const QString normalized = value.trimmed();
+            if (normalized.isEmpty()) {
+                return;
+            }
+            capturedCodeValue = normalized;
+            received = true;
+            loop.quit();
+        },
+        Qt::QueuedConnection);
+    const auto timeoutConn = QObject::connect(
+        &timeoutTimer,
+        &QTimer::timeout,
+        &loop,
+        [&loop]() { loop.quit(); },
+        Qt::QueuedConnection);
+
+    timeoutTimer.start(effectiveTimeoutMs);
+    loop.exec();
+
+    QObject::disconnect(ocrConn);
+    QObject::disconnect(timeoutConn);
+
+    if (!received && takeIfReady()) {
+        return true;
+    }
+
+    if (!received) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("海康 C 编号识别超时：%1 ms 内未收到 OCR 文本。")
+                                .arg(effectiveTimeoutMs);
+        }
+        return false;
+    }
+
+    if (codeValue != nullptr) {
+        *codeValue = capturedCodeValue;
+    }
+    return true;
+}
+
 bool HikCameraCController::captureAndWaitForOcr(
     QString* codeValue,
     QString* errorMessage,
@@ -528,6 +646,9 @@ void HikCameraCController::onTcpCommandReceived(QString cameraIp, QString comman
     if (!ocrText.isEmpty()
         && ocrText.compare(QStringLiteral("hello"), Qt::CaseInsensitive) != 0) {
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        if (m_currentCaptureType == CaptureType::NumberRecognition) {
+            m_codeReadSessionValue = ocrText;
+        }
         emit ocrResultReceived(m_currentCaptureType, ocrText);
 
         // 限频策略：

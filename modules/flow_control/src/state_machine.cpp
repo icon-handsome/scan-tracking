@@ -2850,6 +2850,22 @@ bool StateMachine::isPathScanComplete(int pathId) const
         return false;
     }
 
+    const auto* configManager = scan_tracking::common::ConfigManager::instance();
+    if (configManager != nullptr &&
+        configManager->inspectionTypeForPath(pathId) == scan_tracking::common::InspectionType::CodeRead) {
+        std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
+        const auto pathIt = m_codeReadCompletedSegments.constFind(pathId);
+        if (pathIt == m_codeReadCompletedSegments.cend()) {
+            return false;
+        }
+        for (int segmentIndex = 1; segmentIndex <= scanSegmentTotal; ++segmentIndex) {
+            if (!pathIt->contains(segmentIndex)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
     if (!m_pathSegmentCaptureResults.contains(pathId)) {
         return false;
@@ -3245,6 +3261,7 @@ void StateMachine::clearPathSegmentCache(int pathId, bool preservePathProgress)
         }
         m_pathSegmentRawPointClouds.remove(pathId);
     }
+    m_codeReadCompletedSegments.remove(pathId);
     if (!preservePathProgress && m_currentPathId == pathId) {
         m_currentPathSegments.clear();
     }
@@ -3952,7 +3969,7 @@ tracking::InspectionResult StateMachine::runDebugInspectionOnCachedSegments() co
         : scan_tracking::common::InspectionType::Bevel;
 
     if (inspectionType == scan_tracking::common::InspectionType::CodeRead) {
-        return m_tracking->inspectCodeRead(inspectPathId, false);
+        return m_tracking->finalizeCodeReadInspection(inspectPathId, false);
     }
 
     if (inspectionType == scan_tracking::common::InspectionType::Defect) {
@@ -5313,6 +5330,7 @@ void StateMachine::resetScanSegmentCache()
         }
     }
     m_pathSegmentRawPointClouds.clear();
+    m_codeReadCompletedSegments.clear();
     
     // 重置路径上下文
     m_currentPathId = 1;
