@@ -53,6 +53,9 @@ public:
     /* 向已连接的智能相机发送拍照指令（TCP start\r\n），类型决定后续 FTP 文件名解析 */
     bool requestCapture(CaptureType type = CaptureType::SurfaceDefect);
 
+    /* 触发一次编号识别并等待 OCR 文本返回 */
+    bool captureAndWaitForOcr(QString* codeValue, QString* errorMessage = nullptr, int timeoutMs = -1);
+
     /* 启用周期性自动拍照（联调/冒烟，默认 10s 间隔） */
     void enableTestMode(bool enable, int intervalMs = 10000);
 
@@ -61,6 +64,7 @@ signals:
     void fatalError(scan_tracking::vision::VisionErrorCode code, QString message);
     void captureCompleted(CaptureType type, QByteArray imageData);
     void imageReceived(CaptureType type, QString filePath, qint64 fileSize);  ///< FTP 落图就绪
+    void ocrResultReceived(CaptureType type, QString codeValue);
 
 private slots:
     void onTcpServerStarted(QString listenIp, quint16 port);

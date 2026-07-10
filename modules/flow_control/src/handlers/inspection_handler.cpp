@@ -385,9 +385,20 @@ void StateMachine::executeInspectionTask()
         << QStringLiteral(" angleDeg=") << trackingResult.measurement.headAngleTol
         << QStringLiteral(" lengthMm=") << trackingResult.measurement.bluntHeightTol
         << QStringLiteral(" thicknessMm=") << trackingResult.measurement.thicknessMm
+        << QStringLiteral(" codeValue=")
+        << (trackingResult.codeValue.isEmpty() ? QStringLiteral("<empty>") : trackingResult.codeValue)
         << QStringLiteral(" 说明=") << trackingResult.message;
 
     writeInspectionResult(summary);
+
+    if (inspectionType == scan_tracking::common::InspectionType::CodeRead
+        && m_modbus
+        && m_modbus->isConnected()) {
+        writeAsciiPlaceholder(
+            protocol::registers::kCodeValueAscii,
+            protocol::registers::kCodeValueRegisterCount,
+            trackingResult.codeValue);
+    }
 
     const quint16 plcRes = summary.resultCode;
     qInfo(LOG_FLOW).noquote()
@@ -397,6 +408,9 @@ void StateMachine::executeInspectionTask()
         << QStringLiteral(" measureItemCount=") << summary.measureItemCount;
     completeActiveTask(plcRes, protocol::AckState::Completed, plcRes == kInspectionResOk);
     markPathInspectionCompleted(m_activeTask.inspectionPathId);
+    if (inspectionType == scan_tracking::common::InspectionType::CodeRead) {
+        emit codeReadFinished(summary.resultCode, trackingResult.codeValue);
+    }
     emit inspectionFinished(
         summary.resultCode, summary.ngReasonWord0, summary.ngReasonWord1,
         summary.measureItemCount, trackingResult.measurement, trackingResult.message);

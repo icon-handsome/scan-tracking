@@ -10,6 +10,7 @@
 #include "scan_tracking/common/config_manager.h"
 #include "scan_tracking/tracking/lb_pose_check.h"
 #include "scan_tracking/vision/bevel_measurement_adapter.h"
+#include "scan_tracking/vision/hik_camera_c_controller.h"
 #ifdef SCAN_TRACKING_HAS_INTERNAL_SURFACE_MEASUREMENT
 #include "scan_tracking/vision/internal_surface_measurement_adapter.h"
 #endif
@@ -314,6 +315,12 @@ TrackingService::~TrackingService()
 void TrackingService::setInspectionResultNotifier(InspectionResultNotifier notifier)
 {
     m_inspectionResultNotifier = std::move(notifier);
+}
+
+void TrackingService::setHikCameraCController(
+    scan_tracking::vision::HikCameraCController* controller)
+{
+    m_hikCameraCController = controller;
 }
 
 void TrackingService::clearInspectionResultNotifier()
@@ -1112,14 +1119,32 @@ InspectionResult TrackingService::inspectCodeRead(int inspectionPathId, bool not
     result.sourcePointCount = 0;
     result.measurement.algorithm = InspectionAlgorithm::CodeRead;
     result.measureItemCount = 1;
+    result.measurement.qualityCode = 1;
 
-    // TODO: 接入 HikCameraCController CaptureType::NumberRecognition → kCodeValueAscii
-    static const QString kStubCodeValue = QStringLiteral("STUB-OK");
+    if (m_hikCameraCController == nullptr) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral("编号识别失败：海康 C 控制器未注入。");
+        return deliverInspectionResult(result, notifyListener);
+    }
+
+    QString codeValue;
+    QString errorMessage;
+    if (!m_hikCameraCController->captureAndWaitForOcr(&codeValue, &errorMessage)) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = errorMessage.isEmpty()
+            ? QStringLiteral("编号识别失败：海康 C 未返回 OCR 文本。")
+            : errorMessage;
+        return deliverInspectionResult(result, notifyListener);
+    }
+
     result.resultCode = 1;
-    result.message = QStringLiteral(
-        "编号识别通过（联调占位 OK）：路径 %1，编号=%2。")
+    result.measurement.qualityCode = 0;
+    result.codeValue = codeValue;
+    result.message = QStringLiteral("编号识别通过：路径 %1，编号=%2。")
                          .arg(inspectionPathId)
-                         .arg(kStubCodeValue);
+                         .arg(codeValue);
     qInfo(LOG_TRACKING).noquote() << result.message;
     return deliverInspectionResult(result, notifyListener);
 }

@@ -16,17 +16,32 @@ void CodeReadHandler::execute(TaskHandlerContext& ctx) { ctx.machine.executeCode
 
 void StateMachine::executeCodeReadTask()
 {
-    static const QString kStubCodeValue = QStringLiteral("STUB-OK");
+    tracking::InspectionResult result;
+    if (m_tracking == nullptr) {
+        result.resultCode = 2;
+        result.ngReasonWord0 = (1u << 4);
+        result.message = QStringLiteral("Trig_CodeRead 失败：Tracking 服务不可用。");
+    } else {
+        result = m_tracking->inspectCodeRead(0, false);
+    }
+
     qInfo(LOG_FLOW).noquote()
-        << QStringLiteral("收到 Trig_CodeRead，联调占位返回 OK，编号=") << kStubCodeValue;
+        << QStringLiteral("收到 Trig_CodeRead，resultCode=") << result.resultCode
+        << QStringLiteral(" codeValue=")
+        << (result.codeValue.isEmpty() ? QStringLiteral("<empty>") : result.codeValue)
+        << QStringLiteral(" message=") << result.message;
+
     if (m_modbus && m_modbus->isConnected()) {
         writeAsciiPlaceholder(
             protocol::registers::kCodeValueAscii,
             protocol::registers::kCodeValueRegisterCount,
-            kStubCodeValue);
+            result.codeValue);
     }
-    completeActiveTask(1, protocol::AckState::Completed, true);
-    emit codeReadFinished(1, kStubCodeValue);
+    completeActiveTask(
+        result.resultCode,
+        protocol::AckState::Completed,
+        result.resultCode == 1);
+    emit codeReadFinished(result.resultCode, result.codeValue);
 }
 
 

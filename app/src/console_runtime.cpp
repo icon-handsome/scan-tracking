@@ -370,6 +370,7 @@ void ConsoleRuntime::initVisionFlowModules(
 
     qInfo(appLog) << QStringLiteral("[启动] 即将创建 TrackingService...");
     trackingService_ = std::make_unique<scan_tracking::tracking::TrackingService>();
+    trackingService_->setHikCameraCController(hikCameraCController_.get());
     qInfo(appLog) << QStringLiteral("[启动] TrackingService 已创建。");
 
     if (startupStage < 5) {

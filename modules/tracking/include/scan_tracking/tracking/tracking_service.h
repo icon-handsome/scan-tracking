@@ -15,12 +15,16 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QList>
 #include <QtCore/QMetaType>
+#include <QtCore/QPointer>
 #include <QtCore/QString>
 #include <QtCore/QtGlobal>
 
 #include "scan_tracking/mech_eye/mech_eye_types.h"
 
 namespace scan_tracking {
+namespace vision {
+class HikCameraCController;
+}
 namespace tracking {
 
 /// 坡口测量算法输出（对应 HMI event.inspection.finished 协议字段）
@@ -69,6 +73,7 @@ struct InspectionResult {
     quint16 measureItemCount = 0;     ///< 测量项数量
     int sourcePointCount = 0;         ///< 输入点云点数
     InspectionMeasurement measurement; ///< 算法测量项（HMI 结构化上报）
+    QString codeValue;                ///< OCR/读码结果（仅 code_read 使用）
     QString message;                  ///< 结果描述信息
 };
 
@@ -106,6 +111,9 @@ public:
 
     /// 注册综合检测结果回调：inspectPointCloud 返回前必定触发
     void setInspectionResultNotifier(InspectionResultNotifier notifier);
+
+    /// 注入海康 C 智能相机控制器，供编号识别/缺陷识别调用
+    void setHikCameraCController(scan_tracking::vision::HikCameraCController* controller);
 
     /// 安全释放回调（swap 清空，避免退出阶段 std::function 析构访问失效目标）
     void clearInspectionResultNotifier();
@@ -188,6 +196,7 @@ private:
     InspectionResult deliverInspectionResult(InspectionResult result, bool notifyListener) const;
 
     InspectionResultNotifier m_inspectionResultNotifier;
+    QPointer<scan_tracking::vision::HikCameraCController> m_hikCameraCController;
 };
 
 }  // namespace tracking

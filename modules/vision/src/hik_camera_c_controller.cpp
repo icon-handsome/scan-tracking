@@ -2,6 +2,7 @@
 
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QTimer>
@@ -32,6 +33,14 @@ bool ensureDirectoryTreeExists(const QString& directoryPath)
         return false;
     }
     return std::filesystem::is_directory(fsPath);
+}
+
+int hikCAutoTestIntervalMs()
+{
+    bool ok = false;
+    const int intervalMs =
+        qEnvironmentVariableIntValue("SCAN_TRACKING_HIKC_AUTO_TEST_INTERVAL_MS", &ok);
+    return (ok && intervalMs > 0) ? intervalMs : 0;
 }
 
 }  // namespace
@@ -78,6 +87,7 @@ void HikCameraCController::start(const scan_tracking::common::VisionConfig& conf
 
     qInfo(hikCControllerLog) << QStringLiteral("HikCameraCController::start 入口");
 
+    m_config = config;
     m_smartCameraIp = config.hikCameraC.ipAddress;
     m_tcpListenIp = config.hikCameraCTcpListenIp.isEmpty()
                         ? QStringLiteral("192.168.8.13")
@@ -285,6 +295,86 @@ bool HikCameraCController::requestCapture(CaptureType type)
     return m_tcpServer->sendStartCaptureToCamera(m_smartCameraIp);
 }
 
+bool HikCameraCController::captureAndWaitForOcr(
+    QString* codeValue,
+    QString* errorMessage,
+    int timeoutMs)
+{
+    if (codeValue != nullptr) {
+        codeValue->clear();
+    }
+
+    if (!m_started) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("海康 C 控制器未启动。");
+        }
+        return false;
+    }
+
+    const int effectiveTimeoutMs =
+        timeoutMs > 0 ? timeoutMs : (m_config.hikCaptureTimeoutMs > 0 ? m_config.hikCaptureTimeoutMs : 5000);
+
+    QString capturedCodeValue;
+    bool received = false;
+    QEventLoop loop;
+    QTimer timeoutTimer;
+    timeoutTimer.setSingleShot(true);
+
+    const auto ocrConn = QObject::connect(
+        this,
+        &HikCameraCController::ocrResultReceived,
+        &loop,
+        [&](CaptureType type, const QString& value) {
+            if (type != CaptureType::NumberRecognition) {
+                return;
+            }
+
+            const QString normalized = value.trimmed();
+            if (normalized.isEmpty()) {
+                return;
+            }
+
+            capturedCodeValue = normalized;
+            received = true;
+            loop.quit();
+        },
+        Qt::QueuedConnection);
+    const auto timeoutConn = QObject::connect(
+        &timeoutTimer,
+        &QTimer::timeout,
+        &loop,
+        [&loop]() { loop.quit(); },
+        Qt::QueuedConnection);
+
+    if (!requestCapture(CaptureType::NumberRecognition)) {
+        QObject::disconnect(ocrConn);
+        QObject::disconnect(timeoutConn);
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("海康 C 编号识别触发失败：相机未就绪或 TCP 未连接。");
+        }
+        return false;
+    }
+
+    timeoutTimer.start(effectiveTimeoutMs);
+    loop.exec();
+
+    QObject::disconnect(ocrConn);
+    QObject::disconnect(timeoutConn);
+
+    if (!received) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("海康 C 编号识别超时：%1 ms 内未收到 OCR 文本。")
+                                .arg(effectiveTimeoutMs);
+        }
+        return false;
+    }
+
+    if (codeValue != nullptr) {
+        *codeValue = capturedCodeValue;
+    }
+    return true;
+}
+
 void HikCameraCController::enableTestMode(bool enable, int intervalMs)
 {
     if (enable) {
@@ -387,13 +477,13 @@ void HikCameraCController::onTcpCameraConnected(QString cameraIp, quint16 camera
     
     if (cameraIp == m_smartCameraIp) {
         setState(HikCameraCState::Ready, QStringLiteral("智能相机已通过 TCP 连接并就绪"));
-
-        // 连接后立即触发一次编号识别
-        requestCapture(CaptureType::NumberRecognition);
-
-        // 后续每 10 秒自动触发（编号识别）
-        enableTestMode(true, 10000);
-        qInfo(hikCControllerLog) << "自动采集已启用：连接后立即触发，之后每 10 秒一次";
+        const int autoTestIntervalMs = hikCAutoTestIntervalMs();
+        if (autoTestIntervalMs > 0) {
+            requestCapture(CaptureType::NumberRecognition);
+            enableTestMode(true, autoTestIntervalMs);
+            qInfo(hikCControllerLog) << "自动采集已启用：连接后立即触发，之后每"
+                                     << autoTestIntervalMs << "ms 一次";
+        }
     } else {
         qWarning(hikCControllerLog) << QStringLiteral("意外相机 IP 已连接：") << cameraIp
                                     << QStringLiteral("（期望：") << m_smartCameraIp << QStringLiteral("）");
@@ -438,6 +528,7 @@ void HikCameraCController::onTcpCommandReceived(QString cameraIp, QString comman
     if (!ocrText.isEmpty()
         && ocrText.compare(QStringLiteral("hello"), Qt::CaseInsensitive) != 0) {
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        emit ocrResultReceived(m_currentCaptureType, ocrText);
 
         // 限频策略：
         // - 相同 OCR 结果在 2 秒内只打印一次

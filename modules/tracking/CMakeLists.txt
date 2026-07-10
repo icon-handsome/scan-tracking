@@ -15,6 +15,7 @@ target_link_libraries(scan_tracking_tracking
         Qt5::Core
         scan_tracking_common
         scan_tracking_mech_eye
+        scan_tracking_vision
     PRIVATE
         LbPoseDetection::lb_pose_detection
 )

@@ -2243,6 +2243,9 @@ QJsonObject HmiTcpServer::buildInspectionFinishedPayload(const tracking::Inspect
     tracking::appendHeadDisplayMetricsFields(payload, result.measurement);
     payload[QLatin1String("message")] = result.message;
     payload[QLatin1String("sourcePointCount")] = result.sourcePointCount;
+    if (!result.codeValue.isEmpty()) {
+        payload[QLatin1String("codeValue")] = result.codeValue;
+    }
 
     if (const auto* cfgMgr = common::ConfigManager::instance()) {
         const common::BevelRecipe recipe = cfgMgr->bevelRecipe();
@@ -2351,6 +2354,8 @@ void HmiTcpServer::publishInspectionResult(const tracking::InspectionResult& res
             << QStringLiteral(" lengthMm=") << result.measurement.bluntHeightTol
             << QStringLiteral(" icpFitness=") << result.measurement.icpFitness
             << QStringLiteral(" qualityCode=") << result.measurement.qualityCode
+            << QStringLiteral(" codeValue=")
+            << (result.codeValue.isEmpty() ? QStringLiteral("<empty>") : result.codeValue)
             << QStringLiteral(" message=") << result.message;
         return;
     }
@@ -2368,6 +2373,8 @@ void HmiTcpServer::publishInspectionResult(const tracking::InspectionResult& res
         << QStringLiteral(" lengthMm=") << result.measurement.bluntHeightTol
         << QStringLiteral(" icpFitness=") << result.measurement.icpFitness
         << QStringLiteral(" qualityCode=") << result.measurement.qualityCode
+        << QStringLiteral(" codeValue=")
+        << (result.codeValue.isEmpty() ? QStringLiteral("<empty>") : result.codeValue)
         << QStringLiteral(" message=") << result.message;
 }
 
