@@ -1520,6 +1520,9 @@ void StateMachine::stop()
     const bool firstStop = !m_stopped.exchange(true);
 
     if (firstStop) {
+        // 丢弃仍在跑的内表面后台结果，避免 stop 后 QueuedConnection 再触达已清 publisher
+        ++m_internalSurfaceAsyncGeneration;
+
         // 先断开外部信号并释放 std::function，避免退出阶段 processEvents 触发已失效回调
         {
             tracking::InspectionResultNotifier cleared;
@@ -4466,6 +4469,64 @@ void StateMachine::deliverOfflineInternalSurfaceInspectionResult(
         result.message);
 }
 
+void StateMachine::deliverOnlineInternalSurfaceInspectionResult(
+    const tracking::InspectionResult& trackingResult,
+    int segmentCount,
+    quint64 generation)
+{
+    if (m_stopped.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (generation != m_internalSurfaceAsyncGeneration) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[InternalSurface] 忽略过期后台结果 generation=")
+            << generation << QStringLiteral(" current=") << m_internalSurfaceAsyncGeneration;
+        return;
+    }
+    if (m_activeTask.definition == nullptr
+        || m_activeTask.definition->stage != protocol::Stage::Inspection
+        || m_activeTask.completionAnnounced) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[InternalSurface] 忽略后台结果：检测任务已结束或未在 Inspection 阶段");
+        return;
+    }
+
+    InspectionSummary summary;
+    summary.resultCode = trackingResult.resultCode;
+    summary.ngReasonWord0 = trackingResult.ngReasonWord0;
+    summary.ngReasonWord1 = trackingResult.ngReasonWord1;
+    summary.measureItemCount = trackingResult.measureItemCount;
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("Trig_Inspection 完成")
+        << QStringLiteral(" 参与段数=") << segmentCount
+        << QStringLiteral(" 总点数=") << trackingResult.sourcePointCount
+        << QStringLiteral(" angleDeg=") << trackingResult.measurement.headAngleTol
+        << QStringLiteral(" lengthMm=") << trackingResult.measurement.bluntHeightTol
+        << QStringLiteral(" thicknessMm=") << trackingResult.measurement.thicknessMm
+        << QStringLiteral(" 说明=") << trackingResult.message;
+
+    writeInspectionResult(summary);
+
+    const quint16 plcRes = summary.resultCode;
+    constexpr quint16 kInspectionResOk = 1;
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("Trig_Inspection Res_Inspection=") << plcRes
+        << QStringLiteral(" ngReasonWord0=") << summary.ngReasonWord0
+        << QStringLiteral(" ngReasonWord1=") << summary.ngReasonWord1
+        << QStringLiteral(" measureItemCount=") << summary.measureItemCount;
+    completeActiveTask(plcRes, protocol::AckState::Completed, plcRes == kInspectionResOk);
+    markPathInspectionCompleted(m_activeTask.inspectionPathId);
+    emit inspectionFinished(
+        summary.resultCode,
+        summary.ngReasonWord0,
+        summary.ngReasonWord1,
+        summary.measureItemCount,
+        trackingResult.measurement,
+        trackingResult.message);
+    maybeEmitPresetInspectionDemo(m_activeTask.scanSegmentIndex);
+}
+
 /**
  * @brief 向 PLC 发送 ACK（应答）信号
  * 
@@ -4627,6 +4688,8 @@ void StateMachine::onProcessTimeout()
         return;
     }
     if (m_activeTask.definition->stage == protocol::Stage::Inspection) {
+        // 丢弃仍在跑的内表面后台结果，避免超时收尾后再写一遍 PLC
+        ++m_internalSurfaceAsyncGeneration;
         writeInspectionResult({});
         completeActiveTask(
             kInspectionResTimeoutNg,
@@ -6221,6 +6284,9 @@ void StateMachine::enterFaultState(
  */
 void StateMachine::abortActiveTaskForFault(quint16 resultCode)
 {
+    // 丢弃仍在跑的内表面后台结果，避免故障收尾后再写一遍 PLC
+    ++m_internalSurfaceAsyncGeneration;
+
     if (m_activeTask.definition == nullptr) {
         // 没有活动任务，只需清理基本状态
         m_timeoutTimer->stop();

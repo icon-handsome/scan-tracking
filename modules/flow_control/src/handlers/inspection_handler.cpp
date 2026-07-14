@@ -2,10 +2,11 @@
 
 #include "scan_tracking/flow_control/state_machine.h"
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QFileInfo>
 #include <QtCore/QLoggingCategory>
+#include <QtCore/QPointer>
 
-#include <future>
 #include <thread>
 
 namespace scan_tracking {
@@ -21,31 +22,6 @@ namespace {
 constexpr quint16 kInspectionResOk = 1;
 /// IPC 侧处理失败（Tracking 不可用、点云加载失败等），与算法 NG(2) 区分
 constexpr quint16 kInspectionResProcessingFail = 7;
-
-tracking::InspectionResult runInternalSurfaceInspectionInWorker(
-    scan_tracking::tracking::TrackingService* tracking,
-    const QString& mergedPcdPath,
-    int inspectionPathId)
-{
-    if (tracking == nullptr) {
-        tracking::InspectionResult failure;
-        failure.resultCode = 2;
-        failure.ngReasonWord0 = (1u << 4);
-        failure.message = QStringLiteral("综合检测失败：Tracking 服务不可用。");
-        return failure;
-    }
-
-    std::packaged_task<tracking::InspectionResult()> task(
-        [tracking, mergedPcdPath, inspectionPathId]() {
-            return tracking->inspectInternalSurfaceFromScanFile(
-                mergedPcdPath, inspectionPathId, false, false);
-        });
-    std::future<tracking::InspectionResult> future = task.get_future();
-    std::thread worker(std::move(task));
-    tracking::InspectionResult result = future.get();
-    worker.join();
-    return result;
-}
 }
 
 void StateMachine::executeInspectionTask()
@@ -326,7 +302,7 @@ void StateMachine::executeInspectionTask()
         }
 
         qInfo(LOG_FLOW).noquote()
-            << QStringLiteral("[InternalSurface] 从落盘 PCD 执行测量（后台线程，避免主线程大点云堆损坏）")
+            << QStringLiteral("[InternalSurface] 从落盘 PCD 执行测量（后台线程，主线程不阻塞，避免 PLC/HMI 断连）")
             << QStringLiteral(" path=") << mergedInspectionPcdPath
             << QStringLiteral(" 总点数=") << totalPointCount
             << QStringLiteral(" 参与段数=") << segmentCount;
@@ -334,11 +310,60 @@ void StateMachine::executeInspectionTask()
         // 落盘完成后释放路径段点云缓存（保留段号进度，避免 PLC 再发段1 被误判为新一轮 path2）。
         clearPathSegmentCache(m_activeTask.inspectionPathId, true);
 
-        trackingResult = runInternalSurfaceInspectionInWorker(
-            m_tracking, mergedInspectionPcdPath, m_activeTask.inspectionPathId);
-        if (trackingResult.sourcePointCount <= 0 && totalPointCount > 0) {
-            trackingResult.sourcePointCount = totalPointCount;
+        // 大点云算法可达数分钟；默认 Inspection 超时 60s 在异步后会误触发，延长地板。
+        {
+            const int extendedSec = qMax(
+                static_cast<int>(m_activeTask.timeoutSeconds),
+                kInternalSurfaceTimeoutFloorSeconds);
+            m_activeTask.timeoutSeconds = static_cast<quint16>(qMin(extendedSec, 65535));
+            if (m_timeoutTimer != nullptr) {
+                m_timeoutTimer->start(static_cast<int>(m_activeTask.timeoutSeconds) * 1000);
+            }
+            qInfo(LOG_FLOW).noquote()
+                << QStringLiteral("[InternalSurface] 任务超时已延长至")
+                << m_activeTask.timeoutSeconds << QStringLiteral("s");
         }
+
+        const quint64 generation = ++m_internalSurfaceAsyncGeneration;
+        const int pathId = m_activeTask.inspectionPathId;
+        const int fallbackPointCount = totalPointCount;
+        const int asyncSegmentCount = segmentCount;
+        const QString pcdPath = mergedInspectionPcdPath;
+        tracking::TrackingService* tracking = m_tracking;
+        QPointer<StateMachine> self(this);
+
+        std::thread([self, tracking, pcdPath, pathId, fallbackPointCount, asyncSegmentCount, generation]() {
+            tracking::InspectionResult result;
+            if (tracking == nullptr) {
+                result.resultCode = 2;
+                result.ngReasonWord0 = (1u << 4);
+                result.message = QStringLiteral("综合检测失败：Tracking 服务不可用。");
+            } else {
+                result = tracking->inspectInternalSurfaceFromScanFile(
+                    pcdPath, pathId, false, false);
+            }
+            if (result.sourcePointCount <= 0 && fallbackPointCount > 0) {
+                result.sourcePointCount = fallbackPointCount;
+            }
+
+            QCoreApplication* app = QCoreApplication::instance();
+            if (app == nullptr) {
+                return;
+            }
+            QMetaObject::invokeMethod(
+                app,
+                [self, result, asyncSegmentCount, generation]() {
+                    if (!self) {
+                        return;
+                    }
+                    self->deliverOnlineInternalSurfaceInspectionResult(
+                        result, asyncSegmentCount, generation);
+                },
+                Qt::QueuedConnection);
+        }).detach();
+
+        // 主线程立即返回，继续跑 Modbus/HMI 事件循环；结果由 deliverOnline* 收尾。
+        return;
     } else {
         scan_tracking::mech_eye::PointCloudFrame mergedCloud;
         int totalPointCount = 0;

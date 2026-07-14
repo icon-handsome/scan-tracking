@@ -171,6 +171,16 @@ public:
         const tracking::InspectionResult& result);
 
     /**
+     * @brief 在线 Trig_Inspection 内表面算法完成后的主线程收尾（写 PLC / 推 HMI）
+     *
+     * 由后台线程经 QueuedConnection 回投；generation 不匹配或任务已结束时丢弃。
+     */
+    void deliverOnlineInternalSurfaceInspectionResult(
+        const tracking::InspectionResult& result,
+        int segmentCount,
+        quint64 generation);
+
+    /**
      * @brief 一次性联调：从 [Bevel] offlineReplayDataDir 加载 PCD/PLY 点云并跑坡口测量
      *
      * 不写 PLC、不占用 PLC 任务槽；结果写入日志并推送显控（若已连接）。
@@ -818,7 +828,12 @@ private:
     /// 综合检测结果推送（与 TrackingService::InspectionResultNotifier 共用同一回调）
     std::function<void(const tracking::InspectionResult&)> m_inspectionResultPublisher;
 
+    /// 在线内表面异步检测代数：超时/新任务时递增，用于丢弃过期后台结果
+    quint64 m_internalSurfaceAsyncGeneration = 0;
+
     static constexpr int kMaxPointCloudCacheSize = 200;   // 多路径缓存上限（6 路径共 183 段，留余量）
+    /// 内表面大点云 ICP/网格化可达数分钟；低于此时长会误超时掐断握手
+    static constexpr int kInternalSurfaceTimeoutFloorSeconds = 600;
     static constexpr int kMaxReasonableRefinementJobs = 32;  // 并发 refinement 上限（超出视为逻辑错误）
     static constexpr int kShutdownRefinementJoinTimeoutMs = 3000;
 
