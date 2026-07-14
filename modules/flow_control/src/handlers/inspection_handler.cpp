@@ -63,7 +63,7 @@ void StateMachine::executeInspectionTask()
         // 写入默认的检测失败结果
         writeInspectionResult({2, 1u << 4, 0, 0});
 
-        // 演示：tracking 不可用时也向显控推送失败结果（与蓝友出口字段一致）
+        // 演示：tracking 不可用时也向显控推送失败结果（与出口字段一致）
         if (m_inspectionResultPublisher) {
             tracking::InspectionResult failure;
             failure.resultCode = 2;

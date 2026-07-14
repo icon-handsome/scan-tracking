@@ -58,8 +58,11 @@ private:
     /* 在事件循环启动后初始化海康 C（避免与 MechEye SDK 同步初始化冲突） */
     void initFlowModules(int startupStage, scan_tracking::common::VisionConfig visionConfig);
 
-    /* 视觉流水线 / 跟踪 / 状态机：再延迟一轮事件循环，避开 SDK 加载后的堆不稳定窗口 */
+    /* 视觉流水线 / 跟踪：再延迟一轮事件循环，避开 SDK 加载后的堆不稳定窗口 */
     void initVisionFlowModules(int startupStage, scan_tracking::common::VisionConfig visionConfig);
+
+    /* 状态机 / HMI：在 Tracking 就绪后再延迟创建，避开 MechEye/CXP SDK 堆不稳定窗口 */
+    void initStateMachineModule(int startupStage);
 
     /* [Debug] 自动延时测试：读取 config.ini 并调度定时器 */
     void scheduleAutoLatencyBundleTest();

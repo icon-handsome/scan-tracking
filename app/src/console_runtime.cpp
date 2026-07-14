@@ -230,7 +230,14 @@ void ConsoleRuntime::initMechEyeModule(int startupStage)
     }
 
     // MechEye/Hik MVS SDK 与后续 Qt 网络/目录操作错开：延迟到事件循环稳定后再启动流程模块。
-    QTimer::singleShot(200, &application_, [this, startupStage, visionConfig]() {
+    bool flowDelayOk = false;
+    const int flowModulesDelayMs =
+        qEnvironmentVariableIntValue("SCAN_TRACKING_FLOW_MODULES_DELAY_MS", &flowDelayOk);
+    const int effectiveFlowDelayMs =
+        (flowDelayOk && flowModulesDelayMs >= 0) ? flowModulesDelayMs : 500;
+    qInfo(appLog) << QStringLiteral("[启动] 将在") << effectiveFlowDelayMs
+                  << QStringLiteral("ms 后初始化流程模块（可用 SCAN_TRACKING_FLOW_MODULES_DELAY_MS 覆盖）。");
+    QTimer::singleShot(effectiveFlowDelayMs, &application_, [this, startupStage, visionConfig]() {
         initFlowModules(startupStage, visionConfig);
     });
 }
@@ -378,7 +385,32 @@ void ConsoleRuntime::initVisionFlowModules(
         return;
     }
 
-    // StateMachine 是主流程编排核心，注入 Modbus / 视觉 / 跟踪等依赖
+    bool stateMachineDelayOk = false;
+    const int stateMachineDelayMs =
+        qEnvironmentVariableIntValue("SCAN_TRACKING_STATEMACHINE_DELAY_MS", &stateMachineDelayOk);
+    const int effectiveStateMachineDelayMs =
+        (stateMachineDelayOk && stateMachineDelayMs >= 0) ? stateMachineDelayMs : 800;
+    qInfo(appLog) << QStringLiteral("[启动] 将在") << effectiveStateMachineDelayMs
+                  << QStringLiteral("ms 后创建 StateMachine（可用 SCAN_TRACKING_STATEMACHINE_DELAY_MS 覆盖）。");
+    QTimer::singleShot(effectiveStateMachineDelayMs, &application_, [this, startupStage]() {
+        initStateMachineModule(startupStage);
+    });
+}
+
+void ConsoleRuntime::initStateMachineModule(int startupStage)
+{
+    if (startupStage < 5) {
+        return;
+    }
+    if (stateMachine_ != nullptr) {
+        qWarning(appLog) << QStringLiteral("[启动] StateMachine 已存在，跳过重复初始化。");
+        return;
+    }
+    if (trackingService_ == nullptr || visionPipelineService_ == nullptr) {
+        qCritical(appLog) << QStringLiteral("[启动] StateMachine 依赖未就绪，取消创建。");
+        return;
+    }
+
     qInfo(appLog) << QStringLiteral("[启动] 即将创建 StateMachine...");
     stateMachine_ = std::make_unique<scan_tracking::flow_control::StateMachine>(
         modbusService_.get(),

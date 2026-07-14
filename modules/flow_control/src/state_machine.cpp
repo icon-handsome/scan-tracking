@@ -1382,18 +1382,22 @@ StateMachine::StateMachine(
             << QStringLiteral(" (enableTelescopicScan/enableHoistAssist/enableCollisionMonitor stage3+)");
     }
 
+    qInfo(LOG_FLOW).noquote() << QStringLiteral("[Station] StateMachine ctor: 配置定时器");
     // 配置定时器间隔
     m_pollTimer->setInterval(flowConfig.pollIntervalMs);      // PLC 轮询间隔
     m_heartbeatTimer->setInterval(flowConfig.heartbeatIntervalMs);  // 心跳发送间隔
     m_timeoutTimer->setSingleShot(true);  // 超时定时器为单次触发
 
+    qInfo(LOG_FLOW).noquote() << QStringLiteral("[Station] StateMachine ctor: 连接内部定时器");
     // 连接定时器信号到对应的槽函数
     connect(m_pollTimer, &QTimer::timeout, this, &StateMachine::pollPlcState);
     connect(m_heartbeatTimer, &QTimer::timeout, this, &StateMachine::publishHeartbeat);
     connect(m_timeoutTimer, &QTimer::timeout, this, &StateMachine::onProcessTimeout);
 
+    qInfo(LOG_FLOW).noquote() << QStringLiteral("[Station] StateMachine ctor: 加载标定矩阵");
     reloadCalibrationMatricesFromConfig();
 
+    qInfo(LOG_FLOW).noquote() << QStringLiteral("[Station] StateMachine ctor: 连接 Modbus 信号");
     // 如果 Modbus 服务可用，连接其信号
     if (m_modbus) {
         connect(m_modbus, &modbus::ModbusService::connected, this, &StateMachine::onModbusConnected);
@@ -1405,6 +1409,7 @@ StateMachine::StateMachine(
         connect(m_modbus, &modbus::ModbusService::registerWriteFailed, this, &StateMachine::onRegisterWriteFailed);
     }
 
+    qInfo(LOG_FLOW).noquote() << QStringLiteral("[Station] StateMachine ctor: 连接 MechEye 信号");
     // 如果 Mech-Eye 相机服务可用，连接其信号
     if (m_mechEye) {
         connect(
@@ -1422,6 +1427,7 @@ StateMachine::StateMachine(
             Qt::QueuedConnection);
     }
 
+    qInfo(LOG_FLOW).noquote() << QStringLiteral("[Station] StateMachine ctor: 连接 VisionPipeline 信号");
     if (m_visionPipeline) {
         connect(
             m_visionPipeline,
@@ -1447,6 +1453,7 @@ StateMachine::StateMachine(
                     << message;
             });
     }
+    qInfo(LOG_FLOW).noquote() << QStringLiteral("[Station] StateMachine ctor: 完成");
 }
 
 /**
