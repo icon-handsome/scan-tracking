@@ -89,6 +89,12 @@ QString summarizeHmiTracePayload(const QString& type, const QJsonObject& payload
                             .arg(payload.value(QLatin1String("plcUnloadNgAreaCount")).toInt())
                             .arg(payload.value(QLatin1String("plcUnloadOkAreaCount")).toInt());
         }
+        if (payload.contains(QLatin1String("loadProcessStatus"))
+            || payload.contains(QLatin1String("unloadProcessStatus"))) {
+            summary += QStringLiteral(" loadProc=%1 unloadProc=%2")
+                            .arg(payload.value(QLatin1String("loadProcessStatus")).toInt())
+                            .arg(payload.value(QLatin1String("unloadProcessStatus")).toInt());
+        }
         return summary;
     }
     if (type == QLatin1String(kStatusCamera)) {

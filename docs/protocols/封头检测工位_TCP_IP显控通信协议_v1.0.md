@@ -1,6 +1,6 @@
 # 封头检测工位 IPC-Qt 显控通信协议
 
-**版本**：v1.1（2026-06-19 增补 `cmd.set_unload_area_config` 与 `status.plc` 下料区封头字段）  
+**版本**：v1.2（2026-07-14 修正 `status.plc` 上下料寄存器映射至 40051~40057，增补过程状态字段）  
 **适用范围**：第一工位核心控制程序（Windows）与 Qt 显控界面（麒麟 OS）的 TCP/IP 通信。
 
 ---
@@ -81,19 +81,22 @@ TCP 是流式协议，为解决粘包和半包问题，采用长度前缀的帧�
   - `rollerRunFreqHz` (int): 滚轮运行频率 Hz（PLC 40043）
   - `electromagnetStatus` (int): 电磁吸盘状态，0=退磁, 1=充磁, 2=报警（PLC 40044）
   - `estopButtonStatus` (int): 急停按钮，0=断开(未按下), 1=按下（PLC 40045）
-  - `loadVisionStatusCode` (int): 上料视觉状态码（PLC 40046），1100=坐标发送完成，1102=拍照计算完成
-  - `unloadNgAreaFull` (int): NG 区满料，0=未满料, 1=满料（PLC 40047）
-  - `unloadOkAreaFull` (int): OK 区满料，0=未满料, 1=满料（PLC 40048）
-  - `plcUnloadNgAreaCount` (int): PLC 上报 NG 区封头数量（PLC 40049，单位：个）
-  - `plcUnloadOkAreaCount` (int): PLC 上报 OK 区封头数量（PLC 40050，单位：个）
+  - `loadVisionStatusCode` (int): 上料视觉状态码（PLC **40051**），1100=坐标发送完成，1102=拍照计算完成
+  - `unloadNgAreaFull` (int): NG 区满料，0=未满料, 1=满料（PLC **40052**）
+  - `unloadOkAreaFull` (int): OK 区满料，0=未满料, 1=满料（PLC **40053**）
+  - `plcUnloadNgAreaCount` (int): PLC 上报 NG 区封头数量（PLC **40054**，单位：个）
+  - `plcUnloadOkAreaCount` (int): PLC 上报 OK 区封头数量（PLC **40055**，单位：个）
+  - `loadProcessStatus` (int): 上料过程状态（PLC **40056**）：0=空闲, 1=等待坐标, 2=搬运放料中, 3=完成, 4=异常
+  - `unloadProcessStatus` (int): 下料过程状态（PLC **40057**）：0=空闲, 1=等待坐标, 2=下料执行中, 3=完成, 4=满料或异常
   - `modbusConnected` (bool)
   - `unloadAreaMaxStackCount` (int): 下料区封头最大叠加个数（IPC 缓存，来源显控 `cmd.set_unload_area_config`）
-  - `unloadAreaOkCount` (int): 下料 OK 区封头数量（**显控经 IPC 写入 40177 的配置/计数**，非 PLC 40050）
-  - `unloadAreaNgCount` (int): 下料 NG 区封头数量（**显控经 IPC 写入 40178 的配置/计数**，非 PLC 40049）
+  - `unloadAreaOkCount` (int): 下料 OK 区封头数量（**显控经 IPC 写入 40177 的配置/计数**，非 PLC 40055）
+  - `unloadAreaNgCount` (int): 下料 NG 区封头数量（**显控经 IPC 写入 40178 的配置/计数**，非 PLC 40054）
   - `unloadAreaAutoClear` (bool): 自动清零使能，true=PLC 在整垛取走后自动清零对应计数
 
 > **辅机字段**：第一、第二工位均推送；无 PLC 数据时缺省为 0。`telescopicRodStatus` 或 `electromagnetStatus` 变为 **2** 时，Core 向显控推送 `event.alarm`（`level=2`，`code` 920/921，见 §2.8）。  
-> **下料区计数区分**：`plcUnloadOkAreaCount` / `plcUnloadNgAreaCount` 为 **PLC 实时上报**（40049/40050）；`unloadAreaOkCount` / `unloadAreaNgCount` 为 **显控经 `cmd.set_unload_area_config` 写入 IPC 后回显**（40177/40178），两者来源不同，UI 勿混用。
+> **下料区计数区分**：`plcUnloadOkAreaCount` / `plcUnloadNgAreaCount` 为 **PLC 实时上报**（40054/40055）；`unloadAreaOkCount` / `unloadAreaNgCount` 为 **显控经 `cmd.set_unload_area_config` 写入 IPC 后回显**（40177/40178），两者来源不同，UI 勿混用。  
+> **过程状态**：`loadProcessStatus` / `unloadProcessStatus` 由 PLC 周期写入，IPC 在命令区变化或 500ms 轮询时经 `status.plc` 推送（payload 去重）。40046~40050 为第二工位 `Trig_TelescopicScan` 扩展，与上下料状态区不重叠。
 
 ### 2.4 相机与设备状态 (`status.camera` / `status.device`)
 - **频率**：

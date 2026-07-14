@@ -183,7 +183,7 @@ inline quint16 plcAnalogToUInt16(quint16 word0, quint16 word1 = 0)
 // ==================== 寄存器区块定义 ====================
 
 constexpr int kCommandBlockStart = 0;    ///< 命令区起始地址：PLC→IPC的控制指令区域（0 基偏移）
-constexpr int kCommandBlockSize = 51;    ///< 命令区大小：40001~40050（modbusIndex 1~50，含 index 0 预留）
+constexpr int kCommandBlockSize = 58;    ///< 命令区大小：40001~40057（modbusIndex 1~57，含 index 0 预留）
 constexpr int kResultBlockStart = 101;   ///< 结果区起始：40101（modbusIndex=101）
 constexpr int kResultBlockSize = 84;     ///< 结果区大小：共84个寄存器
 
@@ -233,11 +233,30 @@ constexpr int kRollerSetFreqHz = modbusIndexFromPlcAddress(40042);
 constexpr int kRollerRunFreqHz = modbusIndexFromPlcAddress(40043);
 constexpr int kElectromagnetStatus = modbusIndexFromPlcAddress(40044);
 constexpr int kEstopButtonStatus = modbusIndexFromPlcAddress(40045);
-constexpr int kLoadVisionStatusCode = modbusIndexFromPlcAddress(40046);
-constexpr int kUnloadNgAreaFull = modbusIndexFromPlcAddress(40047);
-constexpr int kUnloadOkAreaFull = modbusIndexFromPlcAddress(40048);
-constexpr int kUnloadNgAreaCount = modbusIndexFromPlcAddress(40049);
-constexpr int kUnloadOkAreaCount = modbusIndexFromPlcAddress(40050);
+
+// --- 第二工位伸缩杆扫描扩展（PLC → IPC，第一工位可忽略）---
+constexpr int kTrigTelescopicScan = modbusIndexFromPlcAddress(40046);
+// 40047~40050: Reserved_TelescopicExt（预留）
+
+// --- 上下料工位/下料区状态（PLC → IPC，40051~40055）---
+constexpr int kLoadVisionStatusCode = modbusIndexFromPlcAddress(40051);
+constexpr int kUnloadNgAreaFull = modbusIndexFromPlcAddress(40052);
+constexpr int kUnloadOkAreaFull = modbusIndexFromPlcAddress(40053);
+constexpr int kUnloadNgAreaCount = modbusIndexFromPlcAddress(40054);
+constexpr int kUnloadOkAreaCount = modbusIndexFromPlcAddress(40055);
+
+// --- 上下料过程状态（PLC → IPC，40056~40057）---
+constexpr int kLoadProcessStatus = modbusIndexFromPlcAddress(40056);
+constexpr int kUnloadProcessStatus = modbusIndexFromPlcAddress(40057);
+
+/// LoadProcess_Status / UnloadProcess_Status 枚举（与协议 §5.6.3~§5.6.4 一致）
+namespace process_status {
+constexpr quint16 kIdle = 0;            ///< 空闲
+constexpr quint16 kWaitCoordinate = 1;  ///< 等待坐标
+constexpr quint16 kExecuting = 2;       ///< 上料：搬运放料中 / 下料：执行中
+constexpr quint16 kCompleted = 3;       ///< 完成
+constexpr quint16 kFault = 4;           ///< 上料：异常 / 下料：满料或异常
+}  // namespace process_status
 
 /// 六轴位姿（x/y/z + rx/ry/rz）
 struct Pose6f {

@@ -1435,12 +1435,17 @@ StateMachine::StateMachine(
             this,
             &StateMachine::onVisionBundleCaptureFinished,
             Qt::QueuedConnection);
+        // 每帧 Capturing/Ready 会刷屏，仅记录 Error/Stopped
         connect(
             m_visionPipeline,
             &vision::VisionPipelineService::stateChanged,
             this,
             [](vision::VisionPipelineState state, const QString& description) {
-                qInfo(LOG_FLOW) << QStringLiteral("[VisionPipeline] 状态=") << static_cast<int>(state) << description;
+                if (state == vision::VisionPipelineState::Error
+                    || state == vision::VisionPipelineState::Stopped) {
+                    qWarning(LOG_FLOW) << QStringLiteral("[VisionPipeline] 状态=")
+                                       << static_cast<int>(state) << description;
+                }
             });
         connect(
             m_visionPipeline,
@@ -1816,11 +1821,18 @@ void StateMachine::handleRegistersRead(int startAddress, const QVector<quint16>&
             "Roller_RunFreq_Hz",       // 43  40043
             "Electromagnet_Status",    // 44  40044
             "EstopButton_Status",      // 45  40045
-            "LoadVision_StatusCode",   // 46  40046
-            "UnloadNgArea_Full",       // 47  40047
-            "UnloadOkArea_Full",       // 48  40048
-            "UnloadNgArea_Count",      // 49  40049
-            "UnloadOkArea_Count",      // 50  40050
+            "Trig_TelescopicScan",     // 46  40046
+            "Reserved_TelescopicExt_40047", // 47
+            "Reserved_TelescopicExt_40048", // 48
+            "Reserved_TelescopicExt_40049", // 49
+            "Reserved_TelescopicExt_40050", // 50
+            "LoadVision_StatusCode",   // 51  40051
+            "UnloadNgArea_Full",       // 52  40052
+            "UnloadOkArea_Full",       // 53  40053
+            "PlcUnload_NgAreaCount",   // 54  40054
+            "PlcUnload_OkAreaCount",   // 55  40055
+            "LoadProcess_Status",      // 56  40056
+            "UnloadProcess_Status",    // 57  40057
         };
         constexpr int kNameCount = sizeof(kRegisterNames) / sizeof(kRegisterNames[0]);
         const int compareCount = qMin(previousCommandBlock.size(),

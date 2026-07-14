@@ -3,6 +3,27 @@
 #include <numeric>
 #include <random>
 
+// Silence LBN console spam (2D centers / Rt matrices). Set LBN_ENABLE_CONSOLE_LOG=1 to restore.
+#ifndef LBN_ENABLE_CONSOLE_LOG
+#define LBN_ENABLE_CONSOLE_LOG 0
+#endif
+#if LBN_ENABLE_CONSOLE_LOG
+#define LBN_COUT std::cout
+#else
+#include <iostream>
+struct LbnNullBuf : public std::streambuf {
+	int overflow(int c) override { return c; }
+};
+inline std::ostream& lbnNullOut()
+{
+	static LbnNullBuf buf;
+	static std::ostream out(&buf);
+	return out;
+}
+#define LBN_COUT lbnNullOut()
+#endif
+
+
 namespace lbn_pose {
 
 /**************************************************************************************
@@ -241,7 +262,7 @@ bool MarkPointDetector::GlobalSearch(const cv::Mat&            img_in,
 
 	is_initialized = !circle_centers.empty();
 
-	std::cout << "Raw marker candidates before DBSCAN: " << circle_centers.size() << std::endl;
+	LBN_COUT << "Raw marker candidates before DBSCAN: " << circle_centers.size() << std::endl;
 
 	// 注意要做离群点统计滤波
 	 filterOutlies_Debscan(circle_centers,
@@ -273,10 +294,10 @@ bool MarkPointDetector::GlobalSearch(const cv::Mat&            img_in,
 	//{
 	//	std::cout << circle_centers[i].x << "," << circle_centers[i].y << "," << 0.0f<< std::endl;
 	//}
-	std::cout << "Count of 2D marker centers:  " << results.size() << std::endl;
+	LBN_COUT << "Count of 2D marker centers:  " << results.size() << std::endl;
 	for (size_t i = 0; i < results.size(); ++i)
 	{
-		std::cout << results[i].x << "," << results[i].y << "," << 0.0f << std::endl;
+		LBN_COUT << results[i].x << "," << results[i].y << "," << 0.0f << std::endl;
 	}
 
 	if (0)
@@ -867,7 +888,7 @@ int FastGeoHash::build()
 		}
 	}
 	delete[] currentPos;
-	std::cout << "Build finished. Total combinations: " << totalEntries << std::endl;
+	LBN_COUT << "Build finished. Total combinations: " << totalEntries << std::endl;
 	return 0;
 }
 
@@ -1359,7 +1380,7 @@ int FastGeoHash::Get_Track_Pose(std::vector<cv::Point3f>& frame_3d_points,
 	}
 	if (filtered_frame_3d_points.size() < 3)
 	{
-		std::cout << "Errs: The Number of Template Matching is not Enough: " << filtered_frame_3d_points.size() << std::endl;
+		LBN_COUT << "Errs: The Number of Template Matching is not Enough: " << filtered_frame_3d_points.size() << std::endl;
 		return 500;
 	}
 	int res_err = computeRigidTransformSVD(filtered_frame_3d_points,
@@ -1372,45 +1393,45 @@ int FastGeoHash::Get_Track_Pose(std::vector<cv::Point3f>& frame_3d_points,
 
 	Rt_global = Rt * scan_to_marker_RT;
 
-	std::cout << "对应点数量： " << filtered_frame_3d_points.size() << std::endl;
-	std::cout << "标记点： " << std::endl;
+	LBN_COUT << "对应点数量： " << filtered_frame_3d_points.size() << std::endl;
+	LBN_COUT << "标记点： " << std::endl;
 	for (int i = 0; i < filtered_frame_3d_points.size(); i++)
 	{
-		std::cout << filtered_frame_3d_points[i].x << " " <<
+		LBN_COUT << filtered_frame_3d_points[i].x << " " <<
 			         filtered_frame_3d_points[i].y << " " <<
 			         filtered_frame_3d_points[i].z << std::endl;
 	}
-	std::cout << std::endl;
+	LBN_COUT << std::endl;
 
-	std::cout << "模板点： " << std::endl;
+	LBN_COUT << "模板点： " << std::endl;
 	for (int i = 0; i < filtered_frame_3d_points.size(); i++)
 	{
-		std::cout << corres_template_pnts[i].x << " " <<
+		LBN_COUT << corres_template_pnts[i].x << " " <<
 			         corres_template_pnts[i].y << " " <<
 			         corres_template_pnts[i].z << std::endl;
 	}
-	std::cout << std::endl;
+	LBN_COUT << std::endl;
 
-	std::cout << " Realtime Rt is: " << std::endl;
-	std::cout << std::fixed << std::setprecision(8);  // 强制保留 8 位小数
+	LBN_COUT << " Realtime Rt is: " << std::endl;
+	LBN_COUT << std::fixed << std::setprecision(8);  // 强制保留 8 位小数
 	for (int i = 0; i < 4; i++)
 	{
 		for (int j = 0; j < 4; j++)
 		{
-			std::cout << std::setw(8) << Rt.at<double>(i, j) << " ";
+			LBN_COUT << std::setw(8) << Rt.at<double>(i, j) << " ";
 		}
-		std::cout << std::endl;
+		LBN_COUT << std::endl;
 	}
 
-	std::cout << " Realtime Rt_global is: " << std::endl;
-	std::cout << std::fixed << std::setprecision(8);  // 强制保留 8 位小数
+	LBN_COUT << " Realtime Rt_global is: " << std::endl;
+	LBN_COUT << std::fixed << std::setprecision(8);  // 强制保留 8 位小数
 	for (int i = 0; i < 4; i++)
 	{
 		for (int j = 0; j < 4; j++)
 		{
-			std::cout << std::setw(8) << Rt_global.at<double>(i, j) << " ";
+			LBN_COUT << std::setw(8) << Rt_global.at<double>(i, j) << " ";
 		}
-		std::cout << std::endl;
+		LBN_COUT << std::endl;
 	}
 
 	//// 9. 输出结果

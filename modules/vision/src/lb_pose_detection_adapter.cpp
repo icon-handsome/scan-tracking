@@ -19,7 +19,8 @@
 namespace scan_tracking {
 namespace vision {
 
-Q_LOGGING_CATEGORY(LOG_LB_POSE, "vision.lb_pose")
+// vision.lb_pose 打印已屏蔽
+// Q_LOGGING_CATEGORY(LOG_LB_POSE, "vision.lb_pose")
 
 namespace {
 
@@ -232,10 +233,12 @@ void logLbDiagnosticText(const QString& diagnosticText)
     if (!scan_tracking::common::segmentCaptureExportEnabled()) {
         return;
     }
-    const QStringList lines = diagnosticText.split(QChar('\n'), Qt::SkipEmptyParts);
-    for (const QString& line : lines) {
-        qInfo(LOG_LB_POSE).noquote() << line;
-    }
+    // vision.lb_pose 打印已屏蔽
+    Q_UNUSED(diagnosticText);
+    // const QStringList lines = diagnosticText.split(QChar('\n'), Qt::SkipEmptyParts);
+    // for (const QString& line : lines) {
+    //     qInfo(LOG_LB_POSE).noquote() << line;
+    // }
 }
 
 }  // namespace
@@ -335,15 +338,17 @@ LbPoseResult runLbPoseDetection(
             angleToleranceDeg,
             minPercent);
         if (trackResult != 0) {
-            if (scan_tracking::common::segmentCaptureExportEnabled()) {
-                qWarning(LOG_LB_POSE).noquote()
-                    << QStringLiteral("LB Get_Track_Pose 失败 code=%1").arg(trackResult)
-                    << QStringLiteral("三维重建点数=") << geoHash.track_pose_last_recon_count
-                    << QStringLiteral("邻域滤波后=") << geoHash.track_pose_last_neighbor_filtered_count
-                    << QStringLiteral("模板匹配点数=") << geoHash.track_pose_last_matched_count
-                    << QStringLiteral("最少需要=") << geoHash.track_pose_last_min_pose_points
-                    << QStringLiteral("当前重建点数(调用前)=") << reconPointCount;
-            }
+            // vision.lb_pose 打印已屏蔽
+            // if (scan_tracking::common::segmentCaptureExportEnabled()) {
+            //     qWarning(LOG_LB_POSE).noquote()
+            //         << QStringLiteral("LB Get_Track_Pose 失败 code=%1").arg(trackResult)
+            //         << QStringLiteral("三维重建点数=") << geoHash.track_pose_last_recon_count
+            //         << QStringLiteral("邻域滤波后=") << geoHash.track_pose_last_neighbor_filtered_count
+            //         << QStringLiteral("模板匹配点数=") << geoHash.track_pose_last_matched_count
+            //         << QStringLiteral("最少需要=") << geoHash.track_pose_last_min_pose_points
+            //         << QStringLiteral("当前重建点数(调用前)=") << reconPointCount;
+            // }
+            Q_UNUSED(reconPointCount);
             return makeFailure(QStringLiteral("LB 跟踪返回错误代码 %1。").arg(trackResult));
         }
 

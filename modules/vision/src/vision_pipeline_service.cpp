@@ -359,7 +359,8 @@ void VisionPipelineService::finishBundleIfReady()
 
     const auto lbConfig = m_lbPoseConfig;
     const auto lbnConfig = m_lbnPoseConfig;
-    const bool verbosePoseLogs = scan_tracking::common::segmentCaptureExportEnabled();
+    // 位姿详细日志（开始检测/Rt 矩阵等）会刷屏；落盘仍由 SegmentCaptureExport 控制
+    constexpr bool verbosePoseLogs = false;
     QPointer<VisionPipelineService> self(this);
     // 位姿检测为 CPU 密集型，放到 detached 后台线程，完成后 invokeMethod 回主线程
     std::thread([self, bundle, lbConfig, lbnConfig, hikReady, hikSkipped, runLbn, verbosePoseLogs]() mutable {

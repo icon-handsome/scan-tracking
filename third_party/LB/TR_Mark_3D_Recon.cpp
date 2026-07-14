@@ -2,7 +2,25 @@
 #include "AppConfig.h"
 #include "TR_Mark_Track.h"
 
-// ¼ÆËãÁ½¸ö¶şÎ¬µãÖ®¼äµÄÅ·ÊÏ¾àÀë
+// Silence 3D recon marker dump. Set LB_ENABLE_CONSOLE_LOG=1 to restore.
+#ifndef LB_ENABLE_CONSOLE_LOG
+#define LB_ENABLE_CONSOLE_LOG 0
+#endif
+#if LB_ENABLE_CONSOLE_LOG
+#define LB_COUT std::cout
+#else
+struct LbNullBuf3d : public std::streambuf {
+	int overflow(int c) override { return c; }
+};
+inline std::ostream& lbNullOut3d()
+{
+	static LbNullBuf3d buf;
+	static std::ostream out(&buf);
+	return out;
+}
+#define LB_COUT lbNullOut3d()
+#endif
+
 double TR_INSPECT_3D_Recon_Marker::calculateDistance(const cv::Point2f& p1, const cv::Point2f& p2)
 {
 	double dx = p1.x - p2.x;
@@ -10,7 +28,7 @@ double TR_INSPECT_3D_Recon_Marker::calculateDistance(const cv::Point2f& p1, cons
 	return std::sqrt(dx * dx + dy * dy);
 }
 
-// ¼ÆËãµã¼¯µÄ¼¸ºÎÖĞĞÄµã
+// è®¡ç®—ç‚¹é›†çš„å‡ ä½•ä¸­å¿ƒç‚¹
 cv::Point2f TR_INSPECT_3D_Recon_Marker::calculateCentroid(const std::vector<cv::Point2f>& points)
 {
 	if (points.empty()) 
@@ -28,19 +46,19 @@ cv::Point2f TR_INSPECT_3D_Recon_Marker::calculateCentroid(const std::vector<cv::
 	return cv::Point2f(sum_x / points.size(), sum_y / points.size());
 }
 
-// ¹ıÂËÀëÈºµã
-// ²ÎÊıËµÃ÷£º
-//   points: ÊäÈëµÄÔ­Ê¼µã¼¯
-//   std_factor: ±ê×¼²îÏµÊı£¨½¨Òé2»ò3£¬ÖµÔ½´ó¹ıÂËÔ½¿íËÉ£©
-// ·µ»ØÖµ£º¹ıÂËºóµÄµã¼¯
-// ÓÅ»¯£º
-// 1)µü´úÊ½£ºÏÈ¹ıÂËµôÃ÷ÏÔµÄÀëÈºµã£¬ÔÙÖØĞÂ¼ÆËãÖĞĞÄºÍãĞÖµ£¬ÖØ¸´ 2-3 ´Î£¬±ÜÃâ³õÊ¼ÀëÈºµãÓ°ÏìÖĞĞÄ¼ÆËã
-// 2)Ô­Ê¼Ëã·¨¼ÙÉèµã¼¯Î§ÈÆ¼¸ºÎÖĞĞÄÕıÌ¬·Ö²¼£¬µ«Êµ¼Ê³¡¾°ÖĞ¿ÉÄÜ²»³ÉÁ¢£¬¿ÉÕë¶ÔĞÔÓÅ»¯£º¸ÄÓÃ·ÖÎ»Êı·¨£¨ËÄ·ÖÎ»¾à IQR£©
-// ÊÊÓÃ³¡¾°£ºµã¼¯·Ö²¼·ÇÕıÌ¬£¨±ÈÈç¾ùÔÈ·Ö²¼¡¢Æ«Ì¬·Ö²¼£©
-// ºËĞÄÂß¼­£º
-// ¼ÆËãËùÓĞ¾àÀëµÄËÄ·ÖÎ»Êı Q1£¨25%£©¡¢Q3£¨75%£©
-// ¼ÆËãËÄ·ÖÎ»¾à IQR = Q3 - Q1
-// ãĞÖµ = Q3 + 1.5 * IQR£¨¾­µä IQR ÀëÈºµãÅĞ¶¨¹æÔò£©
+// è¿‡æ»¤ç¦»ç¾¤ç‚¹
+// å‚æ•°è¯´æ˜ï¼š
+//   points: è¾“å…¥çš„åŸå§‹ç‚¹é›†
+//   std_factor: æ ‡å‡†å·®ç³»æ•°ï¼ˆå»ºè®®2æˆ–3ï¼Œå€¼è¶Šå¤§è¿‡æ»¤è¶Šå®½æ¾ï¼‰
+// è¿”å›å€¼ï¼šè¿‡æ»¤åçš„ç‚¹é›†
+// ä¼˜åŒ–ï¼š
+// 1)è¿­ä»£å¼ï¼šå…ˆè¿‡æ»¤æ‰æ˜æ˜¾çš„ç¦»ç¾¤ç‚¹ï¼Œå†é‡æ–°è®¡ç®—ä¸­å¿ƒå’Œé˜ˆå€¼ï¼Œé‡å¤ 2-3 æ¬¡ï¼Œé¿å…åˆå§‹ç¦»ç¾¤ç‚¹å½±å“ä¸­å¿ƒè®¡ç®—
+// 2)åŸå§‹ç®—æ³•å‡è®¾ç‚¹é›†å›´ç»•å‡ ä½•ä¸­å¿ƒæ­£æ€åˆ†å¸ƒï¼Œä½†å®é™…åœºæ™¯ä¸­å¯èƒ½ä¸æˆç«‹ï¼Œå¯é’ˆå¯¹æ€§ä¼˜åŒ–ï¼šæ”¹ç”¨åˆ†ä½æ•°æ³•ï¼ˆå››åˆ†ä½è· IQRï¼‰
+// é€‚ç”¨åœºæ™¯ï¼šç‚¹é›†åˆ†å¸ƒéæ­£æ€ï¼ˆæ¯”å¦‚å‡åŒ€åˆ†å¸ƒã€åæ€åˆ†å¸ƒï¼‰
+// æ ¸å¿ƒé€»è¾‘ï¼š
+// è®¡ç®—æ‰€æœ‰è·ç¦»çš„å››åˆ†ä½æ•° Q1ï¼ˆ25%ï¼‰ã€Q3ï¼ˆ75%ï¼‰
+// è®¡ç®—å››åˆ†ä½è· IQR = Q3 - Q1
+// é˜ˆå€¼ = Q3 + 1.5 * IQRï¼ˆç»å…¸ IQR ç¦»ç¾¤ç‚¹åˆ¤å®šè§„åˆ™ï¼‰
 int TR_INSPECT_3D_Recon_Marker::filterOutliers(const std::vector<cv::Point2f> &points,
                                                std::vector<cv::Point2f>       &filtered_points,
 	                                           double                          std_factor)
@@ -52,13 +70,13 @@ int TR_INSPECT_3D_Recon_Marker::filterOutliers(const std::vector<cv::Point2f> &p
 		{
 			filtered_points.push_back(points[i]);
 		}
-		return 0; // µãÌ«ÉÙÎŞĞè¹ıÂË
+		return 0; // ç‚¹å¤ªå°‘æ— éœ€è¿‡æ»¤
 	}
 
-	// 1. ¼ÆËãÖĞĞÄµã
+	// 1. è®¡ç®—ä¸­å¿ƒç‚¹
 	 cv::Point2f centroid = calculateCentroid(points);
 
-	// 2. ¼ÆËãÃ¿¸öµãµ½ÖĞĞÄµãµÄ¾àÀë
+	// 2. è®¡ç®—æ¯ä¸ªç‚¹åˆ°ä¸­å¿ƒç‚¹çš„è·ç¦»
 	std::vector<double> distances;
 	distances.reserve(points.size());
 	for (const auto& p : points)
@@ -66,10 +84,10 @@ int TR_INSPECT_3D_Recon_Marker::filterOutliers(const std::vector<cv::Point2f> &p
 		distances.push_back(calculateDistance(p, centroid));
 	}
 
-	// 3. ¼ÆËã¾àÀëµÄ¾ùÖµ
+	// 3. è®¡ç®—è·ç¦»çš„å‡å€¼
 	double mean_distance = std::accumulate(distances.begin(), distances.end(), 0.0) / distances.size();
 
-	// 4. ¼ÆËã¾àÀëµÄ±ê×¼²î
+	// 4. è®¡ç®—è·ç¦»çš„æ ‡å‡†å·®
 	double sum_squared_diff = 0.0;
 	for (double d : distances) 
 	{
@@ -77,10 +95,10 @@ int TR_INSPECT_3D_Recon_Marker::filterOutliers(const std::vector<cv::Point2f> &p
 	}
 	double std_distance = std::sqrt(sum_squared_diff / distances.size());
 
-	// 5. ¼ÆËããĞÖµ£¨¾ùÖµ + std_factor * ±ê×¼²î£©
+	// 5. è®¡ç®—é˜ˆå€¼ï¼ˆå‡å€¼ + std_factor * æ ‡å‡†å·®ï¼‰
 	double threshold = mean_distance + std_factor * std_distance;
 
-	// 6. ¹ıÂËÀëÈºµã
+	// 6. è¿‡æ»¤ç¦»ç¾¤ç‚¹
 	for (size_t i = 0; i < points.size(); ++i) 
 	{
 		if (distances[i] <= threshold)
@@ -89,22 +107,22 @@ int TR_INSPECT_3D_Recon_Marker::filterOutliers(const std::vector<cv::Point2f> &p
 		}
 	}
 
-	//// Êä³ö¹ıÂËĞÅÏ¢£¨¿ÉÑ¡£©
-	//std::cout << "=== ÀëÈºµã¹ıÂËĞÅÏ¢ ===" << std::endl;
-	//std::cout << "Ô­Ê¼µãÊı: " << points.size() << std::endl;
-	//std::cout << "ÒÆ³ıµÄÀëÈºµãÊı: " << points.size() - filtered_points.size() << std::endl;
-	//std::cout << "¹ıÂËºóµãÊı: " << filtered_points.size() << std::endl;
-	//std::cout << "¾àÀëãĞÖµ: " << threshold << std::endl;
+	//// è¾“å‡ºè¿‡æ»¤ä¿¡æ¯ï¼ˆå¯é€‰ï¼‰
+	//std::cout << "=== ç¦»ç¾¤ç‚¹è¿‡æ»¤ä¿¡æ¯ ===" << std::endl;
+	//std::cout << "åŸå§‹ç‚¹æ•°: " << points.size() << std::endl;
+	//std::cout << "ç§»é™¤çš„ç¦»ç¾¤ç‚¹æ•°: " << points.size() - filtered_points.size() << std::endl;
+	//std::cout << "è¿‡æ»¤åç‚¹æ•°: " << filtered_points.size() << std::endl;
+	//std::cout << "è·ç¦»é˜ˆå€¼: " << threshold << std::endl;
 	return 0;
 }
 
 
 
-// ¿¼ÂÇµ½±ê¼ÇµãµÄ¾Û¼¯ĞÔºÍ¾ùÔÈĞÔ£¬Ê¹ÓÃdescan½øĞĞÂË²¨
-// points             ÊäÈëµÄµã¼¯£¨cv::Point2f ¸ñÊ½£©
-// filtered_points    ÂË²¨ºóµÄµã¼¯£¨cv::Point2f ¸ñÊ½£©
-// eps                ÁÚÓò°ë¾¶£¨Á½¸öµã±»ÊÓÎªÁÚ¾ÓµÄ×î´óÏñËØ¾àÀë£©
-// minPts             ×îÉÙµãÊı£¨ÉÙÓÚ´ËÊıÁ¿µÄµã½«±»ÊÓÎªÔëÉù£©
+// è€ƒè™‘åˆ°æ ‡è®°ç‚¹çš„èšé›†æ€§å’Œå‡åŒ€æ€§ï¼Œä½¿ç”¨descanè¿›è¡Œæ»¤æ³¢
+// points             è¾“å…¥çš„ç‚¹é›†ï¼ˆcv::Point2f æ ¼å¼ï¼‰
+// filtered_points    æ»¤æ³¢åçš„ç‚¹é›†ï¼ˆcv::Point2f æ ¼å¼ï¼‰
+// eps                é‚»åŸŸåŠå¾„ï¼ˆä¸¤ä¸ªç‚¹è¢«è§†ä¸ºé‚»å±…çš„æœ€å¤§åƒç´ è·ç¦»ï¼‰
+// minPts             æœ€å°‘ç‚¹æ•°ï¼ˆå°‘äºæ­¤æ•°é‡çš„ç‚¹å°†è¢«è§†ä¸ºå™ªå£°ï¼‰
 bool TR_INSPECT_3D_Recon_Marker::filterOutlies_Debscan(const std::vector<cv::Point2f> &points,
 	                                                   std::vector<cv::Point2f>       &filtered_points,
 						                               float eps,
@@ -117,10 +135,10 @@ bool TR_INSPECT_3D_Recon_Marker::filterOutlies_Debscan(const std::vector<cv::Poi
 
 	float eps2 = eps * eps;
 	int n = points.size();
-	std::vector<int> labels(n, -1); // -1: Î´´¦Àí, 0: ÔëÉù, >0: ´ØID
+	std::vector<int> labels(n, -1); // -1: æœªå¤„ç†, 0: å™ªå£°, >0: ç°‡ID
 	int clusterId = 0;
 
-	// 1. Ö´ĞĞ DBSCAN ¾ÛÀà
+	// 1. æ‰§è¡Œ DBSCAN èšç±»
 	for (int i = 0; i < n; i++) 
 	{
 		if (labels[i] != -1)
@@ -128,7 +146,7 @@ bool TR_INSPECT_3D_Recon_Marker::filterOutlies_Debscan(const std::vector<cv::Poi
 			continue;
 		}
 
-		// Ñ°ÕÒÁÚ¾Ó
+		// å¯»æ‰¾é‚»å±…
 		std::vector<int> neighbors;
 		for (int j = 0; j < n; j++) 
 		{
@@ -140,21 +158,21 @@ bool TR_INSPECT_3D_Recon_Marker::filterOutlies_Debscan(const std::vector<cv::Poi
 
 		if (neighbors.size() < (size_t)minPts) 
 		{
-			labels[i] = 0; // ±ê¼ÇÎªÔëÉù
+			labels[i] = 0; // æ ‡è®°ä¸ºå™ªå£°
 		}
 		else 
 		{
 			clusterId++;
 			labels[i] = clusterId;
 
-			// À©Õ¹´Ø (Ê¹ÓÃ¶ÓÁĞÄ£Äâµİ¹é)
+			// æ‰©å±•ç°‡ (ä½¿ç”¨é˜Ÿåˆ—æ¨¡æ‹Ÿé€’å½’)
 			std::vector<int> seeds = neighbors;
 			for (size_t k = 0; k < seeds.size(); k++) 
 			{
 				int currIdx = seeds[k];
 				if (labels[currIdx] == 0)
 				{
-					labels[currIdx] = clusterId; // ÔëÉùµã±ä±ß½çµã
+					labels[currIdx] = clusterId; // å™ªå£°ç‚¹å˜è¾¹ç•Œç‚¹
 				}
 				if (labels[currIdx] != -1)
 				{
@@ -179,10 +197,10 @@ bool TR_INSPECT_3D_Recon_Marker::filterOutlies_Debscan(const std::vector<cv::Poi
 		}
 	}
 
-	// 2. Í³¼ÆÄÄ¸ö´ØµÄµãÊı×î¶à£¬¾Û¼¯µã
+	// 2. ç»Ÿè®¡å“ªä¸ªç°‡çš„ç‚¹æ•°æœ€å¤šï¼Œèšé›†ç‚¹
 	if (clusterId == 0)
 	{
-		return false; // È«ÊÇÔëÉù
+		return false; // å…¨æ˜¯å™ªå£°
 	}
 
 	std::vector<int> counts(clusterId + 1, 0);
@@ -198,7 +216,7 @@ bool TR_INSPECT_3D_Recon_Marker::filterOutlies_Debscan(const std::vector<cv::Poi
 	int targetId = std::distance(counts.begin(), maxIt);
 	int maxPointsCount = *maxIt;
 
-	// 3. ¼ÆËãÄ¿±ê´ØµÄÖĞĞÄ
+	// 3. è®¡ç®—ç›®æ ‡ç°‡çš„ä¸­å¿ƒ
 	cv::Point2f sum(0, 0);
 	filtered_points.clear();
 	for (int i = 0; i < n; i++)
@@ -212,7 +230,7 @@ bool TR_INSPECT_3D_Recon_Marker::filterOutlies_Debscan(const std::vector<cv::Poi
 	return true;
 }
 
-// ÈıÎ¬ÖØ½¨±ê¶¨²ÎÊıÅäÖÃ
+// ä¸‰ç»´é‡å»ºæ ‡å®šå‚æ•°é…ç½®
 int TR_INSPECT_3D_Recon_Marker::Set_Calib_Config(cv::Mat I1_t,
                                                  cv::Mat D1_t,
                                                  cv::Mat E1_t,
@@ -220,23 +238,23 @@ int TR_INSPECT_3D_Recon_Marker::Set_Calib_Config(cv::Mat I1_t,
                                                  cv::Mat D2_t,
                                                  cv::Mat E2_t)
 {
-	// ¼ì²éËùÓĞ¾ØÕóÊÇ·ñÎª¿Õ
+	// æ£€æŸ¥æ‰€æœ‰çŸ©é˜µæ˜¯å¦ä¸ºç©º
 	if (I1_t.empty() || D1_t.empty() || E1_t.empty() ||
 		I2_t.empty() || D2_t.empty() || E2_t.empty())
 	{
-		std::cerr << "[´íÎó] ±ê¶¨²ÎÊı¾ØÕó²»ÄÜÎª¿Õ£¡" << std::endl;
-		return 100; // ·µ»Ø100±íÊ¾²ÎÊı´íÎó
+		std::cerr << "[é”™è¯¯] æ ‡å®šå‚æ•°çŸ©é˜µä¸èƒ½ä¸ºç©ºï¼" << std::endl;
+		return 100; // è¿”å›100è¡¨ç¤ºå‚æ•°é”™è¯¯
 	}
 
-	// ¼ì²éÄÚ²Î¾ØÕó±ØĞëÊÇ 3x3 ¸¡µãĞÍ£¨Ïà»ú±ê×¼ÄÚ²Î¸ñÊ½£©
+	// æ£€æŸ¥å†…å‚çŸ©é˜µå¿…é¡»æ˜¯ 3x3 æµ®ç‚¹å‹ï¼ˆç›¸æœºæ ‡å‡†å†…å‚æ ¼å¼ï¼‰
 	if (I1_t.rows != 3 || I1_t.cols != 3 || I1_t.type() != CV_64F ||
 		I2_t.rows != 3 || I2_t.cols != 3 || I2_t.type() != CV_64F)
 	{
-		std::cerr << "[´íÎó] Ïà»úÄÚ²Î¾ØÕó±ØĞëÊÇ3x3Ë«¾«¶È¸¡µãĞÍ(CV_64F)£¡" << std::endl;
+		std::cerr << "[é”™è¯¯] ç›¸æœºå†…å‚çŸ©é˜µå¿…é¡»æ˜¯3x3åŒç²¾åº¦æµ®ç‚¹å‹(CV_64F)ï¼" << std::endl;
 		return 200;
 	}
 
-	// Éî¿½±´£¬Ê¹ÓÃ cv::Mat::clone() Éî¿½±´£¬±ÜÃâÍâ²¿¾ØÕóÊÍ·Åµ¼ÖÂÒ°Ö¸Õë
+	// æ·±æ‹·è´ï¼Œä½¿ç”¨ cv::Mat::clone() æ·±æ‹·è´ï¼Œé¿å…å¤–éƒ¨çŸ©é˜µé‡Šæ”¾å¯¼è‡´é‡æŒ‡é’ˆ
 	config.I1 = I1_t.clone();
 	config.D1 = D1_t.clone();
 	config.E1 = E1_t.clone();
@@ -248,7 +266,7 @@ int TR_INSPECT_3D_Recon_Marker::Set_Calib_Config(cv::Mat I1_t,
 	return 0;
 }
 
-// 2D¼ì²â²ÎÊıÅäÖÃ
+// 2Dæ£€æµ‹å‚æ•°é…ç½®
 int TR_INSPECT_3D_Recon_Marker::Set_2D_Config(double     epipolar_threshold,
 	                                          float      min_z_range,
 	                                          float      max_z_range,
@@ -264,10 +282,10 @@ int TR_INSPECT_3D_Recon_Marker::Set_2D_Config(double     epipolar_threshold,
 	return 0;
 }
 
-// ¼ÆËãÖØÍ¶Ó°Îó²î
-// p3d       Èı½Ç»¯µÃµ½µÄ3Dµã£¨ÊÀ½ç/Ïà»ú×ø±êÏµ£©
-// pt2d      Ô­Ê¼Í¼ÏñÉÏµÄ2DÏñËØµã
-// projMat   Í¶Ó°¾ØÕó P = K [R|t]
+// è®¡ç®—é‡æŠ•å½±è¯¯å·®
+// p3d       ä¸‰è§’åŒ–å¾—åˆ°çš„3Dç‚¹ï¼ˆä¸–ç•Œ/ç›¸æœºåæ ‡ç³»ï¼‰
+// pt2d      åŸå§‹å›¾åƒä¸Šçš„2Dåƒç´ ç‚¹
+// projMat   æŠ•å½±çŸ©é˜µ P = K [R|t]
 double  TR_INSPECT_3D_Recon_Marker::calculateReprojectionError(const cv::Point3f& p3d,
 	                                                           const cv::Point2f& pt2d,
 															   const cv::Mat& projMat)
@@ -287,12 +305,12 @@ double  TR_INSPECT_3D_Recon_Marker::calculateReprojectionError(const cv::Point3f
 	return cv::norm(projected_pt - pt2d);
 }
 
-// ÔÚ×óÓÒÍ¼ÉÏ»æÖÆ¼«Ïß
-// img1 ×óÍ¼
-// img2 ÓÒÍ¼
-// F »ù´¡¾ØÕó
-// pts1 ×óÍ¼ÌØÕ÷µã¼¯ºÏ
-// pts2 ÓÒÍ¼ÌØÕ÷µã¼¯ºÏ (Óë pts1 Ò»Ò»¶ÔÓ¦)
+// åœ¨å·¦å³å›¾ä¸Šç»˜åˆ¶æçº¿
+// img1 å·¦å›¾
+// img2 å³å›¾
+// F åŸºç¡€çŸ©é˜µ
+// pts1 å·¦å›¾ç‰¹å¾ç‚¹é›†åˆ
+// pts2 å³å›¾ç‰¹å¾ç‚¹é›†åˆ (ä¸ pts1 ä¸€ä¸€å¯¹åº”)
 void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 	                                               const cv::Mat& img2,
 	                                               const cv::Mat& F,
@@ -300,18 +318,18 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 	                                               const std::vector<cv::Point2f>& pts2)
 {
 	cv::Mat outImg1, outImg2;
-	// ×ª»»Îª²ÊÉ«ÒÔ±ã»­Ïß
+	// è½¬æ¢ä¸ºå½©è‰²ä»¥ä¾¿ç”»çº¿
 	if (img1.channels() == 1) cv::cvtColor(img1, outImg1, cv::COLOR_GRAY2BGR);
 	else outImg1 = img1.clone();
 
 	if (img2.channels() == 1) cv::cvtColor(img2, outImg2, cv::COLOR_GRAY2BGR);
 	else outImg2 = img2.clone();
 
-	// 1. ¼ÆËã¼«Ïß
+	// 1. è®¡ç®—æçº¿
 	std::vector<cv::Vec3f> lines1, lines2;
-	// computeCorrespondEpilines ÊäÈë±ØĞëÊÇ float ÀàĞÍ
-	cv::computeCorrespondEpilines(pts1, 1, F, lines2); // ×óµãÔÚÓÒÍ¼µÄÏß
-	cv::computeCorrespondEpilines(pts2, 2, F, lines1); // ÓÒµãÔÚ×óÍ¼µÄÏß
+	// computeCorrespondEpilines è¾“å…¥å¿…é¡»æ˜¯ float ç±»å‹
+	cv::computeCorrespondEpilines(pts1, 1, F, lines2); // å·¦ç‚¹åœ¨å³å›¾çš„çº¿
+	cv::computeCorrespondEpilines(pts2, 2, F, lines1); // å³ç‚¹åœ¨å·¦å›¾çš„çº¿
 
 	cv::RNG rng(12345);
 
@@ -320,27 +338,27 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 	{
 		cv::Scalar color = cv::Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
 
-		// --- ÔÚ×óÍ¼»­Ïß (¶ÔÓ¦ÓÒÍ¼µÄµã) ---
+		// --- åœ¨å·¦å›¾ç”»çº¿ (å¯¹åº”å³å›¾çš„ç‚¹) ---
 		float a1 = lines1[i][0], b1 = lines1[i][1], c1 = lines1[i][2];
-		cv::line(outImg1, cv::Point(0, -c1 / b1), cv::Point(outImg1.cols, -(c1 + a1*outImg1.cols) / b1), color, 4); // Ïß¿í¼Ó´ó
-		cv::circle(outImg1, pts1[i], 15, color, -1); // Ô²È¦¼Ó´ó
+		cv::line(outImg1, cv::Point(0, -c1 / b1), cv::Point(outImg1.cols, -(c1 + a1*outImg1.cols) / b1), color, 4); // çº¿å®½åŠ å¤§
+		cv::circle(outImg1, pts1[i], 15, color, -1); // åœ†åœˆåŠ å¤§
 
-		// --- ÔÚÓÒÍ¼»­Ïß (¶ÔÓ¦×óÍ¼µÄµã) ---
+		// --- åœ¨å³å›¾ç”»çº¿ (å¯¹åº”å·¦å›¾çš„ç‚¹) ---
 		float a2 = lines2[i][0], b2 = lines2[i][1], c2 = lines2[i][2];
 		cv::line(outImg2, cv::Point(0, -c2 / b2), cv::Point(outImg2.cols, -(c2 + a2*outImg2.cols) / b2), color, 4);
 		cv::circle(outImg2, pts2[i], 15, color, -1);
 	}
 
-	// 2. Æ´½ÓÍ¼Ïñ
+	// 2. æ‹¼æ¥å›¾åƒ
 	cv::Mat combined;
 	cv::hconcat(outImg1, outImg2, combined);
 
-	// 3. ´°¿Ú´¦Àí (¹Ø¼üĞŞ¸Ä)
+	// 3. çª—å£å¤„ç† (å…³é”®ä¿®æ”¹)
 	std::string winName = "Epipolar Check (Press any key to close)";
-	// WINDOW_NORMAL ÔÊĞíÄãÓÃÊó±êÍÏ¶¯´°¿Ú±ßÔµÀ´µ÷Õû´óĞ¡
+	// WINDOW_NORMAL å…è®¸ä½ ç”¨é¼ æ ‡æ‹–åŠ¨çª—å£è¾¹ç¼˜æ¥è°ƒæ•´å¤§å°
 	cv::namedWindow(winName, cv::WINDOW_NORMAL);
 
-	// ¸ù¾İÏÔÊ¾Æ÷·Ö±æÂÊ×Ô¶¯µ÷Õû´°¿Ú´óĞ¡ (ÀıÈçµ÷Õûµ½ 1280 ¿í)
+	// æ ¹æ®æ˜¾ç¤ºå™¨åˆ†è¾¨ç‡è‡ªåŠ¨è°ƒæ•´çª—å£å¤§å° (ä¾‹å¦‚è°ƒæ•´åˆ° 1280 å®½)
 	float displayScale = 1280.0f / combined.cols;
 	cv::resizeWindow(winName, 1280, (int)(combined.rows * displayScale));
 
@@ -349,14 +367,14 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 	cv::destroyWindow(winName);
 }
 
-	// ÔÚ×óÓÒÍ¼ÉÏ»æÖÆ¼«Ïß
-	// ÔÚÄ¿±êµã¼¯ÖĞÑ°ÕÒ×î¼ÑÆ¥Åäµã
-	// pt            Ô´Í¼ÏñÖĞµÄµã
-	// candidates    Ä¿±êÍ¼ÏñÖĞµÄºòÑ¡µã¼¯
-	// F             »ù´¡¾ØÕó
-	// isLeftToRight true±íÊ¾×óËÑÓÒ(L->R)£¬false±íÊ¾ÓÒËÑ×ó(R->L)
-	// threshold     ¼«Ïß¾àÀëãĞÖµ
-	// ×¢Òâ£º×óËÑÓÒÓÃFunc£¬ÓÒËÑ×óÓÃ FuncT
+	// åœ¨å·¦å³å›¾ä¸Šç»˜åˆ¶æçº¿
+	// åœ¨ç›®æ ‡ç‚¹é›†ä¸­å¯»æ‰¾æœ€ä½³åŒ¹é…ç‚¹
+	// pt            æºå›¾åƒä¸­çš„ç‚¹
+	// candidates    ç›®æ ‡å›¾åƒä¸­çš„å€™é€‰ç‚¹é›†
+	// F             åŸºç¡€çŸ©é˜µ
+	// isLeftToRight trueè¡¨ç¤ºå·¦æœå³(L->R)ï¼Œfalseè¡¨ç¤ºå³æœå·¦(R->L)
+	// threshold     æçº¿è·ç¦»é˜ˆå€¼
+	// æ³¨æ„ï¼šå·¦æœå³ç”¨Funcï¼Œå³æœå·¦ç”¨ FuncT
 	int TR_INSPECT_3D_Recon_Marker::findBestEpipolarMatch(const cv::Point2f& pt,
 		                                                  const std::vector<cv::Point2f>& candidates,
 		                                                  const cv::Mat& F,
@@ -368,11 +386,11 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 
 		if (isLeftToRight)
 		{
-			line = F * p_mat; // LÍ¼µãÔÚRÍ¼µÄ¼«Ïß
+			line = F * p_mat; // Lå›¾ç‚¹åœ¨Rå›¾çš„æçº¿
 		}
 		else
 		{
-			line = F.t() * p_mat; // RÍ¼µãÔÚLÍ¼µÄ¼«Ïß (F×ªÖÃ)
+			line = F.t() * p_mat; // Rå›¾ç‚¹åœ¨Lå›¾çš„æçº¿ (Fè½¬ç½®)
 		}
 
 		double a = line.at<double>(0);
@@ -381,18 +399,18 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 		double line_norm = std::sqrt(a * a + b * b);
 
 		int best_idx = -1;
-		double min_dist = 1e10;            // ×îĞ¡¾àÀë
-		double sed_dist = 1e10;            // µÚ¶şĞ¡¾àÀë
+		double min_dist = 1e10;            // æœ€å°è·ç¦»
+		double sed_dist = 1e10;            // ç¬¬äºŒå°è·ç¦»
 
 		for (int j = 0; j < candidates.size(); ++j)
 		{
 			const auto& target_pt = candidates[j];
 
-			// 1. ¼«Ïß¾àÀë¼ì²é
+			// 1. æçº¿è·ç¦»æ£€æŸ¥
 			double dist = std::abs(a * target_pt.x + b * target_pt.y + c) / line_norm;
 
-			// 2. ÊÓ²îÔ¼Êø (Ë®Æ½·ÅÖÃÏà»úÍ¨³£ÒªÇó pt_left.x > pt_right.x)
-			// Èç¹ûÊÇÓÒËÑ×ó£¬Ôò target_pt.x Ó¦´óÓÚ pt.x
+			// 2. è§†å·®çº¦æŸ (æ°´å¹³æ”¾ç½®ç›¸æœºé€šå¸¸è¦æ±‚ pt_left.x > pt_right.x)
+			// å¦‚æœæ˜¯å³æœå·¦ï¼Œåˆ™ target_pt.x åº”å¤§äº pt.x
 			if (isLeftToRight && target_pt.x >= pt.x)
 			{
 				continue;
@@ -403,27 +421,27 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 			}
 
 
-			// 2. ¾àÀëãĞÖµ³õÉ¸
+			// 2. è·ç¦»é˜ˆå€¼åˆç­›
 			if (dist > threshold)
 			{
 				continue;
 			}
 
-			// 3. ºËĞÄÂß¼­£ºÎ¬»¤×î½üºÍ´Î½ü
+			// 3. æ ¸å¿ƒé€»è¾‘ï¼šç»´æŠ¤æœ€è¿‘å’Œæ¬¡è¿‘
 			if (dist < min_dist)
 			{
-				sed_dist = min_dist;      // Ô­À´µÄµÚÒ»±ä³ÉµÚ¶ş
-				min_dist = dist;          // ¸üĞÂµÚÒ»
+				sed_dist = min_dist;      // åŸæ¥çš„ç¬¬ä¸€å˜æˆç¬¬äºŒ
+				min_dist = dist;          // æ›´æ–°ç¬¬ä¸€
 				best_idx = j;
 			}
 			else if (dist < sed_dist)
 			{
-				sed_dist = dist;          // ½ö¸üĞÂµÚ¶ş
+				sed_dist = dist;          // ä»…æ›´æ–°ç¬¬äºŒ
 			}
 		}
 
-		// Ä£·Â OpenCV StereoBM Ëã·¨£ºÈç¹ûµ½¼«Ïß×î½üµÄµã¾àÀëÊÇ d1£¬´Î½üµÄµã¾àÀëÊÇ d2¡£
-		// Èç¹û d1 / d2 > 0.7£¨¼´µÚÒ»Æ¥ÅäºÍµÚ¶şÆ¥ÅäºÜ½Ó½ü£©£¬ËµÃ÷´Ë´¦´æÔÚÆçÒå£¬¹¤Òµ³¡¾°ÏÂ½¨ÒéÉáÆú¸Ãµã£¬ÒÔ±£Ö¤¡°²»³ö´í¡±±È¡°µãÊı¶à¡±¸üÖØÒª¡£
+		// æ¨¡ä»¿ OpenCV StereoBM ç®—æ³•ï¼šå¦‚æœåˆ°æçº¿æœ€è¿‘çš„ç‚¹è·ç¦»æ˜¯ d1ï¼Œæ¬¡è¿‘çš„ç‚¹è·ç¦»æ˜¯ d2ã€‚
+		// å¦‚æœ d1 / d2 > 0.7ï¼ˆå³ç¬¬ä¸€åŒ¹é…å’Œç¬¬äºŒåŒ¹é…å¾ˆæ¥è¿‘ï¼‰ï¼Œè¯´æ˜æ­¤å¤„å­˜åœ¨æ­§ä¹‰ï¼Œå·¥ä¸šåœºæ™¯ä¸‹å»ºè®®èˆå¼ƒè¯¥ç‚¹ï¼Œä»¥ä¿è¯â€œä¸å‡ºé”™â€æ¯”â€œç‚¹æ•°å¤šâ€æ›´é‡è¦ã€‚
 		if (sed_dist > 0.00001)
 		{
 			if ((min_dist / sed_dist) > AppConfig::Instance().recon.max_ratio) // uniqueness ratio
@@ -434,13 +452,13 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 
 		return best_idx;
 	}
-	// ¼ò»¯µÄÏñËØÖØÍ¶Ó°Îó²î¼ÆËã
-	// p3d    Èı½Ç»¯µÃµ½µÄ 3D µã (ÔÚ×óÏà»ú×ø±êÏµÏÂ)
-	// p2d    Ô­Ê¼Í¼ÏñÉÏµÄ¹Û²ìµã (´ø»û±äµÄÏñËØ×ø±ê)
-	// K      ÄÚ²Î¾ØÕó
-	// D      »û±äÏµÊı
-	// R      Ïà¶ÔÓÚ×óÏà»úµÄĞı×ª¾ØÕó (×óÏà»ú´«µ¥Î»Õó)
-	// t      Ïà¶ÔÓÚ×óÏà»úµÄÆ½ÒÆÏòÁ¿ (×óÏà»ú´«ÁãÏòÁ¿)
+	// ç®€åŒ–çš„åƒç´ é‡æŠ•å½±è¯¯å·®è®¡ç®—
+	// p3d    ä¸‰è§’åŒ–å¾—åˆ°çš„ 3D ç‚¹ (åœ¨å·¦ç›¸æœºåæ ‡ç³»ä¸‹)
+	// p2d    åŸå§‹å›¾åƒä¸Šçš„è§‚å¯Ÿç‚¹ (å¸¦ç•¸å˜çš„åƒç´ åæ ‡)
+	// K      å†…å‚çŸ©é˜µ
+	// D      ç•¸å˜ç³»æ•°
+	// R      ç›¸å¯¹äºå·¦ç›¸æœºçš„æ—‹è½¬çŸ©é˜µ (å·¦ç›¸æœºä¼ å•ä½é˜µ)
+	// t      ç›¸å¯¹äºå·¦ç›¸æœºçš„å¹³ç§»å‘é‡ (å·¦ç›¸æœºä¼ é›¶å‘é‡)
 	double TR_INSPECT_3D_Recon_Marker::computePixelErrorSimple(const cv::Point3f& p3d,
 		                                                       const cv::Point2f& p2d,
 		                                                       const cv::Mat& K,
@@ -448,31 +466,31 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 		                                                       const cv::Mat& R,
 		                                                       const cv::Mat& t)
 	{
-		// ½« R ×ª»»ÎªĞı×ªÏòÁ¿ rvec (projectPoints µÄÒªÇó)
+		// å°† R è½¬æ¢ä¸ºæ—‹è½¬å‘é‡ rvec (projectPoints çš„è¦æ±‚)
 		cv::Mat rvec;
 		if (R.total() == 9) cv::Rodrigues(R, rvec);
-		else rvec = R; // Èç¹û´«ÈëµÄ¾ÍÊÇ rvec ÔòÖ±½Ó¸³Öµ
+		else rvec = R; // å¦‚æœä¼ å…¥çš„å°±æ˜¯ rvec åˆ™ç›´æ¥èµ‹å€¼
 
 		std::vector<cv::Point3f> objPts; objPts.push_back(p3d);
 		std::vector<cv::Point2f> imgPts;
 
-		// Í¶Ó°µ½ÏñËØÆ½Ãæ
+		// æŠ•å½±åˆ°åƒç´ å¹³é¢
 		cv::projectPoints(objPts, rvec, t, K, D, imgPts);
 
-		// ·µ»ØÏñËØ¾àÀë
+		// è¿”å›åƒç´ è·ç¦»
 		return cv::norm(imgPts[0] - p2d);
 	}
 
-		// Ñ°ÕÒ×îÓÅÆ¥Åäµã
+		// å¯»æ‰¾æœ€ä¼˜åŒ¹é…ç‚¹
 	int TR_INSPECT_3D_Recon_Marker::findBestMatchRefined(const cv::Point2f& ptL,
 		                                                 const std::vector<cv::Point2f>& resultsR,
 		                                                 const cv::Mat& F,
-		                                                 const cv::Mat& projL, // ½öÓÃÓÚÈı½Ç»¯
-		                                                 const cv::Mat& projR, // ½öÓÃÓÚÈı½Ç»¯
-		                                                 const cv::Mat& I1, const cv::Mat& D1, // ×óÄÚ²Î¡¢»û±ä
-		                                                 const cv::Mat& I2, const cv::Mat& D2, // ÓÒÄÚ²Î¡¢»û±ä
-		                                                 const cv::Mat& R1, const cv::Mat& t1, // ×óÏà»úµÄ R ºÍ t
-		                                                 const cv::Mat& R2, const cv::Mat& t2, // ÓÒÏà»úÏà¶ÔÓÚ×óÏà»úµÄ R ºÍ t
+		                                                 const cv::Mat& projL, // ä»…ç”¨äºä¸‰è§’åŒ–
+		                                                 const cv::Mat& projR, // ä»…ç”¨äºä¸‰è§’åŒ–
+		                                                 const cv::Mat& I1, const cv::Mat& D1, // å·¦å†…å‚ã€ç•¸å˜
+		                                                 const cv::Mat& I2, const cv::Mat& D2, // å³å†…å‚ã€ç•¸å˜
+		                                                 const cv::Mat& R1, const cv::Mat& t1, // å·¦ç›¸æœºçš„ R å’Œ t
+		                                                 const cv::Mat& R2, const cv::Mat& t2, // å³ç›¸æœºç›¸å¯¹äºå·¦ç›¸æœºçš„ R å’Œ t
 		                                                 const double epipolar_threshold,
 		                                                 const double max_reproj_err,
 		                                                 const double max_ratio,
@@ -486,13 +504,13 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 		double reproj_err2 = 2.0 * max_reproj_err;
 		cv::Point3f best_p3d_tmp(0, 0, 0);
 
-		// 1. ¼«Ïß¼ÆËã
+		// 1. æçº¿è®¡ç®—
 		cv::Mat pL_mat = (cv::Mat_<double>(3, 1) << ptL.x, ptL.y, 1.0);
 		cv::Mat line = F * pL_mat;
 		double a = line.at<double>(0), b = line.at<double>(1), c = line.at<double>(2);
 		double line_norm = std::sqrt(a * a + b * b);
 
-		// 2. ×óµãÈ¥»û±ä£¨ÓÃÓÚÈı½Ç»¯£©
+		// 2. å·¦ç‚¹å»ç•¸å˜ï¼ˆç”¨äºä¸‰è§’åŒ–ï¼‰
 		std::vector<cv::Point2f> ptsL_u;
 		cv::undistortPoints(std::vector<cv::Point2f>{ptL}, ptsL_u, I1, D1, cv::noArray(), I1);
 
@@ -500,17 +518,17 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 		{
 			const cv::Point2f& ptR = resultsR[j];
 
-			// 3. ¼«Ïß´ÖÉ¸
+			// 3. æçº¿ç²—ç­›
 			double dist = std::abs(a * ptR.x + b * ptR.y + c) / line_norm;
 			if (dist > epipolar_threshold)
 			{
 				continue;
 			}
-			// 4. ÓÒµãÈ¥»û±ä
+			// 4. å³ç‚¹å»ç•¸å˜
 			std::vector<cv::Point2f> ptsR_u;
 			cv::undistortPoints(std::vector<cv::Point2f>{ptR}, ptsR_u, I2, D2, cv::noArray(), I2);
 
-			// 5. Èı½Ç»¯
+			// 5. ä¸‰è§’åŒ–
 			cv::Mat p4D;
 			cv::triangulatePoints(projL, projR, ptsL_u, ptsR_u, p4D);
 			float w = p4D.at<float>(3, 0);
@@ -520,13 +538,13 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 			}
 
 			cv::Point3f p3d_temp(p4D.at<float>(0, 0) / w, p4D.at<float>(1, 0) / w, p4D.at<float>(2, 0) / w);
-			// 6. Éî¶È¹ıÂË
+			// 6. æ·±åº¦è¿‡æ»¤
 			if (p3d_temp.z < min_z_range || p3d_temp.z > max_z_range)
 			{
 				continue;
 			}
 
-			// 7. ¼ÆËãÏñËØÖØÍ¶Ó°Îó²î (Ê¹ÓÃ´«ÈëµÄ R ºÍ t)
+			// 7. è®¡ç®—åƒç´ é‡æŠ•å½±è¯¯å·® (ä½¿ç”¨ä¼ å…¥çš„ R å’Œ t)
 			double err1 = computePixelErrorSimple(p3d_temp, ptL, I1, D1, R1, t1);
 			double err2 = computePixelErrorSimple(p3d_temp, ptR, I2, D2, R2, t2);
 			double total_err = err1 + err2;
@@ -536,7 +554,7 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 				continue;
 			}
 
-			// 8. ¼ÇÂ¼×îĞ¡ºÍ´ÎĞ¡Îó²î
+			// 8. è®°å½•æœ€å°å’Œæ¬¡å°è¯¯å·®
 			if (total_err < min_err)
 			{
 				second_min_err = min_err;
@@ -550,7 +568,7 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 			}
 		}
 
-		// 9. Î¨Ò»ĞÔ±ÈÂÊ²âÊÔ
+		// 9. å”¯ä¸€æ€§æ¯”ç‡æµ‹è¯•
 		if (best_idx != -1)
 		{
 			if (second_min_err != DBL_MAX)
@@ -563,36 +581,36 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 			out_p3d = best_p3d_tmp;
 		}
 
-		// 10. ¶àÖ¡Æ¥Åä½á¹û²âÊÔ£¬ÔÚÇ°nÖ¡ÖĞÊÇ·ñÒ²ÊÇ¸ÃÆ¥Åäµãbest_idx
+		// 10. å¤šå¸§åŒ¹é…ç»“æœæµ‹è¯•ï¼Œåœ¨å‰nå¸§ä¸­æ˜¯å¦ä¹Ÿæ˜¯è¯¥åŒ¹é…ç‚¹best_idx
 
 		return best_idx;
 	}
 	int TR_INSPECT_3D_Recon_Marker::Get_3D_Recon_Marker(cv::Mat &left_cam,
 		                                                cv::Mat &right_cam)
 	{
-		// 1. ÌáÈ¡Ğı×ª¾ØÕó R ºÍÆ½ÒÆÏòÁ¿ T (´Ó E1, E2 ×ª»»¾ØÕóÖĞ)
-		// ÓÃ»§Ìá¹©µÄ E2 ÊÇ´ÓÏà»ú1µ½Ïà»ú2µÄ±ä»» T_c2_c1 (»òÕßËµÊÇÏà»ú2ÔÚÏà»ú1×ø±êÏµÏÂµÄÎ»×Ë)
-		// ¸ù¾İ E1=I, E2=Extrinsic£¬Í¨³£ P1 = K1[I|0], P2 = K2[R|t]
+		// 1. æå–æ—‹è½¬çŸ©é˜µ R å’Œå¹³ç§»å‘é‡ T (ä» E1, E2 è½¬æ¢çŸ©é˜µä¸­)
+		// ç”¨æˆ·æä¾›çš„ E2 æ˜¯ä»ç›¸æœº1åˆ°ç›¸æœº2çš„å˜æ¢ T_c2_c1 (æˆ–è€…è¯´æ˜¯ç›¸æœº2åœ¨ç›¸æœº1åæ ‡ç³»ä¸‹çš„ä½å§¿)
+		// æ ¹æ® E1=I, E2=Extrinsicï¼Œé€šå¸¸ P1 = K1[I|0], P2 = K2[R|t]
 		cv::Mat R = config.E2(cv::Rect(0, 0, 3, 3));
 		cv::Mat t = config.E2(cv::Rect(3, 0, 1, 3));
 
-		// 2. ¹¹½¨Í¶Ó°¾ØÕó P1, P2 (ÓÃÓÚ cv::triangulatePoints),×¢Òâ£¬Èç¹ûÈ¥»û±äºóµãÊÇÍ¼Ïñ×ø±êÏµµÄÏñËØ£¬ÄÇÃ´Í¶Ó°¾ØÕó²»ĞèÒª³ËÒÔÄÚ²Î¾ØÕó
+		// 2. æ„å»ºæŠ•å½±çŸ©é˜µ P1, P2 (ç”¨äº cv::triangulatePoints),æ³¨æ„ï¼Œå¦‚æœå»ç•¸å˜åç‚¹æ˜¯å›¾åƒåæ ‡ç³»çš„åƒç´ ï¼Œé‚£ä¹ˆæŠ•å½±çŸ©é˜µä¸éœ€è¦ä¹˜ä»¥å†…å‚çŸ©é˜µ
 		cv::Mat proj1 = config.I1 * cv::Mat::eye(3, 4, CV_64F);
 		cv::Mat Rt = cv::Mat::eye(3, 4, CV_64F);
 		cv::hconcat(R, t, Rt);
 		cv::Mat proj2 = config.I2 * Rt;
 
-		// 3. ¼ÆËã»ù´¡¾ØÕó F£¬ÓÃÓÚ¼«ÏßÔ¼ÊøËÑË÷
+		// 3. è®¡ç®—åŸºç¡€çŸ©é˜µ Fï¼Œç”¨äºæçº¿çº¦æŸæœç´¢
 		// F = K2^-T * [t]x * R * K1^-1
 		cv::Mat t_x = (cv::Mat_<double>(3, 3) << 0, -t.at<double>(2), t.at<double>(1),
 			                                     t.at<double>(2), 0, -t.at<double>(0),
 			                                     -t.at<double>(1), t.at<double>(0), 0);
 		cv::Mat E = t_x * R;
 		cv::Mat F = config.I2.inv().t() * E * config.I1.inv();
-		cv::Mat Ft = F.t();               // F×ªÖÃ
+		cv::Mat Ft = F.t();               // Fè½¬ç½®
 
-		// ±ê¼ÇµãÈıÎ¬ÖØ½¨
-		// 1. ±ê¼ÇµãÊ¶±ğ
+		// æ ‡è®°ç‚¹ä¸‰ç»´é‡å»º
+		// 1. æ ‡è®°ç‚¹è¯†åˆ«
 		std::vector<cv::Point2f> results1;
 		results1.reserve(1000);
 		MarkPointDetector serch_Marker1;
@@ -604,7 +622,7 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 		serch_Marker1.ProcessFrame(left_cam, results1);
 		serch_Marker2.ProcessFrame(right_cam, results2);
 
-		if (0)            // ÏÔÊ¾¼«Ïß
+		if (0)            // æ˜¾ç¤ºæçº¿
 		{
 			drawEpipolarLines(left_cam,
 				              right_cam,
@@ -614,14 +632,14 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 		}
 
 		cv::Point3f p3d_L2R;
-		const float SPATIAL_MERGE_DIST = 5.0f; // ¿Õ¼äµãºÏ²¢ãĞÖµ (mm)£¬¸ù¾İÄãµÄ²âÁ¿¾«¶Èµ÷Õû
-		// 1. Æ¥ÅäÓëÖØ½¨Ñ­»·
-		// TODO: ¼«ÏßÆ¥ÅäÖĞÌí¼ÓÏàÁÚµã¸¨ÖúÍ¬ÃûµãËÑË÷
+		const float SPATIAL_MERGE_DIST = 5.0f; // ç©ºé—´ç‚¹åˆå¹¶é˜ˆå€¼ (mm)ï¼Œæ ¹æ®ä½ çš„æµ‹é‡ç²¾åº¦è°ƒæ•´
+		// 1. åŒ¹é…ä¸é‡å»ºå¾ªç¯
+		// TODO: æçº¿åŒ¹é…ä¸­æ·»åŠ ç›¸é‚»ç‚¹è¾…åŠ©åŒåç‚¹æœç´¢
 		frame_3d_points.clear();
 		for (int j = 0; j < (int)results1.size(); ++j)
 		{
 			cv::Point3f p3d_L2R;
-			// 1. ×óËÑÓÒ£ºÑ¡³öÖØÍ¶Ó°Îó²î×îÓÅµÄµã
+			// 1. å·¦æœå³ï¼šé€‰å‡ºé‡æŠ•å½±è¯¯å·®æœ€ä¼˜çš„ç‚¹
 			int idxR = findBestMatchRefined(results1[j],
 				                            results2,
 				                            F,
@@ -646,8 +664,8 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 				continue;
 			}
 
-			//// 2. Ë«ÏòĞ£Ñé£¨Cross-Check£©£ºÈ·±£Âß¼­±Õ»·
-			//// ×¢Òâ£º·´ÏòËÑË÷Ò²Ó¦¸ÃÓÃ Refined Ä£Ê½£¬ÒÔÅÅ³ıÓÒÍ¼µãµÄÆçÒå
+			//// 2. åŒå‘æ ¡éªŒï¼ˆCross-Checkï¼‰ï¼šç¡®ä¿é€»è¾‘é—­ç¯
+			//// æ³¨æ„ï¼šåå‘æœç´¢ä¹Ÿåº”è¯¥ç”¨ Refined æ¨¡å¼ï¼Œä»¥æ’é™¤å³å›¾ç‚¹çš„æ­§ä¹‰
 			//cv::Point3f p3d_R2L;
 			//int idxL_back = findBestMatchRefined(results2[idxR],
 			//	                                 results1,
@@ -671,16 +689,16 @@ void TR_INSPECT_3D_Recon_Marker::drawEpipolarLines(const cv::Mat& img1,
 
 			//if (idxL_back == j)
 			{
-				// Æ¥Åä¼«ÆäÎÈ½¡£¬¼ÓÈë±¾Ö¡µã¼¯
+				// åŒ¹é…æå…¶ç¨³å¥ï¼ŒåŠ å…¥æœ¬å¸§ç‚¹é›†
 				frame_3d_points.push_back(p3d_L2R);
 			}
 		}
 
-		// 6. Êä³ö½á¹û
-		std::cout << "ÈıÎ¬ÖØ½¨±ê¼ÇµãÊıÁ¿: " << frame_3d_points.size() << std::endl;
+		// 6. è¾“å‡ºç»“æœ
+		LB_COUT << "ä¸‰ç»´é‡å»ºæ ‡è®°ç‚¹æ•°é‡: " << frame_3d_points.size() << std::endl;
 		for (size_t ii = 0; ii < frame_3d_points.size(); ii++)
 		{
-			std::cout << frame_3d_points[ii].x << "," << frame_3d_points[ii].y << "," << frame_3d_points[ii].z << std::endl;
+			LB_COUT << frame_3d_points[ii].x << "," << frame_3d_points[ii].y << "," << frame_3d_points[ii].z << std::endl;
 		}
 		return 0;
 	}

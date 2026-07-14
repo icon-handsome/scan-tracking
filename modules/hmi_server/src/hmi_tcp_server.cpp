@@ -1534,6 +1534,10 @@ QJsonObject HmiTcpServer::buildPlcStatusPayload() const
                 payload[QLatin1String("plcUnloadNgAreaCount")] = cb.value(regs::kUnloadNgAreaCount);
                 payload[QLatin1String("plcUnloadOkAreaCount")] = cb.value(regs::kUnloadOkAreaCount);
             }
+            if (cb.size() > regs::kUnloadProcessStatus) {
+                payload[QLatin1String("loadProcessStatus")] = cb.value(regs::kLoadProcessStatus);
+                payload[QLatin1String("unloadProcessStatus")] = cb.value(regs::kUnloadProcessStatus);
+            }
         }
 
         const auto unloadCfg = m_stateMachine->unloadAreaConfig();
@@ -2109,6 +2113,10 @@ void HmiTcpServer::connectStatusRefreshSignals()
         connect(m_modbusService, &modbus::ModbusService::registersRead, this,
                 [this](int, const QVector<quint16>& values) {
             checkPlcAuxDeviceAlarms(values);
+            // 命令区变化（含 40056/40057 上下料过程状态）时即时推送，受 payload 去重约束
+            if (hasClient()) {
+                pushPlcStatus();
+            }
         }, Qt::UniqueConnection);
     }
 

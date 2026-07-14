@@ -194,17 +194,22 @@ void ConsoleRuntime::initMechEyeModule(int startupStage)
             hikCxpCameraBService_ = std::make_unique<scan_tracking::vision::HikCxpCameraService>(
                 QStringLiteral("ch250_b"));
 
+            // CXP 每帧采图都会 emit ready，默认不打印以免刷屏；仅记录错误态
             QObject::connect(
                 hikCxpCameraAService_.get(),
                 &scan_tracking::vision::HikCxpCameraService::stateChanged,
                 [](const QString& roleName, const QString& stateText, const QString& description) {
-                    qInfo(appLog) << QStringLiteral("[CXP]") << roleName << stateText << description;
+                    if (stateText == QStringLiteral("error") || stateText == QStringLiteral("stopped")) {
+                        qWarning(appLog) << QStringLiteral("[CXP]") << roleName << stateText << description;
+                    }
                 });
             QObject::connect(
                 hikCxpCameraBService_.get(),
                 &scan_tracking::vision::HikCxpCameraService::stateChanged,
                 [](const QString& roleName, const QString& stateText, const QString& description) {
-                    qInfo(appLog) << QStringLiteral("[CXP]") << roleName << stateText << description;
+                    if (stateText == QStringLiteral("error") || stateText == QStringLiteral("stopped")) {
+                        qWarning(appLog) << QStringLiteral("[CXP]") << roleName << stateText << description;
+                    }
                 });
 
             hikCxpCameraAService_->start(
@@ -344,12 +349,17 @@ void ConsoleRuntime::initVisionFlowModules(
     qInfo(appLog) << QStringLiteral("[启动] VisionPipelineService 已创建。");
 
     qInfo(appLog) << QStringLiteral("[启动] 连接 VisionPipelineService 信号...");
+    // 视觉流水线每帧都切换 Capturing/Ready，默认不打印状态以免刷屏
     QObject::connect(
         visionPipelineService_.get(),
         &scan_tracking::vision::VisionPipelineService::stateChanged,
         &application_,
         [](scan_tracking::vision::VisionPipelineState state, const QString& description) {
-            qInfo(appLog) << QStringLiteral("[视觉流水线] 状态 =") << static_cast<int>(state) << description;
+            if (state == scan_tracking::vision::VisionPipelineState::Error
+                || state == scan_tracking::vision::VisionPipelineState::Stopped) {
+                qWarning(appLog) << QStringLiteral("[视觉流水线] 状态 =")
+                                 << static_cast<int>(state) << description;
+            }
         },
         Qt::QueuedConnection);
     QObject::connect(
@@ -357,7 +367,7 @@ void ConsoleRuntime::initVisionFlowModules(
         &scan_tracking::vision::VisionPipelineService::bundleCaptureFinished,
         &application_,
         [this](const scan_tracking::vision::MultiCameraCaptureBundle& bundle) {
-            qInfo(appLog) << QStringLiteral("[视觉流水线]") << bundle.summary();
+            // bundle.summary() 每帧打印会刷屏，已禁用
             if (m_autoLatencyTestPending) {
                 onAutoLatencyBundleFinished(bundle);
             }
