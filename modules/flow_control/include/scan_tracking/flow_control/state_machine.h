@@ -171,14 +171,27 @@ public:
         const tracking::InspectionResult& result);
 
     /**
-     * @brief 在线 Trig_Inspection 内表面算法完成后的主线程收尾（写 PLC / 推 HMI）
+     * @brief 在线坡口后台算法完成后的主线程收尾（仅推 HMI，不写 PLC）
      *
-     * 由后台线程经 QueuedConnection 回投；generation 不匹配或任务已结束时丢弃。
+     * 与内表面一致：Trig_Inspection 入口假 OK 放行；真结果只给显控。
+     */
+    void deliverOnlineBevelInspectionResult(
+        const tracking::InspectionResult& result,
+        int segmentCount,
+        quint64 generation,
+        int demoSegmentIndex = 0);
+
+    /**
+     * @brief 在线内表面后台算法完成后的主线程收尾（仅推 HMI，不写 PLC）
+     *
+     * PLC 已在 Trig_Inspection 入口以假 OK（Res=1/Ack=2）放行；此处只投递真结果给显控。
+     * generation 不匹配（ResultReset/stop/新一轮）时丢弃。
      */
     void deliverOnlineInternalSurfaceInspectionResult(
         const tracking::InspectionResult& result,
         int segmentCount,
-        quint64 generation);
+        quint64 generation,
+        int demoSegmentIndex = 0);
 
     /**
      * @brief 一次性联调：从 [Bevel] offlineReplayDataDir 加载 PCD/PLY 点云并跑坡口测量
@@ -524,6 +537,9 @@ private:
         quint32 taskId,
         const scan_tracking::common::PointCloudProcessingConfig& config);
 
+    /// 点云后处理关闭时：Ack 后异步做 PoseStitch，避免主线程抢 PCL 全局锁被内表面长算法卡住
+    void startSegmentBackgroundPoseStitch(int pathId, int segmentIndex);
+
     // 将 refinement 结果写回内存缓存
     void applySegmentRefinementOutcome(const SegmentProcessOutcome& outcome);
 
@@ -537,14 +553,18 @@ private:
         int* segmentCount,
         QString* errorMessage);
 
-    // 坡口检测：从内存缓存按分段取出点云（不合并，供逐段测量取均值）
-    // outSegments 与 outMergedInspectionPcdPath 至少填其一；内表面检测仅需后者
+    // 坡口/内表面等：从内存缓存按分段取出点云
+    // outSegments 与 outMergedInspectionPcdPath 至少填其一
+    // pathIdOverride>0 时用该路径（后台任务在 activeTask 已假完成时仍可读缓存）
+    // waitForRefinement=false：后台线程调用时勿 join+processEvents
     bool loadSegmentPointCloudsForInspection(
         QList<scan_tracking::mech_eye::PointCloudFrame>* outSegments,
         int* totalPointCount,
         int* segmentCount,
         QString* errorMessage,
-        QString* outMergedInspectionPcdPath = nullptr);
+        QString* outMergedInspectionPcdPath = nullptr,
+        int pathIdOverride = 0,
+        bool waitForRefinement = true);
 
     /// Hole 检测：从 session 落盘目录收集各段 pointcloud_stitched 文件路径（不加载点云）
     bool loadHoleSegmentPcdPathsForInspection(
@@ -836,9 +856,12 @@ private:
 
     /// 在线内表面异步检测代数：超时/新任务时递增，用于丢弃过期后台结果
     quint64 m_internalSurfaceAsyncGeneration = 0;
+    /// 在线坡口异步检测代数（假 OK 放行后后台解算）
+    quint64 m_bevelAsyncGeneration = 0;
 
     static constexpr int kMaxPointCloudCacheSize = 200;   // 多路径缓存上限（6 路径共 183 段，留余量）
     /// 内表面大点云 ICP/网格化可达数分钟；低于此时长会误超时掐断握手
+    /// 曾用于在线内表面异步等待时抬高 Inspection 超时；现已假 OK 即时放行，保留常量供对照/离线。
     static constexpr int kInternalSurfaceTimeoutFloorSeconds = 600;
     static constexpr int kMaxReasonableRefinementJobs = 32;  // 并发 refinement 上限（超出视为逻辑错误）
     static constexpr int kShutdownRefinementJoinTimeoutMs = 3000;

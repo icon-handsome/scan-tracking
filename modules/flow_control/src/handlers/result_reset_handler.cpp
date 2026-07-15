@@ -25,6 +25,10 @@ void StateMachine::executeResultResetTask()
     m_ipcSafetyActionWord = 0;
     m_personZoneAlarmActive = false;
 
+    // 丢弃仍在跑的内表面/坡口后台解算，避免复位后把上一件结果推给 HMI
+    ++m_internalSurfaceAsyncGeneration;
+    ++m_bevelAsyncGeneration;
+
     resetScanSegmentCache();  // 清空扫描缓存
     // 将扫描分段完成索引寄存器清零
     const bool segmentIndexCleared = m_modbus->writeRegisters(protocol::registers::kScanSegmentDoneIndex, {0, 0, 0});

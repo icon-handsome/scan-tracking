@@ -122,78 +122,100 @@ void StateMachine::executeInspectionTask()
             outerPointCount,
             m_activeTask.inspectionPathId);
     } else if (inspectionType == scan_tracking::common::InspectionType::Bevel) {
-        QString mergedInspectionPcdPath;
-        int totalPointCount = 0;
-        if (!loadSegmentPointCloudsForInspection(
-                nullptr,
-                &totalPointCount,
-                &segmentCount,
-                &loadError,
-                &mergedInspectionPcdPath)) {
-            qWarning(LOG_FLOW).noquote()
-                << QStringLiteral("Trig_Inspection 加载坡口分段点云失败：") << loadError
-                << multiPathCacheStatusText();
-            writeInspectionResult({2, 1u << 4, 0, 0});
-            if (m_inspectionResultPublisher) {
-                tracking::InspectionResult failure;
-                failure.resultCode = 2;
-                failure.ngReasonWord0 = (1u << 4);
-                failure.message = loadError.isEmpty()
-                    ? QStringLiteral("综合检测失败：无法加载坡口分段点云。")
-                    : loadError;
-                m_inspectionResultPublisher(failure);
-            }
-            completeActiveTask(
-                kInspectionResProcessingFail,
-                protocol::AckState::Completed,
-                false);
-            clearActiveTask();
-            m_ipcState = protocol::IpcState::Ready;
-            m_currentStage = protocol::Stage::Idle;
-            m_progress = 0;
-            setState(AppState::Ready);
-            publishIpcStatus();
-            return;
-        }
+        // 与内表面一致：Res=1/Ack=2 仅放行；加载/解算全进后台，避免主线程等 path2 的 PCL 锁。
+        const int pathId = m_activeTask.inspectionPathId;
+        const int demoSegmentIndex = m_activeTask.scanSegmentIndex;
 
-        if (mergedInspectionPcdPath.trimmed().isEmpty()
-            || !QFileInfo::exists(mergedInspectionPcdPath)) {
-            loadError = QStringLiteral("坡口检测融合点云不存在：%1").arg(mergedInspectionPcdPath);
-            qWarning(LOG_FLOW).noquote()
-                << QStringLiteral("Trig_Inspection 坡口落盘点云不可用：") << loadError
-                << multiPathCacheStatusText();
-            writeInspectionResult({2, 1u << 4, 0, 0});
-            if (m_inspectionResultPublisher) {
-                tracking::InspectionResult failure;
-                failure.resultCode = 2;
-                failure.ngReasonWord0 = (1u << 4);
-                failure.message = loadError;
-                m_inspectionResultPublisher(failure);
-            }
-            completeActiveTask(
-                kInspectionResProcessingFail,
-                protocol::AckState::Completed,
-                false);
-            clearActiveTask();
-            m_ipcState = protocol::IpcState::Ready;
-            m_currentStage = protocol::Stage::Idle;
-            m_progress = 0;
-            setState(AppState::Ready);
-            publishIpcStatus();
-            return;
-        }
-
+        InspectionSummary provisional;
+        provisional.resultCode = kInspectionResOk;
+        provisional.ngReasonWord0 = 0;
+        provisional.ngReasonWord1 = 0;
+        provisional.measureItemCount = 0;
+        writeInspectionResult(provisional);
         qInfo(LOG_FLOW).noquote()
-            << QStringLiteral("[Bevel] 从落盘融合 PCD 执行测量（避免主线程持有千万级分段点云）")
-            << QStringLiteral(" path=") << mergedInspectionPcdPath
-            << QStringLiteral(" 总点数=") << totalPointCount
-            << QStringLiteral(" 参与段数=") << segmentCount;
+            << QStringLiteral("[Bevel] PLC 假 OK 放行 Res=1/Ack=2")
+            << QStringLiteral(" pathId=") << pathId
+            << QStringLiteral("（真结果仅推 HMI，不回写 PLC）");
+        completeActiveTask(kInspectionResOk, protocol::AckState::Completed, true);
+        markPathInspectionCompleted(pathId);
+        maybeEmitPathFinished(pathId, kInspectionResOk);
 
-        trackingResult = m_tracking->inspectBevelPointCloudFile(
-            mergedInspectionPcdPath, m_activeTask.inspectionPathId);
-        if (trackingResult.sourcePointCount <= 0 && totalPointCount > 0) {
-            trackingResult.sourcePointCount = totalPointCount;
-        }
+        const quint64 generation = ++m_bevelAsyncGeneration;
+        tracking::TrackingService* tracking = m_tracking;
+        QPointer<StateMachine> self(this);
+
+        std::thread([self,
+                     tracking,
+                     pathId,
+                     generation,
+                     demoSegmentIndex]() {
+            tracking::InspectionResult result;
+            int asyncSegmentCount = 0;
+            if (!self || self->m_stopped.load(std::memory_order_acquire)) {
+                return;
+            }
+            if (tracking == nullptr) {
+                result.resultCode = 2;
+                result.ngReasonWord0 = (1u << 4);
+                result.message = QStringLiteral("综合检测失败：Tracking 服务不可用。");
+            } else {
+                QString mergedInspectionPcdPath;
+                QString loadError;
+                int totalPointCount = 0;
+                int segmentCount = 0;
+                // 后台加载：不等 refinement join；pathId 显式传入（activeTask 可能已收尾）
+                const bool loadOk = self->loadSegmentPointCloudsForInspection(
+                    nullptr,
+                    &totalPointCount,
+                    &segmentCount,
+                    &loadError,
+                    &mergedInspectionPcdPath,
+                    pathId,
+                    false);
+                const bool pcdReady = loadOk
+                    && !mergedInspectionPcdPath.trimmed().isEmpty()
+                    && QFileInfo::exists(mergedInspectionPcdPath);
+                asyncSegmentCount = segmentCount;
+
+                if (!pcdReady) {
+                    if (loadError.trimmed().isEmpty()) {
+                        loadError = QStringLiteral("坡口检测融合点云不存在：%1")
+                                        .arg(mergedInspectionPcdPath);
+                    }
+                    result.resultCode = 2;
+                    result.ngReasonWord0 = (1u << 4);
+                    result.message = loadError;
+                } else {
+                    qInfo(LOG_FLOW).noquote()
+                        << QStringLiteral("[Bevel] 后台解算开始（可排队于内表面算法之后）")
+                        << QStringLiteral(" path=") << mergedInspectionPcdPath
+                        << QStringLiteral(" 总点数=") << totalPointCount
+                        << QStringLiteral(" 参与段数=") << segmentCount;
+                    result = tracking->inspectBevelPointCloudFile(
+                        mergedInspectionPcdPath, pathId, false);
+                    if (result.sourcePointCount <= 0 && totalPointCount > 0) {
+                        result.sourcePointCount = totalPointCount;
+                    }
+                }
+            }
+
+            QCoreApplication* app = QCoreApplication::instance();
+            if (app == nullptr) {
+                return;
+            }
+            QMetaObject::invokeMethod(
+                app,
+                [self, result, asyncSegmentCount, generation, demoSegmentIndex]() {
+                    if (!self) {
+                        return;
+                    }
+                    self->deliverOnlineBevelInspectionResult(
+                        result, asyncSegmentCount, generation, demoSegmentIndex);
+                },
+                Qt::QueuedConnection);
+        }).detach();
+
+        return;
     } else if (inspectionType == scan_tracking::common::InspectionType::Hole) {
         QList<scan_tracking::mech_eye::PointCloudFrame> segmentClouds;
         QStringList segmentPcdPaths;
@@ -240,105 +262,98 @@ void StateMachine::executeInspectionTask()
                 segmentClouds, totalPointCount, m_activeTask.inspectionPathId);
         }
     } else if (inspectionType == scan_tracking::common::InspectionType::InternalSurface) {
+        // 与 PLC 约定：握手外形不变，但 Res=1/Ack=2 仅作放行票；真解算只推 HMI。
+        const int pathId = m_activeTask.inspectionPathId;
+        const int demoSegmentIndex = m_activeTask.scanSegmentIndex;
+
+        auto provisionalCompleteToPlc = [this, pathId]() {
+            constexpr quint16 kProvisionalOk = 1;
+            InspectionSummary provisional;
+            provisional.resultCode = kProvisionalOk;
+            provisional.ngReasonWord0 = 0;
+            provisional.ngReasonWord1 = 0;
+            provisional.measureItemCount = 0;
+            writeInspectionResult(provisional);
+            qInfo(LOG_FLOW).noquote()
+                << QStringLiteral("[InternalSurface] PLC 假 OK 放行 Res=1/Ack=2")
+                << QStringLiteral(" pathId=") << pathId
+                << QStringLiteral("（真结果仅推 HMI，不回写 PLC）");
+            completeActiveTask(kProvisionalOk, protocol::AckState::Completed, true);
+            markPathInspectionCompleted(pathId);
+            maybeEmitPathFinished(pathId, kProvisionalOk);
+        };
+
+        // 先完成握手，再融合点云/解算，避免机构等分钟级算法。
+        provisionalCompleteToPlc();
+
         QString mergedInspectionPcdPath;
         int totalPointCount = 0;
-        if (!loadSegmentPointCloudsForInspection(
-                nullptr,
-                &totalPointCount,
-                &segmentCount,
-                &loadError,
-                &mergedInspectionPcdPath)) {
-            qWarning(LOG_FLOW).noquote()
-                << QStringLiteral("Trig_Inspection 加载内表面分段点云失败：") << loadError
-                << multiPathCacheStatusText();
-            writeInspectionResult({2, 1u << 4, 0, 0});
-            if (m_inspectionResultPublisher) {
-                tracking::InspectionResult failure;
-                failure.resultCode = 2;
-                failure.ngReasonWord0 = (1u << 4);
-                failure.message = loadError.isEmpty()
-                    ? QStringLiteral("综合检测失败：无法加载内表面分段点云。")
-                    : loadError;
-                m_inspectionResultPublisher(failure);
-            }
-            completeActiveTask(
-                kInspectionResProcessingFail,
-                protocol::AckState::Completed,
-                false);
-            clearActiveTask();
-            m_ipcState = protocol::IpcState::Ready;
-            m_currentStage = protocol::Stage::Idle;
-            m_progress = 0;
-            setState(AppState::Ready);
-            publishIpcStatus();
-            return;
-        }
+        const bool loadOk = loadSegmentPointCloudsForInspection(
+            nullptr,
+            &totalPointCount,
+            &segmentCount,
+            &loadError,
+            &mergedInspectionPcdPath);
+        const bool pcdReady = loadOk
+            && !mergedInspectionPcdPath.trimmed().isEmpty()
+            && QFileInfo::exists(mergedInspectionPcdPath);
 
-        if (mergedInspectionPcdPath.trimmed().isEmpty()
-            || !QFileInfo::exists(mergedInspectionPcdPath)) {
-            loadError = QStringLiteral("内表面检测融合点云不存在：%1").arg(mergedInspectionPcdPath);
+        // 落盘完成后释放路径段点云缓存（保留段号进度）。
+        clearPathSegmentCache(pathId, true);
+
+        if (!pcdReady) {
+            if (loadError.trimmed().isEmpty()) {
+                loadError = QStringLiteral("内表面检测融合点云不存在：%1")
+                                .arg(mergedInspectionPcdPath);
+            }
             qWarning(LOG_FLOW).noquote()
-                << QStringLiteral("Trig_Inspection 内表面落盘点云不可用：") << loadError
-                << multiPathCacheStatusText();
-            writeInspectionResult({2, 1u << 4, 0, 0});
+                << QStringLiteral("[InternalSurface] 点云不可用，PLC 已假 OK；仅向 HMI 报失败：")
+                << loadError << multiPathCacheStatusText();
+            tracking::InspectionResult failure;
+            failure.resultCode = 2;
+            failure.ngReasonWord0 = (1u << 4);
+            failure.message = loadError;
             if (m_inspectionResultPublisher) {
-                tracking::InspectionResult failure;
-                failure.resultCode = 2;
-                failure.ngReasonWord0 = (1u << 4);
-                failure.message = loadError;
                 m_inspectionResultPublisher(failure);
             }
-            completeActiveTask(
-                kInspectionResProcessingFail,
-                protocol::AckState::Completed,
-                false);
-            clearActiveTask();
-            m_ipcState = protocol::IpcState::Ready;
-            m_currentStage = protocol::Stage::Idle;
-            m_progress = 0;
-            setState(AppState::Ready);
-            publishIpcStatus();
+            emit inspectionFinished(
+                failure.resultCode,
+                failure.ngReasonWord0,
+                failure.ngReasonWord1,
+                failure.measureItemCount,
+                failure.measurement,
+                failure.message);
             return;
         }
 
         qInfo(LOG_FLOW).noquote()
-            << QStringLiteral("[InternalSurface] 从落盘 PCD 执行测量（后台线程，主线程不阻塞，避免 PLC/HMI 断连）")
+            << QStringLiteral("[InternalSurface] 后台解算开始（PLC 已放行）")
             << QStringLiteral(" path=") << mergedInspectionPcdPath
             << QStringLiteral(" 总点数=") << totalPointCount
             << QStringLiteral(" 参与段数=") << segmentCount;
 
-        // 落盘完成后释放路径段点云缓存（保留段号进度，避免 PLC 再发段1 被误判为新一轮 path2）。
-        clearPathSegmentCache(m_activeTask.inspectionPathId, true);
-
-        // 大点云算法可达数分钟；默认 Inspection 超时 60s 在异步后会误触发，延长地板。
-        {
-            const int extendedSec = qMax(
-                static_cast<int>(m_activeTask.timeoutSeconds),
-                kInternalSurfaceTimeoutFloorSeconds);
-            m_activeTask.timeoutSeconds = static_cast<quint16>(qMin(extendedSec, 65535));
-            if (m_timeoutTimer != nullptr) {
-                m_timeoutTimer->start(static_cast<int>(m_activeTask.timeoutSeconds) * 1000);
-            }
-            qInfo(LOG_FLOW).noquote()
-                << QStringLiteral("[InternalSurface] 任务超时已延长至")
-                << m_activeTask.timeoutSeconds << QStringLiteral("s");
-        }
-
         const quint64 generation = ++m_internalSurfaceAsyncGeneration;
-        const int pathId = m_activeTask.inspectionPathId;
         const int fallbackPointCount = totalPointCount;
         const int asyncSegmentCount = segmentCount;
         const QString pcdPath = mergedInspectionPcdPath;
         tracking::TrackingService* tracking = m_tracking;
         QPointer<StateMachine> self(this);
 
-        std::thread([self, tracking, pcdPath, pathId, fallbackPointCount, asyncSegmentCount, generation]() {
+        std::thread([self,
+                     tracking,
+                     pcdPath,
+                     pathId,
+                     fallbackPointCount,
+                     asyncSegmentCount,
+                     generation,
+                     demoSegmentIndex]() {
             tracking::InspectionResult result;
             if (tracking == nullptr) {
                 result.resultCode = 2;
                 result.ngReasonWord0 = (1u << 4);
                 result.message = QStringLiteral("综合检测失败：Tracking 服务不可用。");
             } else {
+                // notifyListener=false：由主线程 deliverOnline* 统一推 HMI，避免双推
                 result = tracking->inspectInternalSurfaceFromScanFile(
                     pcdPath, pathId, false, false);
             }
@@ -352,17 +367,16 @@ void StateMachine::executeInspectionTask()
             }
             QMetaObject::invokeMethod(
                 app,
-                [self, result, asyncSegmentCount, generation]() {
+                [self, result, asyncSegmentCount, generation, demoSegmentIndex]() {
                     if (!self) {
                         return;
                     }
                     self->deliverOnlineInternalSurfaceInspectionResult(
-                        result, asyncSegmentCount, generation);
+                        result, asyncSegmentCount, generation, demoSegmentIndex);
                 },
                 Qt::QueuedConnection);
         }).detach();
 
-        // 主线程立即返回，继续跑 Modbus/HMI 事件循环；结果由 deliverOnline* 收尾。
         return;
     } else {
         scan_tracking::mech_eye::PointCloudFrame mergedCloud;

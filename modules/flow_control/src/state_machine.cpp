@@ -78,6 +78,13 @@ constexpr int kMaxConsecutiveModbusFailures = 3;
 constexpr int kPollLogEveryN = 20;
 constexpr int kBackgroundRefinementJoinTimeoutMs = 300000;
 
+/// 分段 refinement / PoseStitch 后台任务串行队列（与 PCL 全局锁配合，避免多段并行占满内存）
+std::mutex& segmentBackgroundPclSerialMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
 /// PLC `Res_Inspection`：1=OK，6=超时 NG（与 Modbus 协议一致）
 constexpr quint16 kInspectionResOk = 1;
 constexpr quint16 kInspectionResTimeoutNg = 6;
@@ -1522,6 +1529,7 @@ void StateMachine::stop()
     if (firstStop) {
         // 丢弃仍在跑的内表面后台结果，避免 stop 后 QueuedConnection 再触达已清 publisher
         ++m_internalSurfaceAsyncGeneration;
+        ++m_bevelAsyncGeneration;
 
         // 先断开外部信号并释放 std::function，避免退出阶段 processEvents 触发已失效回调
         {
@@ -2327,7 +2335,8 @@ void StateMachine::onVisionBundleCaptureFinished(scan_tracking::vision::MultiCam
     const int pathIdForCache = resolvePathIdForIncomingSegment(segmentIndex);
     commitScanSegmentCaptureImmediate(pathIdForCache, segmentIndex, result, bundle);
     if (!processingConfig.enabled) {
-        applySegmentPoseStitching(pathIdForCache, segmentIndex);
+        // Ack 已回：PoseStitch 勿在主线程同步抢 PCL 锁（内表面后台算法可占锁数分钟）
+        startSegmentBackgroundPoseStitch(pathIdForCache, segmentIndex);
     }
     startSegmentBackgroundRefinement(pathIdForCache, segmentIndex, taskId, processingConfig);
 }
@@ -2593,6 +2602,35 @@ void StateMachine::dispatchSegmentRefinementFinished(SegmentProcessOutcome outco
     QMetaObject::invokeMethod(this, deliverOnMainThread, Qt::BlockingQueuedConnection);
 }
 
+void StateMachine::startSegmentBackgroundPoseStitch(int pathId, int segmentIndex)
+{
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[ScanSync] 后台 PoseStitch 已排队，路径=") << pathId
+        << QStringLiteral(" 段号=") << segmentIndex;
+
+    QPointer<StateMachine> self(this);
+    std::thread([self, pathId, segmentIndex]() {
+        // 与 refinement 共用串行队列；抢 PCL 全局锁时排在内表面算法之后，但不堵主线程/Modbus。
+        std::lock_guard<std::mutex> serialGuard(segmentBackgroundPclSerialMutex());
+        if (!self || self->m_stopped.load(std::memory_order_acquire)) {
+            return;
+        }
+
+        QElapsedTimer timer;
+        timer.start();
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[ScanSync] 后台 PoseStitch 开始，路径=") << pathId
+            << QStringLiteral(" 段号=") << segmentIndex;
+
+        self->applySegmentPoseStitching(pathId, segmentIndex);
+
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[ScanSync] 后台 PoseStitch 完成，路径=") << pathId
+            << QStringLiteral(" 段号=") << segmentIndex
+            << QStringLiteral(" 耗时ms=") << timer.elapsed();
+    }).detach();
+}
+
 void StateMachine::startSegmentBackgroundRefinement(
     int pathId,
     int segmentIndex,
@@ -2618,8 +2656,7 @@ void StateMachine::startSegmentBackgroundRefinement(
         refinementWallTimer.start();
 
         // 多段 400 万级点云并行 refinement 会占满内存；与 PCL 全局锁一致，进程内串行执行。
-        static std::mutex kSegmentRefinementSerialMutex;
-        std::lock_guard<std::mutex> serialGuard(kSegmentRefinementSerialMutex);
+        std::lock_guard<std::mutex> serialGuard(segmentBackgroundPclSerialMutex());
         const qint64 queueWaitMs = refinementWallTimer.elapsed();
 
         if (!self || self->m_stopped.load(std::memory_order_acquire)) {
@@ -3470,7 +3507,9 @@ bool StateMachine::loadSegmentPointCloudsForInspection(
     int* totalPointCount,
     int* segmentCount,
     QString* errorMessage,
-    QString* outMergedInspectionPcdPath)
+    QString* outMergedInspectionPcdPath,
+    int pathIdOverride,
+    bool waitForRefinement)
 {
     if (outSegments == nullptr && outMergedInspectionPcdPath == nullptr) {
         if (errorMessage != nullptr) {
@@ -3486,26 +3525,28 @@ bool StateMachine::loadSegmentPointCloudsForInspection(
         outMergedInspectionPcdPath->clear();
     }
 
-    int maxJoinMs = kBackgroundRefinementJoinTimeoutMs;
-    if (m_activeTask.definition != nullptr &&
-        m_activeTask.definition->stage == protocol::Stage::Inspection &&
-        m_activeTask.timeoutSeconds > 0) {
-        maxJoinMs = std::min(
-            kBackgroundRefinementJoinTimeoutMs,
-            std::max(5000, static_cast<int>(m_activeTask.timeoutSeconds) * 1000 - 5000));
-    }
-    joinAllBackgroundRefinementJobs(maxJoinMs);
+    if (waitForRefinement) {
+        int maxJoinMs = kBackgroundRefinementJoinTimeoutMs;
+        if (m_activeTask.definition != nullptr &&
+            m_activeTask.definition->stage == protocol::Stage::Inspection &&
+            m_activeTask.timeoutSeconds > 0) {
+            maxJoinMs = std::min(
+                kBackgroundRefinementJoinTimeoutMs,
+                std::max(5000, static_cast<int>(m_activeTask.timeoutSeconds) * 1000 - 5000));
+        }
+        joinAllBackgroundRefinementJobs(maxJoinMs);
 
-    int pendingAfterJoin = pendingRefinementJobCount();
-    if (pendingAfterJoin < 0) {
-        reconcilePendingRefinementJobCounter("综合检测前计数异常");
-        pendingAfterJoin = 0;
-    } else if (pendingAfterJoin > 0) {
-        qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("综合检测 join 超时后仍有 refinement 在途=") << pendingAfterJoin
-            << QStringLiteral("，已强制复位；将使用当前缓存点云（可能为未 refine 的原始点云）");
-        reconcilePendingRefinementJobCounter("综合检测前 join 未清空");
-        pendingAfterJoin = 0;
+        int pendingAfterJoin = pendingRefinementJobCount();
+        if (pendingAfterJoin < 0) {
+            reconcilePendingRefinementJobCounter("综合检测前计数异常");
+            pendingAfterJoin = 0;
+        } else if (pendingAfterJoin > 0) {
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("综合检测 join 超时后仍有 refinement 在途=") << pendingAfterJoin
+                << QStringLiteral("，已强制复位；将使用当前缓存点云（可能为未 refine 的原始点云）");
+            reconcilePendingRefinementJobCounter("综合检测前 join 未清空");
+            pendingAfterJoin = 0;
+        }
     }
 
     const auto* configManager = scan_tracking::common::ConfigManager::instance();
@@ -3516,7 +3557,7 @@ bool StateMachine::loadSegmentPointCloudsForInspection(
         return false;
     }
 
-    int inspectPathId = m_activeTask.inspectionPathId;
+    int inspectPathId = pathIdOverride > 0 ? pathIdOverride : m_activeTask.inspectionPathId;
     if (inspectPathId <= 0) {
         inspectPathId = resolvePathIdForInspection();
     }
@@ -4524,6 +4565,46 @@ void StateMachine::deliverOfflineBevelInspectionResult(
         result.message);
 }
 
+void StateMachine::deliverOnlineBevelInspectionResult(
+    const tracking::InspectionResult& trackingResult,
+    int segmentCount,
+    quint64 generation,
+    int demoSegmentIndex)
+{
+    if (m_stopped.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (generation != m_bevelAsyncGeneration) {
+        qWarning(LOG_FLOW).noquote()
+            << QStringLiteral("[Bevel] 忽略过期后台结果 generation=")
+            << generation << QStringLiteral(" current=") << m_bevelAsyncGeneration;
+        return;
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Bevel] 后台解算完成（仅推 HMI，不写 PLC）")
+        << QStringLiteral(" 参与段数=") << segmentCount
+        << QStringLiteral(" 总点数=") << trackingResult.sourcePointCount
+        << QStringLiteral(" resultCode=") << trackingResult.resultCode
+        << QStringLiteral(" bevelType=") << trackingResult.measurement.bevelType
+        << QStringLiteral(" angleDeg=") << trackingResult.measurement.headAngleTol
+        << QStringLiteral(" lengthMm=") << trackingResult.measurement.bluntHeightTol
+        << QStringLiteral(" 说明=") << trackingResult.message;
+
+    if (m_inspectionResultPublisher) {
+        m_inspectionResultPublisher(trackingResult);
+    }
+
+    emit inspectionFinished(
+        trackingResult.resultCode,
+        trackingResult.ngReasonWord0,
+        trackingResult.ngReasonWord1,
+        trackingResult.measureItemCount,
+        trackingResult.measurement,
+        trackingResult.message);
+    maybeEmitPresetInspectionDemo(demoSegmentIndex);
+}
+
 void StateMachine::deliverOfflineInternalSurfaceInspectionResult(
     const tracking::InspectionResult& result)
 {
@@ -4547,7 +4628,8 @@ void StateMachine::deliverOfflineInternalSurfaceInspectionResult(
 void StateMachine::deliverOnlineInternalSurfaceInspectionResult(
     const tracking::InspectionResult& trackingResult,
     int segmentCount,
-    quint64 generation)
+    quint64 generation,
+    int demoSegmentIndex)
 {
     if (m_stopped.load(std::memory_order_acquire)) {
         return;
@@ -4558,48 +4640,29 @@ void StateMachine::deliverOnlineInternalSurfaceInspectionResult(
             << generation << QStringLiteral(" current=") << m_internalSurfaceAsyncGeneration;
         return;
     }
-    if (m_activeTask.definition == nullptr
-        || m_activeTask.definition->stage != protocol::Stage::Inspection
-        || m_activeTask.completionAnnounced) {
-        qWarning(LOG_FLOW).noquote()
-            << QStringLiteral("[InternalSurface] 忽略后台结果：检测任务已结束或未在 Inspection 阶段");
-        return;
-    }
 
-    InspectionSummary summary;
-    summary.resultCode = trackingResult.resultCode;
-    summary.ngReasonWord0 = trackingResult.ngReasonWord0;
-    summary.ngReasonWord1 = trackingResult.ngReasonWord1;
-    summary.measureItemCount = trackingResult.measureItemCount;
-
+    // PLC 握手已在入口以假 OK 完成；此处只推真结果给 HMI。
     qInfo(LOG_FLOW).noquote()
-        << QStringLiteral("Trig_Inspection 完成")
+        << QStringLiteral("[InternalSurface] 后台解算完成（仅推 HMI，不写 PLC）")
         << QStringLiteral(" 参与段数=") << segmentCount
         << QStringLiteral(" 总点数=") << trackingResult.sourcePointCount
-        << QStringLiteral(" angleDeg=") << trackingResult.measurement.headAngleTol
-        << QStringLiteral(" lengthMm=") << trackingResult.measurement.bluntHeightTol
-        << QStringLiteral(" thicknessMm=") << trackingResult.measurement.thicknessMm
+        << QStringLiteral(" resultCode=") << trackingResult.resultCode
+        << QStringLiteral(" depthMm=") << trackingResult.measurement.headDepthMm
+        << QStringLiteral(" volumeM3=") << trackingResult.measurement.headVolumeM3
         << QStringLiteral(" 说明=") << trackingResult.message;
 
-    writeInspectionResult(summary);
+    if (m_inspectionResultPublisher) {
+        m_inspectionResultPublisher(trackingResult);
+    }
 
-    const quint16 plcRes = summary.resultCode;
-    constexpr quint16 kInspectionResOk = 1;
-    qInfo(LOG_FLOW).noquote()
-        << QStringLiteral("Trig_Inspection Res_Inspection=") << plcRes
-        << QStringLiteral(" ngReasonWord0=") << summary.ngReasonWord0
-        << QStringLiteral(" ngReasonWord1=") << summary.ngReasonWord1
-        << QStringLiteral(" measureItemCount=") << summary.measureItemCount;
-    completeActiveTask(plcRes, protocol::AckState::Completed, plcRes == kInspectionResOk);
-    markPathInspectionCompleted(m_activeTask.inspectionPathId);
     emit inspectionFinished(
-        summary.resultCode,
-        summary.ngReasonWord0,
-        summary.ngReasonWord1,
-        summary.measureItemCount,
+        trackingResult.resultCode,
+        trackingResult.ngReasonWord0,
+        trackingResult.ngReasonWord1,
+        trackingResult.measureItemCount,
         trackingResult.measurement,
         trackingResult.message);
-    maybeEmitPresetInspectionDemo(m_activeTask.scanSegmentIndex);
+    maybeEmitPresetInspectionDemo(demoSegmentIndex);
 }
 
 /**
@@ -4763,8 +4826,9 @@ void StateMachine::onProcessTimeout()
         return;
     }
     if (m_activeTask.definition->stage == protocol::Stage::Inspection) {
-        // 丢弃仍在跑的内表面后台结果，避免超时收尾后再写一遍 PLC
+        // 丢弃仍在跑的内表面/坡口后台结果，避免超时收尾后再写一遍 PLC
         ++m_internalSurfaceAsyncGeneration;
+        ++m_bevelAsyncGeneration;
         writeInspectionResult({});
         completeActiveTask(
             kInspectionResTimeoutNg,
@@ -6359,8 +6423,9 @@ void StateMachine::enterFaultState(
  */
 void StateMachine::abortActiveTaskForFault(quint16 resultCode)
 {
-    // 丢弃仍在跑的内表面后台结果，避免故障收尾后再写一遍 PLC
+    // 丢弃仍在跑的内表面/坡口后台结果，避免故障收尾后再写一遍 PLC
     ++m_internalSurfaceAsyncGeneration;
+    ++m_bevelAsyncGeneration;
 
     if (m_activeTask.definition == nullptr) {
         // 没有活动任务，只需清理基本状态
