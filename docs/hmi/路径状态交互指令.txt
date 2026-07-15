@@ -29,3 +29,4 @@
 四、UI 逻辑
   started → 进行中；finished → 已完成；progress_reset → 全重置
   勿用 event.scan.* 的 segmentIndex 推断路径（每路径段号从 1 重计）
+  code_read（编号识别）：started 在 ScanSegment；finished 在 Trig_Inspection 之后（非扫段瞬间）

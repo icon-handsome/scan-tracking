@@ -537,6 +537,7 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("algorithmBypassEnabled", false);
     settings.setValue("firstPathPauseAfterPoint", 0);
     settings.setValue("internalSurfaceOnlyEnabled", false);
+    settings.setValue("shieldPrematurePathAdvanceAfterCodeRead", true);
     settings.setValue("personZoneAlarmToPlcEnabled", true);
     settings.endGroup();
 
@@ -805,11 +806,19 @@ void ConfigManager::load(const QString& filePath)
         qMax(0, settings.value("firstPathPauseAfterPoint", 0).toInt());
     m_flowControlConfig.internalSurfaceOnlyEnabled =
         settings.value("internalSurfaceOnlyEnabled", false).toBool();
+    m_flowControlConfig.shieldPrematurePathAdvanceAfterCodeRead =
+        settings.value("shieldPrematurePathAdvanceAfterCodeRead", true).toBool();
     m_flowControlConfig.personZoneAlarmToPlcEnabled =
         settings.value("personZoneAlarmToPlcEnabled", true).toBool();
     m_flowControlConfig.scanCacheDirectory = settings.value("scanCacheDirectory").toString().trimmed();
     m_flowControlConfig.retainSegmentPly = settings.value("retainSegmentPly", true).toBool();
     settings.endGroup();
+
+    if (m_flowControlConfig.shieldPrematurePathAdvanceAfterCodeRead) {
+        qInfo(LOG_CONFIG).noquote()
+            << QStringLiteral("已启用 code_read 未检前屏蔽提前切路径"
+                              "（[FlowControl] shieldPrematurePathAdvanceAfterCodeRead=true）");
+    }
 
     if (m_flowControlConfig.firstPathPauseAfterPoint > 0) {
         qInfo(LOG_CONFIG).noquote()

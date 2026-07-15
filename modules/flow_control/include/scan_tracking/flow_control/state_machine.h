@@ -441,6 +441,12 @@ private:
 
     bool isPathCodeReadOnly(int pathId) const;
 
+    /// code_read 已扫满但未 Inspection 时，是否应软屏蔽会切入下一路径的 ScanSegment
+    bool shouldSoftShieldPrematureNextPathScan(int segmentIndex) const;
+
+    /// 软屏蔽：Ack/Res 成功握手，不切路径、不采点云
+    void softCompletePrematureNextPathScan();
+
     // 执行检测任务
     void executeInspectionTask();
 
@@ -658,7 +664,7 @@ private:
     ScanPathEventInfo buildScanPathEventInfo(int pathId, quint16 resultCode = 0) const;
     bool isPathCompleteForProgress(int pathId) const;
     void maybeEmitPathStarted(int pathId);
-    void maybeEmitPathFinished(int pathId);
+    void maybeEmitPathFinished(int pathId, quint16 resultCode = 1);
     void clearPathProgressTracking(const QString& resetReason);
 
     void persistSegmentCaptureExportGroup(

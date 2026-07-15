@@ -1742,9 +1742,11 @@ QJsonObject HmiTcpServer::buildCameraStatusPayload() const
         payload[QLatin1String("hikB")] = hikBObj;
     }
 
-    if (m_hikCameraC) {
+    // 海康 C：MVS 服务或智能相机 Controller（TCP）任一已注入即上报连/断
+    if (m_hikCameraC || m_hikCameraCController) {
         QJsonObject hikCObj;
-        hikCObj[QLatin1String("roleName")] = m_hikCameraC->roleName();
+        hikCObj[QLatin1String("roleName")] =
+            m_hikCameraC ? m_hikCameraC->roleName() : QStringLiteral("hikC");
         hikCObj[QLatin1String("connected")] = hikCameraCConnected();
         payload[QLatin1String("hikC")] = hikCObj;
     }

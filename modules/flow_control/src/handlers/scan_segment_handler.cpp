@@ -223,7 +223,7 @@ void StateMachine::commitCodeReadScanSegmentComplete(int pathId, int segmentInde
     emit scanFinished(segmentIndex, 1, 1, 0);
 
     maybeLatchFirstPathStepPause(pathId, segmentIndex);
-    maybeEmitPathFinished(pathId);
+    // code_read：不在此处 pathFinished；等 Trig_Inspection 后再推，避免与下一路径 started 几乎同时到达 Qt
 
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[CodeRead] 扫描段握手完成")

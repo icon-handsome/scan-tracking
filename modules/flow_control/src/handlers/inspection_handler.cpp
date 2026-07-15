@@ -435,6 +435,8 @@ void StateMachine::executeInspectionTask()
         << QStringLiteral(" measureItemCount=") << summary.measureItemCount;
     completeActiveTask(plcRes, protocol::AckState::Completed, plcRes == kInspectionResOk);
     markPathInspectionCompleted(m_activeTask.inspectionPathId);
+    // code_read 路径：HMI pathFinished 延后到本处；其它路径此前扫满时已推过，此处为 no-op
+    maybeEmitPathFinished(m_activeTask.inspectionPathId, plcRes);
     if (inspectionType == scan_tracking::common::InspectionType::CodeRead) {
         emit codeReadFinished(summary.resultCode, trackingResult.codeValue);
     }

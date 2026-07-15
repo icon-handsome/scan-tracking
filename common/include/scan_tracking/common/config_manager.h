@@ -97,6 +97,12 @@ struct FlowControlConfig {
     int firstPathPauseAfterPoint = 0;
     /// true=仅执行 scan_paths 中 inspectionType=internal_surface 的路径（PLC 内表面联调用）；false=按 JSON executionConfig 正常跑全流程
     bool internalSurfaceOnlyEnabled = false;
+    /**
+     * true=临时兼容：code_read 路径已扫满但尚未 Trig_Inspection 时，
+     * 屏蔽会提前切入下一路径的 Trig_ScanSegment（软成功 Ack=2/Res=1，不采点云）。
+     * 用于 PLC 在 path3 检测前误发一次段号1 的现场时序。
+     */
+    bool shieldPrematurePathAdvanceAfterCodeRead = true;
     /// true=显控上报人员区域报警时写 IPC_SafetyAction_Word 并联锁停机；false=测试联调，收到上报但不写 PLC、不停流程
     bool personZoneAlarmToPlcEnabled = true;
     /// @deprecated 分段点云/海康已改内存缓存；仅 LatencyTest 等调试落盘仍可读此路径

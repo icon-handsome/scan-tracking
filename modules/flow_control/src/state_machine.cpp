@@ -1996,6 +1996,10 @@ void StateMachine::processTrigger(const protocol::TriggerDefinition& trigger, co
     m_activeTask.scanSegmentIndex = resolveScanSegmentIndex(commandBlock); // 解析扫描分段索引
 
     if (trigger.stage == protocol::Stage::ScanSegment) {
+        if (shouldSoftShieldPrematureNextPathScan(m_activeTask.scanSegmentIndex)) {
+            softCompletePrematureNextPathScan();
+            return;
+        }
         QString validationError;
         if (!validateScanSegmentRequest(commandBlock, &validationError)) {
             qWarning(LOG_FLOW).noquote()
@@ -2934,6 +2938,10 @@ bool StateMachine::isPathCompleteForProgress(int pathId) const
     if (isAlgorithmBypassEnabled()) {
         return pathId == m_currentPathId && isCurrentPathSegmentSetComplete();
     }
+    // code_read：扫段仅发 start，须等 Trig_Inspection 完成后才算路径完成，否则 HMI 会过早 ✓ 并与下一路径 started 挤在一起
+    if (isPathCodeReadOnly(pathId)) {
+        return isPathScanComplete(pathId) && isPathInspectionCompleted(pathId);
+    }
     return isPathScanComplete(pathId);
 }
 
@@ -2957,7 +2965,7 @@ void StateMachine::maybeEmitPathStarted(int pathId)
     emit pathStarted(info);
 }
 
-void StateMachine::maybeEmitPathFinished(int pathId)
+void StateMachine::maybeEmitPathFinished(int pathId, quint16 resultCode)
 {
     if (m_selfCheckSessionActive || pathId <= 0 || pathId == kSelfCheckCacheBucketId) {
         return;
@@ -2968,11 +2976,12 @@ void StateMachine::maybeEmitPathFinished(int pathId)
     }
 
     m_emittedPathFinished.insert(pathId);
-    ScanPathEventInfo info = buildScanPathEventInfo(pathId, 1);
+    ScanPathEventInfo info = buildScanPathEventInfo(pathId, resultCode);
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[HMI路径] 完成 pathId=") << info.pathId
         << QStringLiteral(" name=") << info.pathName
-        << QStringLiteral(" index=") << info.pathIndex << QLatin1Char('/') << info.pathCount;
+        << QStringLiteral(" index=") << info.pathIndex << QLatin1Char('/') << info.pathCount
+        << QStringLiteral(" resultCode=") << resultCode;
     emit pathFinished(info);
 
     const QVector<int> pathIds = enabledScanPathIds();
@@ -3224,6 +3233,15 @@ int StateMachine::resolvePathIdForIncomingSegment(int segmentIndex) const
         return m_currentPathId;
     }
 
+    // code_read 扫满后须先 Inspection，再允许段号重复触发切到下一路径
+    const auto* cfgMgr = scan_tracking::common::ConfigManager::instance();
+    if (cfgMgr != nullptr &&
+        cfgMgr->flowControlConfig().shieldPrematurePathAdvanceAfterCodeRead &&
+        isPathCodeReadOnly(m_currentPathId) &&
+        !isPathInspectionCompleted(m_currentPathId)) {
+        return m_currentPathId;
+    }
+
     const int currentIndex = pathIds.indexOf(m_currentPathId);
     if (currentIndex >= 0 && currentIndex + 1 < pathIds.size()) {
         return pathIds[currentIndex + 1];
@@ -3298,6 +3316,63 @@ void StateMachine::markPathInspectionCompleted(int pathId)
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[多路径] 路径已完成综合检测 pathId=") << pathId
         << QStringLiteral("，后续 Trig_ScanSegment 须 Trig_ResultReset 后再扫。");
+}
+
+bool StateMachine::shouldSoftShieldPrematureNextPathScan(int segmentIndex) const
+{
+    const auto* cfgMgr = scan_tracking::common::ConfigManager::instance();
+    if (cfgMgr == nullptr ||
+        !cfgMgr->flowControlConfig().shieldPrematurePathAdvanceAfterCodeRead) {
+        return false;
+    }
+    if (m_selfCheckSessionActive || m_currentPathId <= 0) {
+        return false;
+    }
+    if (!isPathCodeReadOnly(m_currentPathId)) {
+        return false;
+    }
+    if (!isCurrentPathSegmentSetComplete() || isPathInspectionCompleted(m_currentPathId)) {
+        return false;
+    }
+    if (!m_currentPathSegments.contains(segmentIndex)) {
+        return false;
+    }
+
+    const QVector<int> pathIds = enabledScanPathIds();
+    const int currentIndex = pathIds.indexOf(m_currentPathId);
+    return currentIndex >= 0 && currentIndex + 1 < pathIds.size();
+}
+
+void StateMachine::softCompletePrematureNextPathScan()
+{
+    const protocol::TriggerDefinition* trigger = m_activeTask.definition;
+    if (trigger == nullptr) {
+        return;
+    }
+
+    const QVector<int> pathIds = enabledScanPathIds();
+    const int currentIndex = pathIds.indexOf(m_currentPathId);
+    const int nextPathId =
+        (currentIndex >= 0 && currentIndex + 1 < pathIds.size()) ? pathIds[currentIndex + 1] : -1;
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[多路径][兼容] code_read 未检前屏蔽提前切路径扫段")
+        << QStringLiteral(" 当前路径=") << m_currentPathId
+        << QStringLiteral(" 段号=") << m_activeTask.scanSegmentIndex
+        << QStringLiteral(" 本应切入路径=") << nextPathId
+        << QStringLiteral(" → 软成功(Ack=2/Res=1)，等待 Trig_Inspection");
+
+    setAlarm(0, 0, QString());
+    setState(AppState::Scanning);
+    m_ipcState = protocol::IpcState::Busy;
+    m_currentStage = protocol::Stage::ScanSegment;
+    m_progress = 100;
+    m_dataValid = true;
+    publishIpcStatus();
+
+    sendAck(*trigger, protocol::AckState::Running);
+    writeScanSegmentResult(m_activeTask.scanSegmentIndex, 1, 0);
+    completeActiveTask(1, protocol::AckState::Completed, true);
 }
 
 bool StateMachine::isPathInspectionCompleted(int pathId) const
