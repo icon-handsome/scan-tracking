@@ -105,6 +105,11 @@ struct FlowControlConfig {
     bool shieldPrematurePathAdvanceAfterCodeRead = true;
     /// true=显控上报人员区域报警时写 IPC_SafetyAction_Word 并联锁停机；false=测试联调，收到上报但不写 PLC、不停流程
     bool personZoneAlarmToPlcEnabled = true;
+    /**
+     * true=IPC 启动 / Modbus 重连后忽略 PLC 已锁存的 Trig_*=1（拍照/检测等残留握手），
+     * 等全部 Trig 清零后再接受新的上升沿；false=保持旧行为（电平即触发，可能误吃上次信号）。
+     */
+    bool ignoreLatchedTriggersOnStart = true;
     /// @deprecated 分段点云/海康已改内存缓存；仅 LatencyTest 等调试落盘仍可读此路径
     QString scanCacheDirectory;
     /// @deprecated 不再用于分段 PLY 生命周期

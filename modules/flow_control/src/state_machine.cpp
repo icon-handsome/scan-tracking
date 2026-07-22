@@ -1511,6 +1511,7 @@ void StateMachine::start()
     m_progress = 0;              // 重置进度
     m_dataValid = false;         // 标记数据无效
     m_consecutiveModbusFailures = 0;  // 重置 Modbus 失败计数器
+    armPlcTriggerEdgeSync("state_machine.start");
     const int stalePending = m_pendingRefinementJobs.exchange(0, std::memory_order_acq_rel);
     if (stalePending != 0) {
         qWarning(LOG_FLOW).noquote()
@@ -1655,6 +1656,7 @@ void StateMachine::onModbusConnected()
     m_warnCode = 0;                   // 清除警告代码
     m_progress = 0;                   // 重置进度
     m_dataValid = false;              // 标记数据无效
+    armPlcTriggerEdgeSync("modbus.connected");
     setState(AppState::Ready);        // 设置应用状态为就绪
     publishIpcStatus();               // 发布 IPC 状态到 PLC
     if (m_unloadAreaConfigReceived) {
@@ -1925,6 +1927,30 @@ void StateMachine::handleRegistersRead(int startAddress, const QVector<quint16>&
 
     // 如果有活动任务但未完成宣告，等待任务执行完毕
     if (m_activeTask.definition != nullptr) {
+        return;
+    }
+
+    // 启动/重连边沿同步：忽略重启前残留的 Trig_*=1（拍照/检测等），等 PLC 全部拉低后再收新触发。
+    if (m_plcTriggerEdgeSyncPending) {
+        if (anyProtocolTriggerLatched(values)) {
+            static QElapsedTimer syncLogTimer;
+            if (!syncLogTimer.isValid() || syncLogTimer.elapsed() >= 2000) {
+                syncLogTimer.restart();
+                QStringList latched;
+                for (const auto& trigger : protocol::triggerDefinitions()) {
+                    if (trigger.trigOffset < values.size() && values[trigger.trigOffset] == 1) {
+                        latched << QString::fromLatin1(trigger.name);
+                    }
+                }
+                qInfo(LOG_FLOW).noquote()
+                    << QStringLiteral("[TrigSync] 忽略残留触发，等待 PLC 清零：")
+                    << latched.join(QLatin1Char(','));
+            }
+            return;
+        }
+        m_plcTriggerEdgeSyncPending = false;
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[TrigSync] 全部 Trig 已清零，开始接受新的上升沿触发");
         return;
     }
 
@@ -4430,6 +4456,52 @@ const protocol::TriggerDefinition* StateMachine::selectPendingTrigger(
         }
     }
     return nullptr;
+}
+
+bool StateMachine::anyProtocolTriggerLatched(const QVector<quint16>& commandBlock)
+{
+    for (const auto& trigger : protocol::triggerDefinitions()) {
+        if (trigger.trigOffset < commandBlock.size() && commandBlock[trigger.trigOffset] == 1) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void StateMachine::armPlcTriggerEdgeSync(const char* reason)
+{
+    const auto* cfg = scan_tracking::common::ConfigManager::instance();
+    if (cfg == nullptr || !cfg->flowControlConfig().ignoreLatchedTriggersOnStart) {
+        m_plcTriggerEdgeSyncPending = false;
+        return;
+    }
+
+    m_plcTriggerEdgeSyncPending = true;
+    m_lastCommandBlock.clear();
+
+    // 清零本侧全部 Ack/Res，避免重启后 PLC 仍读到上次进程残留的 Completed/Running。
+    int clearedPairs = 0;
+    if (m_modbus != nullptr && m_modbus->isConnected()) {
+        for (const auto& trigger : protocol::triggerDefinitions()) {
+            if (trigger.resOffset == trigger.ackOffset + 1) {
+                if (m_modbus->writeRegisters(
+                        trigger.ackOffset,
+                        {static_cast<quint16>(protocol::AckState::Idle), 0})) {
+                    ++clearedPairs;
+                }
+            } else {
+                sendRes(trigger, 0);
+                sendAck(trigger, protocol::AckState::Idle);
+                ++clearedPairs;
+            }
+        }
+    }
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[TrigSync] 已武装边沿同步 reason=")
+        << QString::fromLatin1(reason ? reason : "")
+        << QStringLiteral("：将忽略残留 Trig，待全部清零后再接受新触发")
+        << QStringLiteral(" clearedAckResPairs=") << clearedPairs;
 }
 
 bool StateMachine::loadSegmentPointCloudsForInspection(

@@ -540,6 +540,7 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("internalSurfaceOnlyEnabled", false);
     settings.setValue("shieldPrematurePathAdvanceAfterCodeRead", true);
     settings.setValue("personZoneAlarmToPlcEnabled", true);
+    settings.setValue("ignoreLatchedTriggersOnStart", true);
     settings.endGroup();
 
     settings.beginGroup("Resume");
@@ -822,6 +823,8 @@ void ConfigManager::load(const QString& filePath)
         settings.value("shieldPrematurePathAdvanceAfterCodeRead", true).toBool();
     m_flowControlConfig.personZoneAlarmToPlcEnabled =
         settings.value("personZoneAlarmToPlcEnabled", true).toBool();
+    m_flowControlConfig.ignoreLatchedTriggersOnStart =
+        settings.value("ignoreLatchedTriggersOnStart", true).toBool();
     m_flowControlConfig.scanCacheDirectory = settings.value("scanCacheDirectory").toString().trimmed();
     m_flowControlConfig.retainSegmentPly = settings.value("retainSegmentPly", true).toBool();
     settings.endGroup();
@@ -885,6 +888,12 @@ void ConfigManager::load(const QString& filePath)
         qWarning(LOG_CONFIG).noquote()
             << QStringLiteral("人员区域报警 PLC 联锁已关闭（[FlowControl] personZoneAlarmToPlcEnabled=false）："
                               "显控上报不会写 IPC_SafetyAction_Word，流程不会因人员报警停止。");
+    }
+
+    if (m_flowControlConfig.ignoreLatchedTriggersOnStart) {
+        qInfo(LOG_CONFIG).noquote()
+            << QStringLiteral("启动/重连 Trig 边沿同步已启用（[FlowControl] ignoreLatchedTriggersOnStart=true）："
+                              "忽略残留 Trig_*=1，待全部清零后再接受新触发。");
     }
 
     settings.beginGroup("SegmentCaptureExport");

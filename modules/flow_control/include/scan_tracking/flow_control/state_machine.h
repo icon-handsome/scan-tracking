@@ -622,6 +622,12 @@ private:
     /// 从命令块选取下一个待处理触发（含 Scan/Inspection 同时为 1 时的优先级）
     const protocol::TriggerDefinition* selectPendingTrigger(const QVector<quint16>& commandBlock) const;
 
+    /// 命令块中是否仍有任一协议 Trig_*=1（启动边沿同步用）
+    static bool anyProtocolTriggerLatched(const QVector<quint16>& commandBlock);
+
+    /// IPC 启动 / Modbus 重连后进入 Trig 边沿同步：忽略锁存 Trig，直至全部清零
+    void armPlcTriggerEdgeSync(const char* reason);
+
     // 从 scan_paths_config.json 重新加载 T0，并重置当前标定矩阵
     void reloadCalibrationMatricesFromConfig();
 
@@ -862,6 +868,8 @@ private:
     QElapsedTimer m_pollRequestTimer;                       // 当前轮询请求耗时计时器
     int m_consecutiveModbusFailures = 0;                    // 连续 Modbus 失败次数
     QVector<quint16> m_lastCommandBlock;                    // 上一次命令块副本
+    /// true=等待 PLC 将全部 Trig 清零后再接受新触发（过滤重启前残留握手）
+    bool m_plcTriggerEdgeSyncPending = false;
     protocol::registers::Pose6f m_robotTcpPose;              // 机械臂末端中心点位姿（PLC→IPC）
     
     // === 多路径支持：二维缓存结构（路径ID → 段号 → 数据） ===
