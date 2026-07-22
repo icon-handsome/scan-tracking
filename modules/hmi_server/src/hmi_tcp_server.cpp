@@ -1948,6 +1948,17 @@ void HmiTcpServer::connectStateMachineSignals()
         pushSystemStatus();
     }, Qt::UniqueConnection);
 
+    connect(m_stateMachine, &flow_control::StateMachine::pathProgressRestored, this,
+        [this](const QString& reason) {
+        QJsonObject payload;
+        payload[QLatin1String("reason")] = reason;
+        sendToClient(buildEnvelope(
+            QLatin1String(msg_type::kEventPathProgressRestored),
+            nextEventId(),
+            payload));
+        pushSystemStatus();
+    }, Qt::UniqueConnection);
+
     // TODO(hmi-demo): 综合检测结果改由 TrackingService::deliverInspectionResult → publishInspectionResult 直推，
     // 不再绑定 inspectionFinished，避免与显控收到重复 event.inspection.finished。
 

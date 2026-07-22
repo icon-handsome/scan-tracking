@@ -16,6 +16,7 @@
 #include <thread>
 
 #include "scan_tracking/common/config_manager.h"
+#include "scan_tracking/flow_control/checkpoint_store.h"
 #include "scan_tracking/flow_control/plc_protocol.h"
 #include "scan_tracking/flow_control/task_handler_context.h"
 #include "scan_tracking/mech_eye/mech_eye_types.h"
@@ -279,6 +280,9 @@ signals:
 
     /// 路径进度复位（Trig_ResultReset / 缓存清空）
     void pathProgressReset(const QString& reason);
+
+    /// 断点续跑：检查点已恢复到内存（HMI 应刷新 scanPathProgress）
+    void pathProgressRestored(const QString& reason);
 
     /// 综合检测完成
     void inspectionFinished(quint16 resultCode, quint16 ngReasonWord0, quint16 ngReasonWord1,
@@ -687,6 +691,40 @@ private:
     void maybeEmitPathFinished(int pathId, quint16 resultCode = 1);
     void clearPathProgressTracking(const QString& resetReason);
 
+    /// 断点续跑：保存 / 恢复 / 失败策略 / 已完成段幂等
+    bool isResumeEnabled() const;
+    scan_tracking::common::ResumeConfig currentResumeConfig() const;
+    QString currentScanPathsFingerprint() const;
+    WorkpieceCheckpoint buildWorkpieceCheckpointSnapshot() const;
+    void persistWorkpieceCheckpoint(const char* reason);
+    void clearWorkpieceCheckpoint(const char* reason);
+    bool tryRestoreFromCheckpoint();
+    void applyScanFailurePolicy(int pathId, int segmentIndex, quint16 resultCode);
+    bool isSegmentCompletedForResume(int pathId, int segmentIndex) const;
+    void softCompleteIdempotentScanSegment(int pathId, int segmentIndex);
+    void noteResumedSegmentCompleted(int pathId, int segmentIndex);
+    void logPlcAlignHintOnResume() const;
+    void noteMergedInspectionPcd(int pathId, const QString& absolutePath);
+    void notePathAlgoStatus(int pathId, const QString& status);
+    QString resolveSegmentStitchedCloudPath(int pathId, int segmentIndex) const;
+    QString resolveSegmentRawCloudPath(int pathId, int segmentIndex) const;
+    QString rediscoverSessionRootFromDisk(int preferredPathId = 0) const;
+    bool ensureSegmentCachedFromDisk(int pathId, int segmentIndex, QString* errorMessage = nullptr);
+    bool ensurePathSegmentsCachedFromDisk(int pathId, QString* errorMessage = nullptr);
+    void applyRestoredDiskArtifacts();
+    void maybeRerunPendingAsyncInspections();
+    void startBackgroundInternalSurfaceFromFile(
+        int pathId,
+        const QString& pcdPath,
+        int segmentCount,
+        int fallbackPointCount,
+        int demoSegmentIndex);
+    void startBackgroundBevelFromFile(
+        int pathId,
+        const QString& pcdPath,
+        int segmentCount,
+        int demoSegmentIndex);
+
     void persistSegmentCaptureExportGroup(
         int pathId,
         int segmentIndex,
@@ -836,6 +874,16 @@ private:
     QSet<int> m_emittedPathStarted;                         // 本工件已推送 path.started 的路径
     QSet<int> m_emittedPathFinished;                        // 本工件已推送 path.finished 的路径
     QSet<int> m_inspectedPathIds;                           // 已完成 Trig_Inspection 的路径（复位前拒绝再扫）
+    /// 续跑恢复的「已完成段」（无内存点云仍视为扫完，供幂等与 isPathScanComplete）
+    QMap<int, QSet<int>> m_resumedCompletedSegments;
+    bool m_resumeRestored = false;                          // 本次 start 是否从检查点恢复
+    QMap<int, QString> m_pathMergedInspectionPcd;           // pathId → 融合检测 PCD 绝对路径
+    QMap<int, QString> m_pathAlgoStatus;                    // pathId → idle|running|done|failed
+    QSet<int> m_pendingAsyncRerunPathIds;                   // 启动后需重跑后台算法的路径
+    QString m_pendingRestoreSessionDir;                     // tryRestore 暂存，initialize 后再写回
+    QString m_pendingRestorePoseStitchRunRoot;
+    int m_activeInternalSurfacePathId = 0;
+    int m_activeBevelPathId = 0;
     bool m_emittedAllPathsFinished = false;                 // 本工件已推送 scan_paths.all_finished
     bool m_firstPathStepPauseLatched = false;               // 路径1联调：已达暂停点，拒绝后续扫描
     int m_firstPathStepPauseAtSegment = 0;                  // 路径1联调：已暂停的点位号

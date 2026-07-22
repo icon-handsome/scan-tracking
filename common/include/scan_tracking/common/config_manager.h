@@ -111,6 +111,21 @@ struct FlowControlConfig {
     bool retainSegmentPly = true;
 };
 
+/// IPC 断点续跑（PLC 不断；进程重启 / 段失败后对齐恢复）
+struct ResumeConfig {
+    bool enabled = true;
+    QString checkpointPath = QStringLiteral("output/checkpoint/current.json");
+    bool realignOnStart = true;
+    bool preserveOnModbusReconnect = true;
+    bool idempotentCompletedSegment = true;
+    /// segment=仅失败本段；path=清当前路径；workpiece=旧行为整表清零
+    QString scanFailurePolicy = QStringLiteral("segment");
+    /// true=启动恢复后立即从 session 懒加载已扫段点云到内存；false=仅在 Inspection 时按需加载
+    bool reloadArtifactsOnStart = true;
+    /// true=若检查点显示内表面/坡口算法未完成且融合 PCD 仍在，启动后自动重跑（只推 HMI）
+    bool rerunPendingAsyncAlgoOnStart = true;
+};
+
 /// 点云落盘格式：pcd=二进制 PCD；ply=二进制 little-endian PLY
 enum class PointCloudSaveFormat {
     Pcd,
@@ -365,6 +380,7 @@ public:
     const CameraConfig& cameraConfig() const;
     const VisionConfig& visionConfig() const;
     const FlowControlConfig& flowControlConfig() const;
+    const ResumeConfig& resumeConfig() const;
     const SegmentCaptureExportConfig& segmentCaptureExportConfig() const;
     const TrackingConfig& trackingConfig() const;
     const BevelConfig& bevelConfig() const;
@@ -415,6 +431,7 @@ private:
     CameraConfig m_cameraConfig;
     VisionConfig m_visionConfig;
     FlowControlConfig m_flowControlConfig;
+    ResumeConfig m_resumeConfig;
     SegmentCaptureExportConfig m_segmentCaptureExportConfig;
     TrackingConfig m_trackingConfig;
     BevelConfig m_bevelConfig;

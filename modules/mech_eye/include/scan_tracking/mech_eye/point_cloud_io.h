@@ -67,13 +67,13 @@ bool savePointCloudFrameToPly(const PointCloudFrame& frame, const QString& absol
 bool convertTxtPointCloudToPly(const QString& txtPath, const QString& plyPath);
 
 /**
- * @brief 将 PointCloudFrame 保存为 PCL binary PCD（与内表面 demo LoadCloud 输入一致）
- * @note 仅写入有限 x,y,z；NaN/Inf 点会被跳过
+ * @brief 将 PointCloudFrame 保存为 binary PCD（FIELDS x y z，与内表面/坡口加载器兼容）
+ * @note 仅写入有限 x,y,z；NaN/Inf 点会被跳过。直写文件，不经 PCL PointCloud 二次拷贝。
  */
 bool savePointCloudFrameToPcd(const PointCloudFrame& frame, const QString& absolutePath);
 
 /**
- * @brief 按路径后缀保存二进制点云（.pcd → PCL binary；.ply → binary_little_endian xyz；缺省后缀按 pcd）
+ * @brief 按路径后缀保存二进制点云（.pcd → binary PCD；.ply → binary_little_endian xyz；缺省后缀按 pcd）
  */
 bool savePointCloudFrameToBinaryFile(const PointCloudFrame& frame, const QString& absolutePath);
 

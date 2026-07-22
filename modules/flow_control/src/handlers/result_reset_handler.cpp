@@ -30,6 +30,7 @@ void StateMachine::executeResultResetTask()
     ++m_bevelAsyncGeneration;
 
     resetScanSegmentCache();  // 清空扫描缓存
+    clearWorkpieceCheckpoint("result_reset");
     // 将扫描分段完成索引寄存器清零
     const bool segmentIndexCleared = m_modbus->writeRegisters(protocol::registers::kScanSegmentDoneIndex, {0, 0, 0});
     if (!segmentIndexCleared) {

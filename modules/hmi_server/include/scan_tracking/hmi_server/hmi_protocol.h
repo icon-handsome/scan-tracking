@@ -52,6 +52,7 @@ inline constexpr const char* kEventPathStarted     = "event.path.started";
 inline constexpr const char* kEventPathFinished      = "event.path.finished";
 inline constexpr const char* kEventScanPathsAllFinished = "event.scan_paths.all_finished";
 inline constexpr const char* kEventPathProgressReset = "event.path.progress_reset";
+inline constexpr const char* kEventPathProgressRestored = "event.path.progress_restored";
 inline constexpr const char* kEventImageCaptured     = "event.image.captured";
 inline constexpr const char* kEventBundleCaptured    = "event.bundle.captured";
 inline constexpr const char* kEventInspectionFinished = "event.inspection.finished";

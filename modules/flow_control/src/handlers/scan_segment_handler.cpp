@@ -58,6 +58,13 @@ void StateMachine::executeScanSegmentTask()
     }
 
     const int pathIdForCapture = resolvePathIdForIncomingSegment(m_activeTask.scanSegmentIndex);
+    if (isResumeEnabled()
+        && currentResumeConfig().idempotentCompletedSegment
+        && isSegmentCompletedForResume(pathIdForCapture, m_activeTask.scanSegmentIndex)) {
+        softCompleteIdempotentScanSegment(pathIdForCapture, m_activeTask.scanSegmentIndex);
+        return;
+    }
+
     if (isPathCodeReadOnly(pathIdForCapture)) {
         executeCodeReadScanSegmentTask(pathIdForCapture);
         return;
@@ -224,6 +231,7 @@ void StateMachine::commitCodeReadScanSegmentComplete(int pathId, int segmentInde
 
     maybeLatchFirstPathStepPause(pathId, segmentIndex);
     // code_read：不在此处 pathFinished；等 Trig_Inspection 后再推，避免与下一路径 started 几乎同时到达 Qt
+    persistWorkpieceCheckpoint("code_read_segment");
 
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[CodeRead] 扫描段握手完成")

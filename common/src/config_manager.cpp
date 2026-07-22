@@ -197,6 +197,7 @@ const ModbusConfig& ConfigManager::modbusConfig() const { return m_modbusConfig;
 const CameraConfig& ConfigManager::cameraConfig() const { return m_cameraConfig; }
 const VisionConfig& ConfigManager::visionConfig() const { return m_visionConfig; }
 const FlowControlConfig& ConfigManager::flowControlConfig() const { return m_flowControlConfig; }
+const ResumeConfig& ConfigManager::resumeConfig() const { return m_resumeConfig; }
 const SegmentCaptureExportConfig& ConfigManager::segmentCaptureExportConfig() const
 {
     return m_segmentCaptureExportConfig;
@@ -541,6 +542,17 @@ void ConfigManager::writeDefaults(QSettings& settings)
     settings.setValue("personZoneAlarmToPlcEnabled", true);
     settings.endGroup();
 
+    settings.beginGroup("Resume");
+    settings.setValue("enabled", true);
+    settings.setValue("checkpointPath", QStringLiteral("output/checkpoint/current.json"));
+    settings.setValue("realignOnStart", true);
+    settings.setValue("preserveOnModbusReconnect", true);
+    settings.setValue("idempotentCompletedSegment", true);
+    settings.setValue("scanFailurePolicy", QStringLiteral("segment"));
+    settings.setValue("reloadArtifactsOnStart", true);
+    settings.setValue("rerunPendingAsyncAlgoOnStart", true);
+    settings.endGroup();
+
     settings.beginGroup("SegmentCaptureExport");
     settings.setValue("enabled", true);
     settings.setValue("outputRoot", QStringLiteral("output"));
@@ -813,6 +825,42 @@ void ConfigManager::load(const QString& filePath)
     m_flowControlConfig.scanCacheDirectory = settings.value("scanCacheDirectory").toString().trimmed();
     m_flowControlConfig.retainSegmentPly = settings.value("retainSegmentPly", true).toBool();
     settings.endGroup();
+
+    settings.beginGroup("Resume");
+    m_resumeConfig.enabled = settings.value("enabled", true).toBool();
+    m_resumeConfig.checkpointPath =
+        settings.value("checkpointPath", QStringLiteral("output/checkpoint/current.json"))
+            .toString()
+            .trimmed();
+    if (m_resumeConfig.checkpointPath.isEmpty()) {
+        m_resumeConfig.checkpointPath = QStringLiteral("output/checkpoint/current.json");
+    }
+    m_resumeConfig.realignOnStart = settings.value("realignOnStart", true).toBool();
+    m_resumeConfig.preserveOnModbusReconnect =
+        settings.value("preserveOnModbusReconnect", true).toBool();
+    m_resumeConfig.idempotentCompletedSegment =
+        settings.value("idempotentCompletedSegment", true).toBool();
+    m_resumeConfig.scanFailurePolicy =
+        settings.value("scanFailurePolicy", QStringLiteral("segment")).toString().trimmed().toLower();
+    if (m_resumeConfig.scanFailurePolicy != QStringLiteral("path")
+        && m_resumeConfig.scanFailurePolicy != QStringLiteral("workpiece")) {
+        m_resumeConfig.scanFailurePolicy = QStringLiteral("segment");
+    }
+    m_resumeConfig.reloadArtifactsOnStart =
+        settings.value("reloadArtifactsOnStart", true).toBool();
+    m_resumeConfig.rerunPendingAsyncAlgoOnStart =
+        settings.value("rerunPendingAsyncAlgoOnStart", true).toBool();
+    settings.endGroup();
+
+    if (m_resumeConfig.enabled) {
+        qInfo(LOG_CONFIG).noquote()
+            << QStringLiteral("断点续跑已启用（[Resume] enabled=true） checkpoint=")
+            << m_resumeConfig.checkpointPath
+            << QStringLiteral(" scanFailurePolicy=") << m_resumeConfig.scanFailurePolicy;
+    } else {
+        qInfo(LOG_CONFIG).noquote()
+            << QStringLiteral("断点续跑已关闭（[Resume] enabled=false）");
+    }
 
     if (m_flowControlConfig.shieldPrematurePathAdvanceAfterCodeRead) {
         qInfo(LOG_CONFIG).noquote()

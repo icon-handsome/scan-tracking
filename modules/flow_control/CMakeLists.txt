@@ -1,5 +1,6 @@
 set(CMAKE_AUTOMOC ON)
 add_library(scan_tracking_flow_control STATIC
+    include/scan_tracking/flow_control/checkpoint_store.h
     include/scan_tracking/flow_control/state_machine.h
     include/scan_tracking/flow_control/station_trigger_policy.h
     include/scan_tracking/flow_control/task_handler_context.h
@@ -14,6 +15,7 @@ add_library(scan_tracking_flow_control STATIC
     include/scan_tracking/flow_control/handlers/self_check_handler.h
     include/scan_tracking/flow_control/handlers/station_material_check_handler.h
     include/scan_tracking/flow_control/handlers/unload_calc_handler.h
+    src/checkpoint_store.cpp
     src/station_trigger_policy.cpp
     src/state_machine.cpp
     src/handlers/code_read_handler.cpp

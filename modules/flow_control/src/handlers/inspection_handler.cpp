@@ -140,6 +140,23 @@ void StateMachine::executeInspectionTask()
         markPathInspectionCompleted(pathId);
         maybeEmitPathFinished(pathId, kInspectionResOk);
 
+        // PLC 可能在后台仍写千万级 PCD / 解算时重复拉 Trig_Inspection。
+        // 再启一个后台任务会并发落盘同一批 pathN_merged_*.pcd，易 OOM / 堆损坏闪退。
+        const QString algoStatus = m_pathAlgoStatus.value(pathId);
+        if (m_activeBevelPathId == pathId
+            || algoStatus == QStringLiteral("running")
+            || algoStatus == QStringLiteral("done")) {
+            qInfo(LOG_FLOW).noquote()
+                << QStringLiteral("[Bevel] 跳过重复后台启动 pathId=") << pathId
+                << QStringLiteral(" algoStatus=") << (algoStatus.isEmpty() ? QStringLiteral("<empty>") : algoStatus)
+                << QStringLiteral(" activeBevelPathId=") << m_activeBevelPathId;
+            return;
+        }
+
+        notePathAlgoStatus(pathId, QStringLiteral("running"));
+        persistWorkpieceCheckpoint("bevel_algo_start");
+        m_activeBevelPathId = pathId;
+
         const quint64 generation = ++m_bevelAsyncGeneration;
         tracking::TrackingService* tracking = m_tracking;
         QPointer<StateMachine> self(this);
@@ -186,6 +203,16 @@ void StateMachine::executeInspectionTask()
                     result.ngReasonWord0 = (1u << 4);
                     result.message = loadError;
                 } else {
+                    QMetaObject::invokeMethod(
+                        QCoreApplication::instance(),
+                        [self, pathId, mergedInspectionPcdPath]() {
+                            if (!self) {
+                                return;
+                            }
+                            self->noteMergedInspectionPcd(pathId, mergedInspectionPcdPath);
+                            self->persistWorkpieceCheckpoint("bevel_merged_pcd");
+                        },
+                        Qt::QueuedConnection);
                     qInfo(LOG_FLOW).noquote()
                         << QStringLiteral("[Bevel] 后台解算开始（可排队于内表面算法之后）")
                         << QStringLiteral(" path=") << mergedInspectionPcdPath
@@ -332,50 +359,16 @@ void StateMachine::executeInspectionTask()
             << QStringLiteral(" 总点数=") << totalPointCount
             << QStringLiteral(" 参与段数=") << segmentCount;
 
-        const quint64 generation = ++m_internalSurfaceAsyncGeneration;
-        const int fallbackPointCount = totalPointCount;
-        const int asyncSegmentCount = segmentCount;
-        const QString pcdPath = mergedInspectionPcdPath;
-        tracking::TrackingService* tracking = m_tracking;
-        QPointer<StateMachine> self(this);
+        noteMergedInspectionPcd(pathId, mergedInspectionPcdPath);
+        notePathAlgoStatus(pathId, QStringLiteral("running"));
+        persistWorkpieceCheckpoint("internal_surface_algo_start");
 
-        std::thread([self,
-                     tracking,
-                     pcdPath,
-                     pathId,
-                     fallbackPointCount,
-                     asyncSegmentCount,
-                     generation,
-                     demoSegmentIndex]() {
-            tracking::InspectionResult result;
-            if (tracking == nullptr) {
-                result.resultCode = 2;
-                result.ngReasonWord0 = (1u << 4);
-                result.message = QStringLiteral("综合检测失败：Tracking 服务不可用。");
-            } else {
-                // notifyListener=false：由主线程 deliverOnline* 统一推 HMI，避免双推
-                result = tracking->inspectInternalSurfaceFromScanFile(
-                    pcdPath, pathId, false, false);
-            }
-            if (result.sourcePointCount <= 0 && fallbackPointCount > 0) {
-                result.sourcePointCount = fallbackPointCount;
-            }
-
-            QCoreApplication* app = QCoreApplication::instance();
-            if (app == nullptr) {
-                return;
-            }
-            QMetaObject::invokeMethod(
-                app,
-                [self, result, asyncSegmentCount, generation, demoSegmentIndex]() {
-                    if (!self) {
-                        return;
-                    }
-                    self->deliverOnlineInternalSurfaceInspectionResult(
-                        result, asyncSegmentCount, generation, demoSegmentIndex);
-                },
-                Qt::QueuedConnection);
-        }).detach();
+        startBackgroundInternalSurfaceFromFile(
+            pathId,
+            mergedInspectionPcdPath,
+            segmentCount,
+            totalPointCount,
+            demoSegmentIndex);
 
         return;
     } else {

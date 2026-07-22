@@ -805,30 +805,106 @@ bool pointCloudFrameToPclCloud(const PointCloudFrame& frame, PclXyzCloud* outClo
 
 bool savePointCloudFrameToPcd(const PointCloudFrame& frame, const QString& absolutePath)
 {
-    if (!frame.isValid() || absolutePath.trimmed().isEmpty()) {
+    if (!frame.isValid() || absolutePath.trimmed().isEmpty() || !frame.pointsXYZ) {
         qWarning(LOG_POINT_CLOUD_IO) << QStringLiteral("savePointCloudFrameToPcd：帧或路径无效");
         return false;
     }
 
-    PclXyzCloud cloud;
-    if (!pointCloudFrameToPclCloud(frame, &cloud)) {
+    const auto& points = *frame.pointsXYZ;
+    const int availablePointCount = static_cast<int>(points.size() / 3);
+    const int count = std::min(frame.pointCount, availablePointCount);
+    if (count <= 0) {
         qWarning(LOG_POINT_CLOUD_IO) << QStringLiteral("savePointCloudFrameToPcd：无有效点");
+        return false;
+    }
+
+    // 直写 binary PCD，避免 PCL PointCloud 二次拷贝（千万级点云上可省数百 MB），
+    // 且不进入 Windows 下非线程安全的 PCL/Eigen 堆路径。
+    std::size_t validCount = 0;
+    for (int index = 0; index < count; ++index) {
+        const auto base = static_cast<std::size_t>(index * 3);
+        if (isFinitePoint(points[base], points[base + 1], points[base + 2])) {
+            ++validCount;
+        }
+    }
+    if (validCount == 0) {
+        qWarning(LOG_POINT_CLOUD_IO) << QStringLiteral("savePointCloudFrameToPcd：全部为 NaN 点");
         return false;
     }
 
     const QFileInfo fileInfo(absolutePath);
     QDir().mkpath(fileInfo.absolutePath());
 
-    const std::string pathLocal8 = fileInfo.absoluteFilePath().toLocal8Bit().toStdString();
-    if (pcl::io::savePCDFileBinary(pathLocal8, cloud) != 0) {
+    QFile file(fileInfo.absoluteFilePath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         qWarning(LOG_POINT_CLOUD_IO).noquote()
-            << QStringLiteral("savePointCloudFrameToPcd：写入失败") << absolutePath;
+            << QStringLiteral("savePointCloudFrameToPcd：无法打开") << absolutePath;
         return false;
     }
 
+    const QByteArray header = QByteArrayLiteral(
+                                  "# .PCD v0.7 - Point Cloud Data file format\n"
+                                  "VERSION 0.7\n"
+                                  "FIELDS x y z\n"
+                                  "SIZE 4 4 4\n"
+                                  "TYPE F F F\n"
+                                  "COUNT 1 1 1\n"
+                                  "WIDTH ")
+        + QByteArray::number(static_cast<qulonglong>(validCount))
+        + QByteArrayLiteral(
+              "\nHEIGHT 1\n"
+              "VIEWPOINT 0 0 0 1 0 0 0\n"
+              "POINTS ")
+        + QByteArray::number(static_cast<qulonglong>(validCount))
+        + QByteArrayLiteral("\nDATA binary\n");
+    if (file.write(header) != header.size()) {
+        qWarning(LOG_POINT_CLOUD_IO).noquote()
+            << QStringLiteral("savePointCloudFrameToPcd：写入 header 失败") << absolutePath;
+        return false;
+    }
+
+    constexpr int kChunkPoints = 8192;
+    float chunk[kChunkPoints * 3];
+    int chunkCount = 0;
+    auto flushChunk = [&]() -> bool {
+        if (chunkCount <= 0) {
+            return true;
+        }
+        const qint64 bytes = static_cast<qint64>(chunkCount) * 3 * static_cast<qint64>(sizeof(float));
+        const bool ok = file.write(reinterpret_cast<const char*>(chunk), bytes) == bytes;
+        chunkCount = 0;
+        return ok;
+    };
+
+    for (int index = 0; index < count; ++index) {
+        const auto base = static_cast<std::size_t>(index * 3);
+        const float x = points[base];
+        const float y = points[base + 1];
+        const float z = points[base + 2];
+        if (!isFinitePoint(x, y, z)) {
+            continue;
+        }
+        const int offset = chunkCount * 3;
+        chunk[offset] = x;
+        chunk[offset + 1] = y;
+        chunk[offset + 2] = z;
+        ++chunkCount;
+        if (chunkCount >= kChunkPoints && !flushChunk()) {
+            qWarning(LOG_POINT_CLOUD_IO).noquote()
+                << QStringLiteral("savePointCloudFrameToPcd：写入 body 失败") << absolutePath;
+            return false;
+        }
+    }
+    if (!flushChunk()) {
+        qWarning(LOG_POINT_CLOUD_IO).noquote()
+            << QStringLiteral("savePointCloudFrameToPcd：写入 body 失败") << absolutePath;
+        return false;
+    }
+
+    file.close();
     qInfo(LOG_POINT_CLOUD_IO).noquote()
         << QStringLiteral("PCD 已保存：") << absolutePath
-        << QStringLiteral(" format=binary_xyz validPoints=") << cloud.size()
+        << QStringLiteral(" format=binary_xyz validPoints=") << static_cast<qulonglong>(validCount)
         << QStringLiteral("/") << frame.pointCount;
     return true;
 }
