@@ -2,6 +2,7 @@
 
 #include "scan_tracking/vision/hik_mvs_sdk_runtime.h"
 
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QPointer>
@@ -24,6 +25,31 @@ namespace vision {
 namespace {
 
 QMutex g_cxpSdkMutex;
+
+// 软触发偶发仍可能取到上一帧；同一相机连续两次内容完全相同则判为旧帧并重采。
+constexpr int kCxpFreshFrameMaxAttempts = 3;
+constexpr int kCxpClearSettleMs = 5;
+
+QByteArray fingerprintMonoPixels(const unsigned char* data, int length)
+{
+    if (data == nullptr || length <= 0) {
+        return {};
+    }
+
+    QCryptographicHash hash(QCryptographicHash::Md5);
+    hash.addData(reinterpret_cast<const char*>(&length), static_cast<int>(sizeof(length)));
+
+    const int chunk = std::min(4096, length);
+    hash.addData(reinterpret_cast<const char*>(data), chunk);
+    if (length > chunk * 2) {
+        const int mid = (length - chunk) / 2;
+        hash.addData(reinterpret_cast<const char*>(data + mid), chunk);
+    }
+    if (length > chunk) {
+        hash.addData(reinterpret_cast<const char*>(data + length - chunk), chunk);
+    }
+    return hash.result();
+}
 
 QString trimSdkString(const unsigned char* raw, std::size_t maxLength)
 {
@@ -133,6 +159,8 @@ public:
     bool sdkReady = false;
     bool connected = false;
     bool grabbing = false;
+    quint64 lastAcceptedFrameId = 0;
+    QByteArray lastAcceptedFingerprint;
 };
 
 void HikCxpCameraService::registerMetaTypes()
@@ -301,150 +329,219 @@ bool HikCxpCameraService::captureMonoFrame(
         m_impl->grabbing = true;
     }
 
-    const int clearResult = MV_CC_ClearImageBuffer(handle);
-    if (clearResult != MV_OK) {
-        qWarning() << QStringLiteral("[%1] MV_CC_ClearImageBuffer 失败 0x%2")
-                          .arg(m_roleName)
-                          .arg(static_cast<quint32>(clearResult), 8, 16, QLatin1Char('0'));
+    quint64 lastAcceptedFrameId = 0;
+    QByteArray lastAcceptedFingerprint;
+    {
+        QMutexLocker locker(&m_impl->mutex);
+        lastAcceptedFrameId = m_impl->lastAcceptedFrameId;
+        lastAcceptedFingerprint = m_impl->lastAcceptedFingerprint;
     }
 
-    if (m_triggerMode == 1) {
-        const int triggerResult = MV_CC_TriggerSoftwareExecute(handle);
-        if (triggerResult != MV_OK) {
-            if (errorMessage != nullptr) {
-                *errorMessage = QStringLiteral("MV_CC_TriggerSoftwareExecute 失败，错误码=0x%1")
-                                    .arg(static_cast<quint32>(triggerResult), 8, 16, QLatin1Char('0'));
+    auto grabOnce = [&](HikMonoFrame* frameOutLocal, QString* grabError) -> bool {
+        const int clearResult = MV_CC_ClearImageBuffer(handle);
+        if (clearResult != MV_OK) {
+            qWarning() << QStringLiteral("[%1] MV_CC_ClearImageBuffer 失败 0x%2")
+                              .arg(m_roleName)
+                              .arg(static_cast<quint32>(clearResult), 8, 16, QLatin1Char('0'));
+        }
+        // 给采集卡 DMA/缓冲一个极短排空窗口，降低 Clear 后仍吐旧帧的概率
+        QThread::msleep(kCxpClearSettleMs);
+
+        if (m_triggerMode == 1) {
+            const int triggerResult = MV_CC_TriggerSoftwareExecute(handle);
+            if (triggerResult != MV_OK) {
+                if (grabError != nullptr) {
+                    *grabError = QStringLiteral("MV_CC_TriggerSoftwareExecute 失败，错误码=0x%1")
+                                     .arg(static_cast<quint32>(triggerResult), 8, 16, QLatin1Char('0'));
+                }
+                return false;
+            }
+        }
+
+        MV_FRAME_OUT frameOut{};
+        const int getBufferResult = MV_CC_GetImageBuffer(handle, &frameOut, actualWaitMs);
+
+        if (!m_started) {
+            if (getBufferResult == MV_OK && frameOut.pBufAddr != nullptr) {
+                MV_CC_FreeImageBuffer(handle, &frameOut);
+            }
+            if (grabError != nullptr) {
+                *grabError = QStringLiteral("CXP 相机服务正在停止，采图被中断");
             }
             return false;
         }
-    }
 
-    MV_FRAME_OUT frameOut{};
-    const int getBufferResult = MV_CC_GetImageBuffer(handle, &frameOut, actualWaitMs);
-
-    if (!m_started) {
         if (getBufferResult == MV_OK && frameOut.pBufAddr != nullptr) {
-            MV_CC_FreeImageBuffer(handle, &frameOut);
-        }
-        if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("CXP 相机服务正在停止，采图被中断");
-        }
-        return false;
-    }
+            const int width = static_cast<int>(frameOut.stFrameInfo.nWidth);
+            const int height = static_cast<int>(frameOut.stFrameInfo.nHeight);
+            const int frameLen = static_cast<int>(frameOut.stFrameInfo.nFrameLen);
 
-    if (getBufferResult == MV_OK && frameOut.pBufAddr != nullptr) {
-        const int width = static_cast<int>(frameOut.stFrameInfo.nWidth);
-        const int height = static_cast<int>(frameOut.stFrameInfo.nHeight);
-        const int frameLen = static_cast<int>(frameOut.stFrameInfo.nFrameLen);
+            if (width > 0 && height > 0 && frameLen > 0) {
+                auto pixels = std::make_shared<std::vector<std::uint8_t>>();
+                pixels->assign(
+                    static_cast<unsigned char*>(frameOut.pBufAddr),
+                    static_cast<unsigned char*>(frameOut.pBufAddr) + frameLen);
 
-        if (width > 0 && height > 0 && frameLen > 0) {
-            auto pixels = std::make_shared<std::vector<std::uint8_t>>();
-            pixels->assign(
-                static_cast<unsigned char*>(frameOut.pBufAddr),
-                static_cast<unsigned char*>(frameOut.pBufAddr) + frameLen);
+                HikMonoFrame frame;
+                frame.pixels = std::move(pixels);
+                frame.width = width;
+                frame.height = height;
+                frame.stride = width;
+                frame.frameId = frameOut.stFrameInfo.nFrameNum;
+                frame.timestampMs = QDateTime::currentMSecsSinceEpoch();
+                frame.sourceCameraKey = cameraKey;
+                frame.pixelFormat = QStringLiteral("Mono8");
 
-            HikMonoFrame frame;
-            frame.pixels = std::move(pixels);
-            frame.width = width;
-            frame.height = height;
-            frame.stride = width;
-            frame.frameId = frameOut.stFrameInfo.nFrameNum;
-            frame.timestampMs = QDateTime::currentMSecsSinceEpoch();
-            frame.sourceCameraKey = cameraKey;
-            frame.pixelFormat = QStringLiteral("Mono8");
+                MV_CC_FreeImageBuffer(handle, &frameOut);
 
-            MV_CC_FreeImageBuffer(handle, &frameOut);
-
-            if (frame.isValid()) {
-                if (outFrame != nullptr) {
-                    *outFrame = frame;
+                if (frame.isValid()) {
+                    if (frameOutLocal != nullptr) {
+                        *frameOutLocal = frame;
+                    }
+                    if (grabError != nullptr) {
+                        grabError->clear();
+                    }
+                    return true;
                 }
-                if (errorMessage != nullptr) {
-                    errorMessage->clear();
-                }
-                qInfo() << QStringLiteral("[%1] CXP 采图成功 %2x%3 len=%4")
-                               .arg(m_roleName)
-                               .arg(width)
-                               .arg(height)
-                               .arg(frameLen);
-                return true;
+            } else {
+                MV_CC_FreeImageBuffer(handle, &frameOut);
             }
         }
-        MV_CC_FreeImageBuffer(handle, &frameOut);
-    }
 
-    thread_local std::vector<unsigned char> fallbackBuffer;
-    if (fallbackBuffer.size() < 48U * 1024U * 1024U) {
-        fallbackBuffer.resize(48U * 1024U * 1024U);
-    }
-    MV_FRAME_OUT_INFO_EX frameInfo{};
-    const int grabResult = MV_CC_GetOneFrameTimeout(
-        handle,
-        fallbackBuffer.data(),
-        static_cast<unsigned int>(fallbackBuffer.size()),
-        &frameInfo,
-        actualWaitMs);
-
-    if (!m_started) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("CXP 相机服务正在停止，采图被中断");
+        thread_local std::vector<unsigned char> fallbackBuffer;
+        if (fallbackBuffer.size() < 48U * 1024U * 1024U) {
+            fallbackBuffer.resize(48U * 1024U * 1024U);
         }
-        return false;
-    }
+        MV_FRAME_OUT_INFO_EX frameInfo{};
+        const int grabResult = MV_CC_GetOneFrameTimeout(
+            handle,
+            fallbackBuffer.data(),
+            static_cast<unsigned int>(fallbackBuffer.size()),
+            &frameInfo,
+            actualWaitMs);
 
-    if (grabResult != MV_OK) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("CXP 采图失败(GetImageBuffer=0x%1, GetOneFrame=0x%2)")
-                                .arg(static_cast<quint32>(getBufferResult), 8, 16, QLatin1Char('0'))
-                                .arg(static_cast<quint32>(grabResult), 8, 16, QLatin1Char('0'));
+        if (!m_started) {
+            if (grabError != nullptr) {
+                *grabError = QStringLiteral("CXP 相机服务正在停止，采图被中断");
+            }
+            return false;
         }
-        return false;
-    }
 
-    const int width = static_cast<int>(frameInfo.nWidth);
-    const int height = static_cast<int>(frameInfo.nHeight);
-    const int frameLen = static_cast<int>(frameInfo.nFrameLen);
-    if (width <= 0 || height <= 0 || frameLen <= 0 || frameLen > static_cast<int>(fallbackBuffer.size())) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("CXP 图像帧信息无效 width=%1 height=%2 len=%3")
-                                .arg(width)
-                                .arg(height)
-                                .arg(frameLen);
+        if (grabResult != MV_OK) {
+            if (grabError != nullptr) {
+                *grabError = QStringLiteral("CXP 采图失败(GetImageBuffer=0x%1, GetOneFrame=0x%2)")
+                                 .arg(static_cast<quint32>(getBufferResult), 8, 16, QLatin1Char('0'))
+                                 .arg(static_cast<quint32>(grabResult), 8, 16, QLatin1Char('0'));
+            }
+            return false;
         }
-        return false;
-    }
 
-    auto pixels = std::make_shared<std::vector<std::uint8_t>>();
-    pixels->assign(fallbackBuffer.begin(), fallbackBuffer.begin() + frameLen);
-
-    HikMonoFrame frame;
-    frame.pixels = std::move(pixels);
-    frame.width = width;
-    frame.height = height;
-    frame.stride = width;
-    frame.frameId = frameInfo.nFrameNum;
-    frame.timestampMs = QDateTime::currentMSecsSinceEpoch();
-    frame.sourceCameraKey = cameraKey;
-    frame.pixelFormat = QStringLiteral("Mono8");
-
-    if (!frame.isValid()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("CXP 采图成功但帧无效");
+        const int width = static_cast<int>(frameInfo.nWidth);
+        const int height = static_cast<int>(frameInfo.nHeight);
+        const int frameLen = static_cast<int>(frameInfo.nFrameLen);
+        if (width <= 0 || height <= 0 || frameLen <= 0 || frameLen > static_cast<int>(fallbackBuffer.size())) {
+            if (grabError != nullptr) {
+                *grabError = QStringLiteral("CXP 图像帧信息无效 width=%1 height=%2 len=%3")
+                                 .arg(width)
+                                 .arg(height)
+                                 .arg(frameLen);
+            }
+            return false;
         }
-        return false;
-    }
 
-    if (outFrame != nullptr) {
-        *outFrame = frame;
-    }
-    if (errorMessage != nullptr) {
-        errorMessage->clear();
-    }
-    qInfo() << QStringLiteral("[%1] CXP 采图成功(GetOneFrame) %2x%3")
+        auto pixels = std::make_shared<std::vector<std::uint8_t>>();
+        pixels->assign(fallbackBuffer.begin(), fallbackBuffer.begin() + frameLen);
+
+        HikMonoFrame frame;
+        frame.pixels = std::move(pixels);
+        frame.width = width;
+        frame.height = height;
+        frame.stride = width;
+        frame.frameId = frameInfo.nFrameNum;
+        frame.timestampMs = QDateTime::currentMSecsSinceEpoch();
+        frame.sourceCameraKey = cameraKey;
+        frame.pixelFormat = QStringLiteral("Mono8");
+
+        if (!frame.isValid()) {
+            if (grabError != nullptr) {
+                *grabError = QStringLiteral("CXP 采图成功但帧无效");
+            }
+            return false;
+        }
+
+        if (frameOutLocal != nullptr) {
+            *frameOutLocal = frame;
+        }
+        if (grabError != nullptr) {
+            grabError->clear();
+        }
+        return true;
+    };
+
+    QString lastError;
+    for (int attempt = 1; attempt <= kCxpFreshFrameMaxAttempts; ++attempt) {
+        HikMonoFrame candidate;
+        if (!grabOnce(&candidate, &lastError)) {
+            if (errorMessage != nullptr) {
+                *errorMessage = lastError;
+            }
+            return false;
+        }
+
+        const QByteArray fingerprint = fingerprintMonoPixels(
+            candidate.pixels->data(), static_cast<int>(candidate.pixels->size()));
+        const bool sameFrameId =
+            lastAcceptedFrameId > 0 && candidate.frameId == lastAcceptedFrameId;
+        const bool sameContent =
+            !lastAcceptedFingerprint.isEmpty() && fingerprint == lastAcceptedFingerprint;
+
+        if ((sameFrameId || sameContent) && attempt < kCxpFreshFrameMaxAttempts) {
+            qWarning().noquote()
+                << QStringLiteral("[%1] CXP 疑似旧帧，丢弃并重采 attempt=%2/%3 frameId=%4 lastFrameId=%5 sameFrameId=%6 sameContent=%7")
+                       .arg(m_roleName)
+                       .arg(attempt)
+                       .arg(kCxpFreshFrameMaxAttempts)
+                       .arg(candidate.frameId)
+                       .arg(lastAcceptedFrameId)
+                       .arg(sameFrameId)
+                       .arg(sameContent);
+            continue;
+        }
+
+        if (sameFrameId || sameContent) {
+            qWarning().noquote()
+                << QStringLiteral("[%1] CXP 重采后仍与上一帧相同，按最新帧返回 frameId=%2")
+                       .arg(m_roleName)
+                       .arg(candidate.frameId);
+        }
+
+        {
+            QMutexLocker locker(&m_impl->mutex);
+            m_impl->lastAcceptedFrameId = candidate.frameId;
+            m_impl->lastAcceptedFingerprint = fingerprint;
+        }
+
+        if (outFrame != nullptr) {
+            *outFrame = candidate;
+        }
+        if (errorMessage != nullptr) {
+            errorMessage->clear();
+        }
+        qInfo().noquote()
+            << QStringLiteral("[%1] CXP 采图成功 %2x%3 len=%4 frameId=%5 attempt=%6")
                    .arg(m_roleName)
-                   .arg(width)
-                   .arg(height);
-    return true;
+                   .arg(candidate.width)
+                   .arg(candidate.height)
+                   .arg(candidate.pixels ? static_cast<int>(candidate.pixels->size()) : 0)
+                   .arg(candidate.frameId)
+                   .arg(attempt);
+        return true;
+    }
+
+    if (errorMessage != nullptr) {
+        *errorMessage = lastError.isEmpty() ? QStringLiteral("CXP 采图失败") : lastError;
+    }
+    return false;
 }
 
 quint64 HikCxpCameraService::requestMonoCapture(const QString& preferredCameraKey, int timeoutMs)
@@ -703,6 +800,8 @@ void HikCxpCameraService::closeDevice()
     }
     m_impl->connected = false;
     m_impl->grabbing = false;
+    m_impl->lastAcceptedFrameId = 0;
+    m_impl->lastAcceptedFingerprint.clear();
 }
 
 void HikCxpCameraService::startAsyncConnect()
