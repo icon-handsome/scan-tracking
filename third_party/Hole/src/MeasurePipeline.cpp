@@ -5,10 +5,6 @@
 #include "HeadMeasure/Geometry.h"
 
 #include <pcl/common/common.h>
-#include <pcl/common/transforms.h>
-#include <pcl/filters/crop_box.h>
-#include <pcl/filters/statistical_outlier_removal.h>
-#include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/ply_io.h>
 #include <pcl/registration/icp.h>
@@ -21,6 +17,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <vector>
 
 namespace hm {
 namespace {
@@ -39,6 +36,60 @@ bool hasSuffix(const std::string& text, const std::string& suffix) {
         return false;
     }
     return std::equal(suffix.rbegin(), suffix.rend(), text.rbegin());
+}
+
+// Windows 下 PCL IO/滤波在 DLL 堆分配，跨模块析构易触发 aligned_free / 堆损坏。
+CloudPtr reownCloudPoints(const CloudConstPtr& input)
+{
+    CloudPtr output(new Cloud);
+    if (!input || input->empty()) {
+        output->width = 0;
+        output->height = 1;
+        output->is_dense = true;
+        return output;
+    }
+
+    output->points.reserve(input->points.size());
+    for (const PointT& point : input->points) {
+        output->points.push_back(point);
+    }
+    output->width = static_cast<std::uint32_t>(output->points.size());
+    output->height = 1;
+    output->is_dense = input->is_dense;
+    return output;
+}
+
+void adoptPclOwnedCloud(CloudPtr& cloud)
+{
+    if (!cloud) {
+        return;
+    }
+    static std::vector<CloudPtr>* leaks = new std::vector<CloudPtr>();
+    leaks->push_back(cloud);
+    cloud.reset();
+}
+
+CloudPtr transformCloudInProcessHeap(const CloudConstPtr& input, const Eigen::Matrix4f& matrix)
+{
+    CloudPtr output(new Cloud);
+    if (!input || input->empty()) {
+        return output;
+    }
+
+    if (matrix.isApprox(Eigen::Matrix4f::Identity(), 1e-6f)) {
+        return reownCloudPoints(input);
+    }
+
+    output->points.reserve(input->size());
+    for (const PointT& point : input->points) {
+        const Eigen::Vector4f transformed =
+            matrix * Eigen::Vector4f(point.x, point.y, point.z, 1.0f);
+        output->points.emplace_back(transformed.x(), transformed.y(), transformed.z());
+    }
+    output->width = static_cast<std::uint32_t>(output->size());
+    output->height = 1;
+    output->is_dense = input->is_dense;
+    return output;
 }
 
 CloudPtr loadCloud(const std::string& path) 
@@ -62,7 +113,10 @@ CloudPtr loadCloud(const std::string& path)
 	{
         throw std::runtime_error("failed to load point cloud: " + path);
     }
-    return cloud;
+    // PCD/PLY 由 PCL DLL 写入 points；复制到进程堆后再泄漏原 Ptr，避免跨堆析构崩溃。
+    CloudPtr owned = reownCloudPoints(cloud);
+    adoptPclOwnedCloud(cloud);
+    return owned;
 }
 
 bool isPointInCropBox(const PointT& point, const CropBox& box)
@@ -328,97 +382,54 @@ CloudPtr preprocess(const CloudConstPtr& input, const MeasureConfig& cfg)
         throw std::runtime_error("preprocess input cloud is empty");
     }
 
-    constexpr std::size_t kOnePassCropVoxelThreshold = 400000;
+    // 一律走进程堆 one-pass crop+voxel：避免 <40 万点仍进 PCL VoxelGrid/SOR
+    //（现场 path1 段点约 18 万即在该路径崩溃；厚度/坡口已用同类策略）。
+    CloudPtr owned = reownCloudPoints(input);
     const double voxelLeafMm = cfg.voxelLeafMm > 0.0
         ? cfg.voxelLeafMm
-        : effectiveVoxelLeafMm(input->size(), 2.0);
+        : effectiveVoxelLeafMm(owned->size(), 2.0);
 
     CloudPtr down;
-    bool usedOnePassCropVoxel = false;
-    if (input->size() > kOnePassCropVoxelThreshold && voxelLeafMm > 0.0)
+    if (voxelLeafMm > 0.0)
     {
-        usedOnePassCropVoxel = true;
         down = cropVoxelCloudOnePass(
-            input,
+            owned,
             cfg.cropBoxes,
             static_cast<float>(voxelLeafMm));
-        std::cout << "frame_crop_voxel_onepass input_points=" << input->size()
-                  << " leaf_mm=" << voxelLeafMm
-                  << " output_points=" << down->size() << std::endl;
-    }
-    else
-    {
-        CloudPtr cropped;
-        CloudConstPtr working = input;
-        if (!cfg.cropBoxes.empty())
+        if (!down || down->empty())
         {
-            cropped = cropCloudAny(input, cfg.cropBoxes);
-            if (cropped && !cropped->empty())
-            {
-                working = cropped;
-                std::cout << "frame_crop points=" << working->size() << std::endl;
-            }
-        }
-
-        down.reset(new Cloud);
-        const double workingLeafMm = effectiveVoxelLeafMm(working->size(), cfg.voxelLeafMm);
-        if (workingLeafMm > 0.0)
-        {
-            pcl::VoxelGrid<PointT> voxel;
-            voxel.setInputCloud(working);
-            const float leaf = static_cast<float>(workingLeafMm);
-            voxel.setLeafSize(leaf, leaf, leaf);
-            voxel.filter(*down);
-            voxel.setInputCloud(CloudConstPtr());
-            std::cout << "frame_voxel leaf_mm=" << workingLeafMm
-                      << " points=" << down->size() << std::endl;
+            // crop 与扫描坐标系不一致时回退全云体素（与旧分支“crop 空则保留原云”一致）
+            down = cropVoxelCloudOnePass(
+                owned,
+                std::vector<CropBox>{},
+                static_cast<float>(voxelLeafMm));
+            std::cout << "frame_crop_empty fallback_full_voxel input_points=" << owned->size()
+                      << " leaf_mm=" << voxelLeafMm
+                      << " output_points=" << (down ? down->size() : 0) << std::endl;
         }
         else
         {
-            pcl::copyPointCloud(*working, *down);
+            std::cout << "frame_crop_voxel_onepass input_points=" << owned->size()
+                      << " leaf_mm=" << voxelLeafMm
+                      << " output_points=" << down->size() << std::endl;
         }
-        cropped.reset();
-    }
-
-    CloudPtr transformed(new Cloud);
-    if (cfg.poseCorrection.isApprox(Eigen::Matrix4f::Identity(), 1e-6f))
-    {
-        pcl::copyPointCloud(*down, *transformed);
     }
     else
     {
-        pcl::transformPointCloud(*down, *transformed, cfg.poseCorrection);
+        down = owned;
     }
+    owned.reset();
+
+    CloudPtr transformed = transformCloudInProcessHeap(down, cfg.poseCorrection);
     down.reset();
 
-    CloudPtr filtered(new Cloud);
-    constexpr std::size_t kSorMaxInputPoints = 250000;
-    // IPC 多段百万点云：one-pass 已 crop+voxel，跳过 SOR 避免 PCL 堆损坏（配置仍保留 V1.3 参数供离线单帧）
-    if (cfg.statisticalMeanK > 0
-        && !usedOnePassCropVoxel
-        && transformed->size() > static_cast<std::size_t>(cfg.statisticalMeanK)
-        && transformed->size() <= kSorMaxInputPoints)
+    // statistical_* 仍保留在配置中供离线 demo；在线路径跳过 SOR，防止 Windows 堆损坏。
+    if (cfg.statisticalMeanK > 0)
     {
-        pcl::StatisticalOutlierRemoval<PointT> sor;
-        sor.setInputCloud(transformed);
-        sor.setMeanK(cfg.statisticalMeanK);
-        sor.setStddevMulThresh(cfg.statisticalStddevMul);
-        sor.filter(*filtered);
-        sor.setInputCloud(CloudConstPtr());
-        std::cout << "frame_sor mean_k=" << cfg.statisticalMeanK
-                  << " points=" << filtered->size() << std::endl;
+        std::cout << "frame_sor skipped reason=windows_heap_safe points="
+                  << transformed->size() << std::endl;
     }
-    else
-    {
-        if (usedOnePassCropVoxel && cfg.statisticalMeanK > 0)
-        {
-            std::cout << "frame_sor skipped reason=onepass_online points=" << transformed->size() << std::endl;
-        }
-        pcl::copyPointCloud(*transformed, *filtered);
-    }
-    transformed.reset();
-
-    return filtered;
+    return transformed;
 }
 
 CloudPtr mergePreprocessedScans(
@@ -618,11 +629,13 @@ FitReport alignScanToTemplate(const CloudConstPtr& scan,
     icp.setMaximumIterations(cfg.icpMaxIterations);
     icp.setTransformationEpsilon(cfg.icpTransformationEpsilon);
     icp.setEuclideanFitnessEpsilon(cfg.icpFitnessEpsilon);
-    Cloud alignedDs;
-    icp.align(alignedDs);
-
+    // ICP 输出落在 PCL 堆；泄漏避免跨堆析构崩溃（仅用变换矩阵，不读对齐点云）。
+    CloudPtr alignedDs(new Cloud);
+    icp.align(*alignedDs);
     const Eigen::Matrix4f transform = icp.getFinalTransformation();
-    pcl::transformPointCloud(*scan, *scanInTemplate, transform);
+    adoptPclOwnedCloud(alignedDs);
+
+    scanInTemplate = transformCloudInProcessHeap(scan, transform);
 
     report.inlierCount = static_cast<int>(scanInTemplate->size());
     report.rmsMm       = std::sqrt(std::max(0.0, icp.getFitnessScore()));
@@ -1893,8 +1906,7 @@ OpeningResult solveOpeningsByProjectionAndLocalIcp_1(const MeasureConfig& cfg,
         const double dot = clampValue(scanRadial.dot(templateRadial), -1.0, 1.0);
         const double delta = (crossSign >= 0.0 ? 1.0 : -1.0) * std::acos(dot);
         Eigen::Matrix4f roughRotation = rotationAroundAxis(headCylinder.point, headCylinder.axis, delta);
-        CloudPtr rotatedScan(new Cloud);
-        pcl::transformPointCloud(*scan, *rotatedScan, roughRotation); 
+        CloudPtr rotatedScan = transformCloudInProcessHeap(scan, roughRotation);
         Eigen::Vector4f scanCenterHp(static_cast<float>(scanCenter3d.x()),
                                      static_cast<float>(scanCenter3d.y()),
                                      static_cast<float>(scanCenter3d.z()),

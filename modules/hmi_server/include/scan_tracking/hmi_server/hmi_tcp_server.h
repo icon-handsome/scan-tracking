@@ -78,6 +78,7 @@ public:
      * @brief 主动推送坡口综合检测结果到 Qt 显控
      *
      * 发送 `event.inspection.finished`，成功与失败均推送，便于客户演示即时看到结果。
+     * 在线多路径由 StateMachine 累计各路径指标后，在全部启用路径完成时调用一次本接口。
      * TODO(hmi-demo): 无客户端时不缓存，演示后若需要可补最后一帧缓存
      * TODO(hmi-demo): 与 status.system 联动刷新 progress/alarmLevel
      * TODO(hmi-demo): 多路径/第二工位结果需扩展 payload 或新增 event 类型

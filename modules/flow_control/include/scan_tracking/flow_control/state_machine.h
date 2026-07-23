@@ -142,6 +142,13 @@ public:
     /// 注册综合检测结果推送回调（tracking 不可用等路径由状态机补发）
     void setInspectionResultPublisher(std::function<void(const tracking::InspectionResult&)> publisher);
 
+    /**
+     * @brief 在线路径检测结果投递显控：前几条路径只累计，全部启用路径完成后统一推 12 项 headMetrics
+     *
+     * 单路径或无启用路径配置时立即推送。离线/调试请继续直接调用 publisher。
+     */
+    void ingestOnlineInspectionResultForHmi(int pathId, const tracking::InspectionResult& result);
+
     /// 当前点云缓存中已有的扫描分段索引（升序，供 HMI 调试命令展示）
     QVector<int> cachedScanSegmentIndices() const;
 
@@ -909,6 +916,16 @@ private:
 
     /// 综合检测结果推送（与 TrackingService::InspectionResultNotifier 共用同一回调）
     std::function<void(const tracking::InspectionResult&)> m_inspectionResultPublisher;
+
+    /// 多路径 headMetrics 累计（仅在线 Trig_Inspection → 显控）
+    void clearAccumulatedInspectionForHmi();
+    static void mergeInspectionMeasurementForHmi(
+        tracking::InspectionMeasurement& dest,
+        const tracking::InspectionMeasurement& src);
+
+    tracking::InspectionResult m_accumulatedHmiInspection;
+    QSet<int> m_hmiIngestedPathIds;
+    bool m_hmiUnifiedInspectionPublished = false;
 
     /// 在线内表面异步检测代数：超时/新任务时递增，用于丢弃过期后台结果
     quint64 m_internalSurfaceAsyncGeneration = 0;

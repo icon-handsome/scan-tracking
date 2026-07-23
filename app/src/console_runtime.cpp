@@ -450,7 +450,8 @@ void ConsoleRuntime::initStateMachineModule(int startupStage)
         hmiTcpServer_->bindServiceSignals();
         qInfo(appLog) << QStringLiteral("[启动] HmiTcpServer 服务信号已绑定。");
 
-        // 坡口测量 inspectPointCloud 返回后立即经 HMI TCP 推送 event.inspection.finished（含失败）
+        // 在线多路径：StateMachine::ingestOnlineInspectionResultForHmi 累计后统一推送；
+        // TrackingService notifier 仅覆盖仍带 notifyListener=true 的调试/旁路路径。
         // 注意：std::function 不可对同一对象连续 std::move，否则 StateMachine 侧会得到空回调并在析构时崩溃。
         const QPointer<scan_tracking::hmi_server::HmiTcpServer> hmiWeak(hmiTcpServer_.get());
         const scan_tracking::tracking::InspectionResultNotifier publishInspectionToHmi =

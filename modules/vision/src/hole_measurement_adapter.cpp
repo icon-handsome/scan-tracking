@@ -66,6 +66,39 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr toPclPointCloud(
     return cloud;
 }
 
+pcl::PointCloud<pcl::PointXYZ>::Ptr reownPclCloud(
+    const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& input)
+{
+    auto output = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    if (!input || input->empty()) {
+        output->width = 0;
+        output->height = 1;
+        output->is_dense = true;
+        return output;
+    }
+
+    output->points.reserve(input->points.size());
+    for (const auto& point : input->points) {
+        output->points.push_back(point);
+    }
+    output->width = static_cast<std::uint32_t>(output->points.size());
+    output->height = 1;
+    output->is_dense = input->is_dense;
+    return output;
+}
+
+void adoptPclIoCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
+{
+    if (!cloud) {
+        return;
+    }
+    // PCD/PLY 由 PCL DLL 写入；泄漏原 Ptr，避免跨堆析构导致后续 Hole preprocess 崩溃。
+    static std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr>* leaks =
+        new std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr>();
+    leaks->push_back(cloud);
+    cloud.reset();
+}
+
 pcl::PointCloud<pcl::PointXYZ>::Ptr loadPclFromPointCloudFile(const QString& absolutePath)
 {
     auto cloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
@@ -80,8 +113,12 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr loadPclFromPointCloudFile(const QString& abs
         : pcl::io::loadPCDFile(localPath.constData(), *cloud);
     if (loadResult != 0) {
         cloud->clear();
+        return cloud;
     }
-    return cloud;
+
+    auto owned = reownPclCloud(cloud);
+    adoptPclIoCloud(cloud);
+    return owned;
 }
 
 void appendPointCloud(hm::CloudPtr& merged, const hm::CloudConstPtr& part)

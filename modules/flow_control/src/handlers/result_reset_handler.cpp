@@ -16,12 +16,15 @@ void ResultResetHandler::execute(TaskHandlerContext& ctx) { ctx.machine.executeR
 
 /**
  * @brief 执行结果复位任务（Trig_ResultReset）
- * 
- * 清空所有累积的点云缓存和检测结果，将相关寄存器归零，
- * 为下一轮扫描周期做准备。
+ *
+ * PLC 用此触发显式告知「新工件 / 重头开始」。IPC 侧清点云缓存、已检测路径、
+ * Resume 检查点与落盘会话目录，下一轮 Trig_ScanSegment 段号 1 将从 path1 起算。
  */
 void StateMachine::executeResultResetTask()
 {
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("Trig_ResultReset：进入新工件复位（清缓存/检查点/路径进度）");
+
     m_ipcSafetyActionWord = 0;
     m_personZoneAlarmActive = false;
 
@@ -29,7 +32,7 @@ void StateMachine::executeResultResetTask()
     ++m_internalSurfaceAsyncGeneration;
     ++m_bevelAsyncGeneration;
 
-    resetScanSegmentCache();  // 清空扫描缓存
+    resetScanSegmentCache();  // 清空扫描缓存 + 路径回到 1 + 轮换 session/run 目录
     clearWorkpieceCheckpoint("result_reset");
     // 将扫描分段完成索引寄存器清零
     const bool segmentIndexCleared = m_modbus->writeRegisters(protocol::registers::kScanSegmentDoneIndex, {0, 0, 0});
@@ -43,7 +46,9 @@ void StateMachine::executeResultResetTask()
     if (!safetyActionCleared) {
         qWarning(LOG_FLOW).noquote() << QStringLiteral("清除 IPC 安全动作字失败");
     }
-    // 完成任务，返回成功
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("Trig_ResultReset 完成：currentPathId=1，后续段号1按 path1 处理");
     completeActiveTask(1);
     emit resultResetFinished(1);
 }

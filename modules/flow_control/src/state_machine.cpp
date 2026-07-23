@@ -2915,6 +2915,151 @@ void StateMachine::setInspectionResultPublisher(
     m_inspectionResultPublisher = std::move(publisher);
 }
 
+void StateMachine::clearAccumulatedInspectionForHmi()
+{
+    m_accumulatedHmiInspection = tracking::InspectionResult{};
+    m_hmiIngestedPathIds.clear();
+    m_hmiUnifiedInspectionPublished = false;
+}
+
+void StateMachine::mergeInspectionMeasurementForHmi(
+    tracking::InspectionMeasurement& dest,
+    const tracking::InspectionMeasurement& src)
+{
+    using tracking::InspectionAlgorithm;
+    switch (src.algorithm) {
+    case InspectionAlgorithm::Bevel:
+        dest.headAngleTol = src.headAngleTol;
+        dest.bluntHeightTol = src.bluntHeightTol;
+        dest.bevelType = src.bevelType;
+        dest.icpFitness = src.icpFitness;
+        dest.qualityCode = src.qualityCode;
+        dest.algorithm = InspectionAlgorithm::Bevel;
+        break;
+    case InspectionAlgorithm::Hole:
+        dest.innerDiameterMm = src.innerDiameterMm;
+        dest.innerCircumferenceMm = src.innerCircumferenceMm;
+        dest.roundnessToleranceMm = src.roundnessToleranceMm;
+        dest.straightSideSlopeDeg = src.straightSideSlopeDeg;
+        dest.straightSideHeightMm = src.straightSideHeightMm;
+        dest.holeOpeningMm = src.holeOpeningMm;
+        dest.jointFitUpAngleDeg = src.jointFitUpAngleDeg;
+        if (src.icpFitness > 0.0f) {
+            dest.icpFitness = src.icpFitness;
+        }
+        dest.qualityCode = src.qualityCode;
+        dest.algorithm = InspectionAlgorithm::Hole;
+        break;
+    case InspectionAlgorithm::Thickness:
+        dest.thicknessMm = src.thicknessMm;
+        if (src.icpFitness > 0.0f) {
+            dest.icpFitness = src.icpFitness;
+        }
+        dest.qualityCode = src.qualityCode;
+        dest.algorithm = InspectionAlgorithm::Thickness;
+        break;
+    case InspectionAlgorithm::InternalSurface:
+        dest.headDepthMm = src.headDepthMm;
+        dest.headVolumeM3 = src.headVolumeM3;
+        dest.qualityCode = src.qualityCode;
+        dest.algorithm = InspectionAlgorithm::InternalSurface;
+        break;
+    case InspectionAlgorithm::CodeRead:
+    case InspectionAlgorithm::Defect:
+        break;
+    }
+}
+
+void StateMachine::ingestOnlineInspectionResultForHmi(
+    int pathId,
+    const tracking::InspectionResult& result)
+{
+    const QVector<int> pathIds = enabledScanPathIds();
+    // 单路径 / 无路径配置：保持原行为，立即推送
+    if (pathIds.size() <= 1) {
+        if (m_inspectionResultPublisher) {
+            m_inspectionResultPublisher(result);
+        }
+        return;
+    }
+
+    if (pathId <= 0) {
+        if (m_inspectionResultPublisher) {
+            m_inspectionResultPublisher(result);
+        }
+        return;
+    }
+
+    if (m_hmiUnifiedInspectionPublished) {
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[HMI] 综合检测已统一推送，忽略后续路径结果 pathId=") << pathId;
+        return;
+    }
+
+    if (m_hmiIngestedPathIds.isEmpty()) {
+        m_accumulatedHmiInspection = tracking::InspectionResult{};
+        m_accumulatedHmiInspection.resultCode = 1;
+        m_accumulatedHmiInspection.message = QStringLiteral("多路径检测累计中");
+    }
+
+    mergeInspectionMeasurementForHmi(
+        m_accumulatedHmiInspection.measurement, result.measurement);
+    m_accumulatedHmiInspection.sourcePointCount += result.sourcePointCount;
+    if (!result.codeValue.isEmpty()) {
+        m_accumulatedHmiInspection.codeValue = result.codeValue;
+    }
+    if (result.resultCode != 1) {
+        m_accumulatedHmiInspection.resultCode = result.resultCode;
+        m_accumulatedHmiInspection.ngReasonWord0 |= result.ngReasonWord0;
+        m_accumulatedHmiInspection.ngReasonWord1 |= result.ngReasonWord1;
+        if (!result.message.isEmpty()) {
+            m_accumulatedHmiInspection.message = result.message;
+        }
+    }
+
+    m_hmiIngestedPathIds.insert(pathId);
+
+    int pendingCount = 0;
+    for (int enabledPathId : pathIds) {
+        if (!m_hmiIngestedPathIds.contains(enabledPathId)) {
+            ++pendingCount;
+        }
+    }
+
+    if (pendingCount > 0) {
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[HMI] 路径检测结果已缓存（待全部路径完成后统一推送）")
+            << QStringLiteral(" pathId=") << pathId
+            << QStringLiteral(" ingested=") << m_hmiIngestedPathIds.size()
+            << QStringLiteral("/") << pathIds.size()
+            << QStringLiteral(" resultCode=") << result.resultCode;
+        return;
+    }
+
+    m_accumulatedHmiInspection.measureItemCount = 12;
+    if (m_accumulatedHmiInspection.resultCode == 1
+        || m_accumulatedHmiInspection.message.isEmpty()
+        || m_accumulatedHmiInspection.message == QStringLiteral("多路径检测累计中")) {
+        m_accumulatedHmiInspection.message =
+            QStringLiteral("多路径综合检测完成（%1/%1）").arg(pathIds.size());
+    }
+
+    if (m_inspectionResultPublisher) {
+        m_inspectionResultPublisher(m_accumulatedHmiInspection);
+    }
+    m_hmiUnifiedInspectionPublished = true;
+
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[HMI] 全部路径完成，已统一推送 event.inspection.finished（12 项 headMetrics）")
+        << QStringLiteral(" pathCount=") << pathIds.size()
+        << QStringLiteral(" resultCode=") << m_accumulatedHmiInspection.resultCode
+        << QStringLiteral(" angleDeg=") << m_accumulatedHmiInspection.measurement.headAngleTol
+        << QStringLiteral(" thicknessMm=") << m_accumulatedHmiInspection.measurement.thicknessMm
+        << QStringLiteral(" depthMm=") << m_accumulatedHmiInspection.measurement.headDepthMm
+        << QStringLiteral(" innerDiameterMm=")
+        << m_accumulatedHmiInspection.measurement.innerDiameterMm;
+}
+
 QVector<int> StateMachine::cachedScanSegmentIndices() const
 {
     QVector<int> indices;
@@ -3102,6 +3247,7 @@ void StateMachine::clearPathProgressTracking(const QString& resetReason)
     m_emittedPathStarted.clear();
     m_emittedPathFinished.clear();
     m_emittedAllPathsFinished = false;
+    clearAccumulatedInspectionForHmi();
     if (!resetReason.isEmpty()) {
         qInfo(LOG_FLOW).noquote()
             << QStringLiteral("[HMI路径] 进度复位 reason=") << resetReason;
@@ -3255,6 +3401,8 @@ void StateMachine::persistWorkpieceCheckpoint(const char* reason)
 void StateMachine::clearWorkpieceCheckpoint(const char* reason)
 {
     if (!isResumeEnabled()) {
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[Resume] 断点续跑未启用，跳过清除检查点 reason=") << reason;
         return;
     }
     const auto resume = currentResumeConfig();
@@ -3263,7 +3411,10 @@ void StateMachine::clearWorkpieceCheckpoint(const char* reason)
         qWarning(LOG_FLOW).noquote()
             << QStringLiteral("[Resume] 清除检查点失败 reason=") << reason
             << QStringLiteral(" err=") << error;
+        return;
     }
+    qInfo(LOG_FLOW).noquote()
+        << QStringLiteral("[Resume] 检查点已清除（新工件） reason=") << reason;
 }
 
 bool StateMachine::tryRestoreFromCheckpoint()
@@ -5683,9 +5834,8 @@ void StateMachine::deliverOnlineBevelInspectionResult(
         << QStringLiteral(" lengthMm=") << trackingResult.measurement.bluntHeightTol
         << QStringLiteral(" 说明=") << trackingResult.message;
 
-    if (m_inspectionResultPublisher) {
-        m_inspectionResultPublisher(trackingResult);
-    }
+    const int bevelPathId = m_activeBevelPathId;
+    ingestOnlineInspectionResultForHmi(bevelPathId, trackingResult);
 
     emit inspectionFinished(
         trackingResult.resultCode,
@@ -5740,7 +5890,7 @@ void StateMachine::deliverOnlineInternalSurfaceInspectionResult(
         return;
     }
 
-    // PLC 握手已在入口以假 OK 完成；此处只推真结果给 HMI。
+    // PLC 握手已在入口以假 OK 完成；此处只投递真结果给 HMI。
     qInfo(LOG_FLOW).noquote()
         << QStringLiteral("[InternalSurface] 后台解算完成（仅推 HMI，不写 PLC）")
         << QStringLiteral(" 参与段数=") << segmentCount
@@ -5750,9 +5900,8 @@ void StateMachine::deliverOnlineInternalSurfaceInspectionResult(
         << QStringLiteral(" volumeM3=") << trackingResult.measurement.headVolumeM3
         << QStringLiteral(" 说明=") << trackingResult.message;
 
-    if (m_inspectionResultPublisher) {
-        m_inspectionResultPublisher(trackingResult);
-    }
+    const int internalSurfacePathId = m_activeInternalSurfacePathId;
+    ingestOnlineInspectionResultForHmi(internalSurfacePathId, trackingResult);
 
     emit inspectionFinished(
         trackingResult.resultCode,
@@ -6669,6 +6818,12 @@ void StateMachine::resetScanSegmentCache()
     m_pendingAsyncRerunPathIds.clear();
     m_pendingRestoreSessionDir.clear();
     m_pendingRestorePoseStitchRunRoot.clear();
+
+    // 新工件：后续段落盘/融合输出须开新 session_* / run_*，避免与上一件混目录
+    m_segmentCaptureExportSessionRoot.clear();
+    m_segmentCaptureExportSessionTimestamp.clear();
+    m_poseStitchRunRootDirectory.clear();
+    m_poseStitchOutputTimestamp.clear();
     
     // 重置路径上下文
     m_currentPathId = 1;
@@ -6680,6 +6835,9 @@ void StateMachine::resetScanSegmentCache()
         qInfo(LOG_FLOW).noquote()
             << QStringLiteral("[多路径] 已清空内存点云缓存，总条目数=") << totalCacheSize
             << QStringLiteral("，路径ID已重置为1");
+    } else {
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[多路径] 扫描缓存已复位，路径ID=1（无内存点云条目）");
     }
 
     m_pathSegmentCalibrationMatrices.clear();
@@ -7683,6 +7841,23 @@ bool StateMachine::validateScanSegmentRequest(const QVector<quint16>& commandBlo
     }
 
     const int targetPathId = resolvePathIdForIncomingSegment(segmentIndex);
+
+    // 断点恢复或 PLC 重发已完成段时，先放行到 ScanSegmentHandler 的幂等软成功分支。
+    // 该判断必须位于“路径已检测”和缓存重复校验之前，否则已从磁盘回填的段会被
+    // 当作非法重复请求返回 Res=9，PLC 无法继续；同时不要在持有缓存锁时再次调用
+    // isSegmentCompletedForResume()，它内部也会获取同一把锁。
+    const bool allowIdempotentCompletedSegment =
+        isResumeEnabled()
+        && currentResumeConfig().idempotentCompletedSegment
+        && isSegmentCompletedForResume(targetPathId, segmentIndex);
+    if (allowIdempotentCompletedSegment) {
+        qInfo(LOG_FLOW).noquote()
+            << QStringLiteral("[Resume] 已完成段重复触发，校验放行到幂等软成功")
+            << QStringLiteral(" pathId=") << targetPathId
+            << QStringLiteral(" 段号=") << segmentIndex;
+        return true;
+    }
+
     if (isPathInspectionCompleted(targetPathId)) {
         if (errorMessage != nullptr) {
             *errorMessage = QStringLiteral(
@@ -7716,23 +7891,17 @@ bool StateMachine::validateScanSegmentRequest(const QVector<quint16>& commandBlo
         std::lock_guard<std::mutex> lock(m_segmentCacheMutex);
 
         if (m_currentPathSegments.contains(segmentIndex) && !isCurrentPathSegmentSetComplete()) {
-            const bool allowIdempotent =
-                isResumeEnabled()
-                && currentResumeConfig().idempotentCompletedSegment
-                && isSegmentCompletedForResume(targetPathId, segmentIndex);
-            if (!allowIdempotent) {
-                if (errorMessage != nullptr) {
-                    *errorMessage = QStringLiteral(
-                        "当前路径尚未扫满，拒绝重复段号：段号=%1，路径=%2")
-                                          .arg(segmentIndex)
-                                          .arg(m_currentPathId);
-                }
-                qWarning(LOG_FLOW).noquote()
-                    << QStringLiteral("拒绝 Trig_ScanSegment：路径内重复段号")
-                    << QStringLiteral(" 段号=") << segmentIndex
-                    << QStringLiteral(" 路径=") << m_currentPathId;
-                return false;
+            if (errorMessage != nullptr) {
+                *errorMessage = QStringLiteral(
+                    "当前路径尚未扫满，拒绝重复段号：段号=%1，路径=%2")
+                                      .arg(segmentIndex)
+                                      .arg(m_currentPathId);
             }
+            qWarning(LOG_FLOW).noquote()
+                << QStringLiteral("拒绝 Trig_ScanSegment：路径内重复段号")
+                << QStringLiteral(" 段号=") << segmentIndex
+                << QStringLiteral(" 路径=") << m_currentPathId;
+            return false;
         }
 
         if (m_currentPathSegments.contains(segmentIndex) && isCurrentPathSegmentSetComplete()) {

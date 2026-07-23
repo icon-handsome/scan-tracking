@@ -45,7 +45,7 @@ void StateMachine::executeInspectionTask()
             failure.resultCode = 2;
             failure.ngReasonWord0 = (1u << 4);
             failure.message = QStringLiteral("综合检测失败：Tracking 服务不可用。");
-            m_inspectionResultPublisher(failure);
+            ingestOnlineInspectionResultForHmi(m_activeTask.inspectionPathId, failure);
         }
 
         completeActiveTask(
@@ -70,9 +70,9 @@ void StateMachine::executeInspectionTask()
     int segmentCount = 0;
 
     if (inspectionType == scan_tracking::common::InspectionType::CodeRead) {
-        trackingResult = m_tracking->finalizeCodeReadInspection(m_activeTask.inspectionPathId);
+        trackingResult = m_tracking->finalizeCodeReadInspection(m_activeTask.inspectionPathId, false);
     } else if (inspectionType == scan_tracking::common::InspectionType::Defect) {
-        trackingResult = m_tracking->inspectSurfaceDefect(m_activeTask.inspectionPathId);
+        trackingResult = m_tracking->inspectSurfaceDefect(m_activeTask.inspectionPathId, false);
     } else if (inspectionType == scan_tracking::common::InspectionType::Thickness) {
         scan_tracking::mech_eye::PointCloudFrame innerCloud;
         scan_tracking::mech_eye::PointCloudFrame outerCloud;
@@ -99,7 +99,7 @@ void StateMachine::executeInspectionTask()
                 failure.message = loadError.isEmpty()
                     ? QStringLiteral("综合检测失败：无法加载厚度 inner/outer 点云。")
                     : loadError;
-                m_inspectionResultPublisher(failure);
+                ingestOnlineInspectionResultForHmi(m_activeTask.inspectionPathId, failure);
             }
             completeActiveTask(
                 kInspectionResProcessingFail,
@@ -120,7 +120,8 @@ void StateMachine::executeInspectionTask()
             outerCloud,
             innerPointCount,
             outerPointCount,
-            m_activeTask.inspectionPathId);
+            m_activeTask.inspectionPathId,
+            false);
     } else if (inspectionType == scan_tracking::common::InspectionType::Bevel) {
         // 与内表面一致：Res=1/Ack=2 仅放行；加载/解算全进后台，避免主线程等 path2 的 PCL 锁。
         const int pathId = m_activeTask.inspectionPathId;
@@ -260,7 +261,7 @@ void StateMachine::executeInspectionTask()
                 failure.message = loadError.isEmpty()
                     ? QStringLiteral("综合检测失败：无法加载 Hole 分段点云。")
                     : loadError;
-                m_inspectionResultPublisher(failure);
+                ingestOnlineInspectionResultForHmi(m_activeTask.inspectionPathId, failure);
             }
             completeActiveTask(
                 kInspectionResProcessingFail,
@@ -280,13 +281,13 @@ void StateMachine::executeInspectionTask()
             &segmentPcdPaths, &totalPointCount, &segmentCount, &pcdLoadError);
         if (useSegmentPcdFiles) {
             trackingResult = m_tracking->inspectHolePointCloudFromSegmentPcdFiles(
-                segmentPcdPaths, totalPointCount, m_activeTask.inspectionPathId);
+                segmentPcdPaths, totalPointCount, m_activeTask.inspectionPathId, false);
         } else {
             qInfo(LOG_FLOW).noquote()
                 << QStringLiteral("[Hole] 落盘分段不可用，回退内存点云：")
                 << pcdLoadError;
             trackingResult = m_tracking->inspectHolePointCloudFrames(
-                segmentClouds, totalPointCount, m_activeTask.inspectionPathId);
+                segmentClouds, totalPointCount, m_activeTask.inspectionPathId, false);
         }
     } else if (inspectionType == scan_tracking::common::InspectionType::InternalSurface) {
         // 与 PLC 约定：握手外形不变，但 Res=1/Ack=2 仅作放行票；真解算只推 HMI。
@@ -340,9 +341,7 @@ void StateMachine::executeInspectionTask()
             failure.resultCode = 2;
             failure.ngReasonWord0 = (1u << 4);
             failure.message = loadError;
-            if (m_inspectionResultPublisher) {
-                m_inspectionResultPublisher(failure);
-            }
+            ingestOnlineInspectionResultForHmi(pathId, failure);
             emit inspectionFinished(
                 failure.resultCode,
                 failure.ngReasonWord0,
@@ -387,7 +386,7 @@ void StateMachine::executeInspectionTask()
                 failure.message = loadError.isEmpty()
                     ? QStringLiteral("综合检测失败：无法加载必需分段点云。")
                     : loadError;
-                m_inspectionResultPublisher(failure);
+                ingestOnlineInspectionResultForHmi(m_activeTask.inspectionPathId, failure);
             }
             completeActiveTask(
                 kInspectionResProcessingFail,
@@ -403,7 +402,7 @@ void StateMachine::executeInspectionTask()
         }
 
         trackingResult = m_tracking->inspectPointCloud(
-            mergedCloud, totalPointCount, m_activeTask.inspectionPathId);
+            mergedCloud, totalPointCount, m_activeTask.inspectionPathId, false);
     }
 
     InspectionSummary summary;
@@ -447,6 +446,7 @@ void StateMachine::executeInspectionTask()
     if (inspectionType == scan_tracking::common::InspectionType::CodeRead) {
         emit codeReadFinished(summary.resultCode, trackingResult.codeValue);
     }
+    ingestOnlineInspectionResultForHmi(m_activeTask.inspectionPathId, trackingResult);
     emit inspectionFinished(
         summary.resultCode, summary.ngReasonWord0, summary.ngReasonWord1,
         summary.measureItemCount, trackingResult.measurement, trackingResult.message);
